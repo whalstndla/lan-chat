@@ -1,80 +1,80 @@
 // src/components/Message.jsx
 import React from 'react'
 import { Paperclip } from 'lucide-react'
-import { 텍스트에서링크변환 } from './LinkPreview'
+import { parseLinksInText } from './LinkPreview'
 import useUserStore from '../store/useUserStore'
 
 // timestamp → "오후 2:30" 형식
-function 시간포맷(timestamp) {
+function formatTime(timestamp) {
   return new Date(timestamp).toLocaleTimeString('ko-KR', {
     hour: '2-digit',
     minute: '2-digit',
   })
 }
 
-export default function Message({ 메시지 }) {
-  const 나의피어아이디 = useUserStore(상태 => 상태.나의피어아이디)
-  const 내메시지 = 메시지.fromId === 나의피어아이디 || 메시지.from_id === 나의피어아이디
+export default function Message({ message }) {
+  const myPeerId = useUserStore(state => state.myPeerId)
+  const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
 
-  const 발신자 = 메시지.from || 메시지.from_name
-  const 내용타입 = 메시지.contentType || 메시지.content_type
-  const 파일URL = 메시지.fileUrl || 메시지.file_url
-  const 파일이름 = 메시지.fileName || 메시지.file_name
+  const sender = message.from || message.from_name
+  const contentType = message.contentType || message.content_type
+  const fileUrl = message.fileUrl || message.file_url
+  const fileName = message.fileName || message.file_name
 
   return (
-    <div className={`flex gap-3 px-4 py-1.5 hover:bg-vsc-hover group ${내메시지 ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex gap-3 px-4 py-1.5 hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''}`}>
       {/* 아바타 */}
       <div className="w-8 h-8 rounded bg-vsc-border flex items-center justify-center text-xs text-vsc-accent font-bold shrink-0 mt-0.5">
-        {발신자?.[0]?.toUpperCase() || '?'}
+        {sender?.[0]?.toUpperCase() || '?'}
       </div>
 
-      <div className={`flex flex-col max-w-[70%] ${내메시지 ? 'items-end' : ''}`}>
+      <div className={`flex flex-col max-w-[70%] ${isMyMessage ? 'items-end' : ''}`}>
         {/* 닉네임 + 시간 */}
         <div className="flex items-baseline gap-2 mb-0.5">
-          <span className={`text-xs font-semibold ${내메시지 ? 'text-vsc-accent' : 'text-vsc-text'}`}>
-            {내메시지 ? '나' : 발신자}
+          <span className={`text-xs font-semibold ${isMyMessage ? 'text-vsc-accent' : 'text-vsc-text'}`}>
+            {isMyMessage ? '나' : sender}
           </span>
           <span className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity">
-            {시간포맷(메시지.timestamp)}
+            {formatTime(message.timestamp)}
           </span>
         </div>
 
         {/* 메시지 내용 */}
-        {(내용타입 === 'text' || !내용타입) && (
+        {(contentType === 'text' || !contentType) && (
           <div className="bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed">
-            {텍스트에서링크변환(메시지.content || '')}
+            {parseLinksInText(message.content || '')}
           </div>
         )}
 
-        {내용타입 === 'image' && 파일URL && (
+        {contentType === 'image' && fileUrl && (
           <div className="rounded overflow-hidden border border-vsc-border">
             <img
-              src={파일URL}
-              alt={파일이름 || '이미지'}
+              src={fileUrl}
+              alt={fileName || '이미지'}
               className="max-w-xs max-h-64 object-contain bg-vsc-bg"
-              onError={(이벤트) => { 이벤트.target.style.display = 'none' }}
+              onError={(event) => { event.target.style.display = 'none' }}
             />
           </div>
         )}
 
-        {내용타입 === 'video' && 파일URL && (
+        {contentType === 'video' && fileUrl && (
           <div className="rounded overflow-hidden border border-vsc-border">
             <video
-              src={파일URL}
+              src={fileUrl}
               controls
               className="max-w-xs max-h-64"
             />
           </div>
         )}
 
-        {내용타입 === 'file' && 파일URL && (
+        {contentType === 'file' && fileUrl && (
           <a
-            href={파일URL}
-            download={파일이름}
+            href={fileUrl}
+            download={fileName}
             className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
           >
             <Paperclip size={14} className="shrink-0" />
-            {파일이름 || '파일'}
+            {fileName || '파일'}
           </a>
         )}
       </div>

@@ -1,13 +1,13 @@
 // electron/storage/database.js
 const Database = require('better-sqlite3')
 
-function 데이터베이스초기화(데이터베이스경로) {
-  const 데이터베이스 = new Database(데이터베이스경로)
+function initDatabase(dbPath) {
+  const db = new Database(dbPath)
 
-  데이터베이스.pragma('journal_mode = WAL')
-  데이터베이스.pragma('foreign_keys = ON')
+  db.pragma('journal_mode = WAL')
+  db.pragma('foreign_keys = ON')
 
-  데이터베이스.exec(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS messages (
       id                TEXT PRIMARY KEY,
       type              TEXT NOT NULL,
@@ -34,11 +34,11 @@ function 데이터베이스초기화(데이터베이스경로) {
     );
   `)
 
-  return 데이터베이스
+  return db
 }
 
-function 데이터베이스닫기(데이터베이스) {
-  데이터베이스.close()
+function closeDatabase(db) {
+  db.close()
 }
 
-module.exports = { 데이터베이스초기화, 데이터베이스닫기 }
+module.exports = { initDatabase, closeDatabase }

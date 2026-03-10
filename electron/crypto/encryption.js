@@ -1,14 +1,14 @@
 // electron/crypto/encryption.js
 const crypto = require('crypto')
 
-function SharedSecret도출(내개인키객체, 상대방공개키객체) {
+function deriveSharedSecret(myPrivateKey, peerPublicKey) {
   return crypto.diffieHellman({
-    privateKey: 내개인키객체,
-    publicKey: 상대방공개키객체,
+    privateKey: myPrivateKey,
+    publicKey: peerPublicKey,
   })
 }
 
-function AES키파생(sharedSecretBuffer) {
+function deriveAESKey(sharedSecretBuffer) {
   return crypto.hkdfSync(
     'sha256',
     sharedSecretBuffer,
@@ -18,32 +18,32 @@ function AES키파생(sharedSecretBuffer) {
   )
 }
 
-function DM암호화(페이로드, sharedSecretBuffer) {
-  const aes키 = Buffer.from(AES키파생(sharedSecretBuffer))
+function encryptDM(payload, sharedSecretBuffer) {
+  const aesKey = Buffer.from(deriveAESKey(sharedSecretBuffer))
   const iv = crypto.randomBytes(12)
 
-  const cipher = crypto.createCipheriv('aes-256-gcm', aes키, iv)
-  const 평문 = Buffer.from(JSON.stringify(페이로드), 'utf-8')
+  const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv)
+  const plaintext = Buffer.from(JSON.stringify(payload), 'utf-8')
 
-  const 암호문 = Buffer.concat([cipher.update(평문), cipher.final()])
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()])
   const authTag = cipher.getAuthTag()
 
-  return Buffer.concat([iv, 암호문, authTag]).toString('base64')
+  return Buffer.concat([iv, ciphertext, authTag]).toString('base64')
 }
 
-function DM복호화(base64암호문, sharedSecretBuffer) {
-  const aes키 = Buffer.from(AES키파생(sharedSecretBuffer))
-  const 전체버퍼 = Buffer.from(base64암호문, 'base64')
+function decryptDM(base64Ciphertext, sharedSecretBuffer) {
+  const aesKey = Buffer.from(deriveAESKey(sharedSecretBuffer))
+  const fullBuffer = Buffer.from(base64Ciphertext, 'base64')
 
-  const iv = 전체버퍼.subarray(0, 12)
-  const authTag = 전체버퍼.subarray(전체버퍼.length - 16)
-  const 암호문 = 전체버퍼.subarray(12, 전체버퍼.length - 16)
+  const iv = fullBuffer.subarray(0, 12)
+  const authTag = fullBuffer.subarray(fullBuffer.length - 16)
+  const ciphertext = fullBuffer.subarray(12, fullBuffer.length - 16)
 
-  const decipher = crypto.createDecipheriv('aes-256-gcm', aes키, iv)
+  const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv)
   decipher.setAuthTag(authTag)
 
-  const 복호화된버퍼 = Buffer.concat([decipher.update(암호문), decipher.final()])
-  return JSON.parse(복호화된버퍼.toString('utf-8'))
+  const decryptedBuffer = Buffer.concat([decipher.update(ciphertext), decipher.final()])
+  return JSON.parse(decryptedBuffer.toString('utf-8'))
 }
 
-module.exports = { SharedSecret도출, DM암호화, DM복호화 }
+module.exports = { deriveSharedSecret, encryptDM, decryptDM }

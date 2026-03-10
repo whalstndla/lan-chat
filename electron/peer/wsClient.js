@@ -1,57 +1,57 @@
 // electron/peer/wsClient.js
 const WebSocket = require('ws')
 
-// 피어 아이디 -> WebSocket 소켓 매핑
-const 연결맵 = new Map()
+// 피어 ID → WebSocket 소켓 매핑
+const connectionMap = new Map()
 
-function 피어연결({ 피어아이디, 호스트, 웹소켓포트 }) {
+function connectToPeer({ peerId, host, wsPort }) {
   return new Promise((resolve, reject) => {
     // 이미 연결되어 있으면 재연결 없이 바로 반환
-    if (연결맵.has(피어아이디)) {
+    if (connectionMap.has(peerId)) {
       resolve()
       return
     }
 
-    const 소켓 = new WebSocket(`ws://${호스트}:${웹소켓포트}`)
+    const socket = new WebSocket(`ws://${host}:${wsPort}`)
 
-    소켓.on('open', () => {
-      연결맵.set(피어아이디, 소켓)
+    socket.on('open', () => {
+      connectionMap.set(peerId, socket)
       resolve()
     })
 
-    소켓.on('close', () => {
-      연결맵.delete(피어아이디)
+    socket.on('close', () => {
+      connectionMap.delete(peerId)
     })
 
-    소켓.on('error', reject)
+    socket.on('error', reject)
   })
 }
 
-function 메시지전송(피어아이디, 메시지객체) {
-  const 소켓 = 연결맵.get(피어아이디)
-  if (!소켓 || 소켓.readyState !== WebSocket.OPEN) return false
-  소켓.send(JSON.stringify(메시지객체))
+function sendMessage(peerId, messageObj) {
+  const socket = connectionMap.get(peerId)
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false
+  socket.send(JSON.stringify(messageObj))
   return true
 }
 
-function 전체전송(메시지객체) {
-  연결맵.forEach((소켓) => {
-    if (소켓.readyState === WebSocket.OPEN) {
-      소켓.send(JSON.stringify(메시지객체))
+function broadcastMessage(messageObj) {
+  connectionMap.forEach((socket) => {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(messageObj))
     }
   })
 }
 
-function 피어연결해제(피어아이디) {
-  const 소켓 = 연결맵.get(피어아이디)
-  if (소켓) {
-    소켓.close()
-    연결맵.delete(피어아이디)
+function disconnectFromPeer(peerId) {
+  const socket = connectionMap.get(peerId)
+  if (socket) {
+    socket.close()
+    connectionMap.delete(peerId)
   }
 }
 
-function 연결목록조회() {
-  return Array.from(연결맵.keys())
+function getConnections() {
+  return Array.from(connectionMap.keys())
 }
 
-module.exports = { 피어연결, 메시지전송, 전체전송, 피어연결해제, 연결목록조회 }
+module.exports = { connectToPeer, sendMessage, broadcastMessage, disconnectFromPeer, getConnections }

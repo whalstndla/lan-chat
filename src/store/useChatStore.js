@@ -2,31 +2,48 @@
 import { create } from 'zustand'
 
 // 현재 보고 있는 채팅방 타입
-// { 타입: 'global' } 또는 { 타입: 'dm', 상대피어아이디: 'xxx', 상대닉네임: '홍길동' }
+// { type: 'global' } 또는 { type: 'dm', peerId: 'xxx', nickname: '홍길동' }
 const useChatStore = create((set) => ({
-  현재채팅방: { 타입: 'global' },
-  전체채팅메시지목록: [],
-  DM메시지맵: {}, // { 피어아이디: [메시지...] }
+  currentRoom: { type: 'global' },
+  globalMessages: [],
+  dmMessages: {}, // { peerId: [메시지...] }
+  unreadCounts: {}, // { peerId: 숫자 }
 
-  현재채팅방변경: (채팅방) => set({ 현재채팅방: 채팅방 }),
+  setCurrentRoom: (room) => set({ currentRoom: room }),
 
-  전체채팅기록설정: (메시지목록) => set({ 전체채팅메시지목록: 메시지목록 }),
+  setGlobalHistory: (messages) => set({ globalMessages: messages }),
 
-  전체채팅메시지추가: (메시지) =>
-    set((상태) => ({
-      전체채팅메시지목록: [...상태.전체채팅메시지목록, 메시지],
+  addGlobalMessage: (message) =>
+    set((state) => ({
+      globalMessages: [...state.globalMessages, message],
     })),
 
-  DM기록설정: (피어아이디, 메시지목록) =>
-    set((상태) => ({
-      DM메시지맵: { ...상태.DM메시지맵, [피어아이디]: 메시지목록 },
+  setDMHistory: (peerId, messages) =>
+    set((state) => ({
+      dmMessages: { ...state.dmMessages, [peerId]: messages },
     })),
 
-  DM메시지추가: (피어아이디, 메시지) =>
-    set((상태) => ({
-      DM메시지맵: {
-        ...상태.DM메시지맵,
-        [피어아이디]: [...(상태.DM메시지맵[피어아이디] || []), 메시지],
+  addDMMessage: (peerId, message) =>
+    set((state) => ({
+      dmMessages: {
+        ...state.dmMessages,
+        [peerId]: [...(state.dmMessages[peerId] || []), message],
+      },
+    })),
+
+  incrementUnread: (peerId) =>
+    set((state) => ({
+      unreadCounts: {
+        ...state.unreadCounts,
+        [peerId]: (state.unreadCounts[peerId] || 0) + 1,
+      },
+    })),
+
+  resetUnread: (peerId) =>
+    set((state) => ({
+      unreadCounts: {
+        ...state.unreadCounts,
+        [peerId]: 0,
       },
     })),
 }))
