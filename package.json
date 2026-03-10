@@ -1,6 +1,6 @@
 {
   "name": "lan-chat",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "",
   "main": "electron/main.js",
   "scripts": {
@@ -24,7 +24,10 @@
       "output": "dist/app"
     },
     "mac": {
-      "target": "dmg",
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
       "icon": "logo.png"
     },
     "win": {
