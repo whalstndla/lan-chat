@@ -331,7 +331,7 @@ async function createWindow() {
   setupAutoUpdater()
 }
 
-// 프로덕션 환경에서만 자동 업데이트 실행
+// 업데이트 이벤트 리스너 등록 (프로덕션 전용)
 function setupAutoUpdater() {
   if (isDev) return
 
@@ -352,13 +352,14 @@ function setupAutoUpdater() {
   autoUpdater.on('error', (error) => {
     sendToRenderer('update-error', error.message)
   })
-
-  autoUpdater.checkForUpdates()
 }
 
-// 수동 업데이트 확인 IPC 핸들러
+// 업데이트 확인 IPC 핸들러 — dev에서는 즉시 not-available 반환
 ipcMain.handle('check-for-updates', () => {
-  if (isDev) return
+  if (isDev) {
+    sendToRenderer('update-not-available')
+    return
+  }
   autoUpdater.checkForUpdates()
 })
 

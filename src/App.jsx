@@ -73,26 +73,37 @@ export default function App() {
   // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
   const [updateState, setUpdateState] = useState('idle')
 
-  // 앱 시작 시 프로필 존재 여부로 첫 화면 결정
-  useEffect(() => {
-    const checkAuth = async () => {
-      const hasProfile = await window.electronAPI.checkProfileExists()
-      setAuthStatus(hasProfile ? 'login' : 'setup')
-    }
-    checkAuth()
-  }, [])
+  // 업데이트 확인 완료 후 인증 화면으로 진행
+  const proceedToAuth = async () => {
+    const hasProfile = await window.electronAPI.checkProfileExists()
+    setAuthStatus(hasProfile ? 'login' : 'setup')
+  }
 
-  // 자동 업데이트 이벤트 구독
+  // 앱 시작 시 업데이트 확인 → 완료 후 인증 화면으로 전환
   useEffect(() => {
+    setUpdateState('checking')
+
     window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
-    window.electronAPI.onUpdateNotAvailable(() => setUpdateState('not-available'))
     window.electronAPI.onUpdateDownloaded(() => setUpdateState('downloaded'))
-    window.electronAPI.onUpdateError(() => setUpdateState('error'))
+    window.electronAPI.onUpdateNotAvailable(() => {
+      setUpdateState('not-available')
+      proceedToAuth()
+    })
+    window.electronAPI.onUpdateError(() => {
+      setUpdateState('error')
+      proceedToAuth()
+    })
+
+    window.electronAPI.checkForUpdates()
   }, [])
 
   const handleCheckUpdate = () => {
     setUpdateState('checking')
     window.electronAPI.checkForUpdates()
+  }
+
+  const handleSkipUpdate = () => {
+    proceedToAuth()
   }
 
   // 인증 완료 후 채팅 초기화
@@ -136,11 +147,45 @@ export default function App() {
   }, [authStatus])
 
   if (authStatus === 'loading') {
+    const statusText = {
+      checking: '업데이트 확인 중...',
+      available: '업데이트 다운로드 중...',
+      downloaded: '업데이트 준비 완료',
+      error: '업데이트 확인 실패',
+    }[updateState]
+
     return (
       <div className="flex flex-col h-screen bg-vsc-bg">
         <TitleBar updateState={updateState} onCheckUpdate={handleCheckUpdate} />
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-vsc-muted text-sm">로딩 중...</p>
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <img src={logoImage} alt="LAN Chat" className="w-12 h-12 object-contain opacity-80" />
+          <p className="text-vsc-muted text-sm">{statusText}</p>
+
+          {updateState === 'downloaded' && (
+            <div className="flex gap-2 mt-1">
+              <button
+                onClick={() => window.electronAPI.installUpdate()}
+                className="text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer"
+              >
+                지금 업데이트
+              </button>
+              <button
+                onClick={handleSkipUpdate}
+                className="text-xs px-3 py-1.5 rounded bg-vsc-border hover:bg-vsc-sidebar text-vsc-muted transition-colors cursor-pointer"
+              >
+                건너뛰기
+              </button>
+            </div>
+          )}
+
+          {updateState === 'available' && (
+            <button
+              onClick={handleSkipUpdate}
+              className="text-xs text-vsc-muted hover:text-vsc-text transition-colors cursor-pointer underline"
+            >
+              건너뛰기
+            </button>
+          )}
         </div>
       </div>
     )
