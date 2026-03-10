@@ -18,6 +18,14 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "build": {
+    "appId": "com.internal.lan-chat",
+    "productName": "LAN Chat",
+    "directories": { "output": "dist/app" },
+    "mac": { "target": "dmg" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" }
+  },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "bonjour-service": "^1.3.0",
