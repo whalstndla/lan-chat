@@ -7,32 +7,40 @@
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-## ✨ Features
+## ✨ 주요 기능
 
-### 🌐 Networking
-| Feature | Description |
-|---------|-------------|
-| **Zero-config peer discovery** | mDNS(Bonjour) automatically finds peers on the same LAN — no IP setup required |
-| **Global chat** | Broadcast messages to all connected peers in real time |
-| **1:1 Direct Messages** | Send private messages directly to a specific peer |
-| **P2P file transfer** | Share images, videos, and files via embedded HTTP server |
+### 🌐 네트워킹
+| 기능 | 설명 |
+|------|------|
+| **자동 피어 발견** | mDNS(Bonjour)로 같은 LAN의 피어를 자동 감지 — IP 설정 불필요 |
+| **전체 채팅** | 연결된 모든 피어에게 실시간 브로드캐스트 메시지 전송 |
+| **1:1 다이렉트 메시지** | 특정 피어에게 직접 암호화 메시지 전송 |
+| **P2P 파일 전송** | 내장 HTTP 서버를 통해 이미지, 영상, 파일 공유 |
 
-### 🔐 Security
-| Feature | Description |
-|---------|-------------|
-| **E2E encrypted DMs** | ECDH P-256 key exchange → HKDF → AES-256-GCM — only sender & receiver can read |
-| **Local authentication** | Username + password on first launch, stored locally with pbkdf2 (310,000 iterations) |
-| **Private key isolation** | Private key never leaves your PC; DB theft cannot decrypt stored DMs |
+### 🔐 보안
+| 기능 | 설명 |
+|------|------|
+| **E2E 암호화 DM** | ECDH P-256 키 교환 → HKDF → AES-256-GCM — 발신자·수신자만 복호화 가능 |
+| **로컬 인증** | 최초 실행 시 아이디 + 비밀번호 설정, pbkdf2(310,000회 반복)로 로컬 저장 |
+| **개인키 격리** | 개인키는 본인 PC 밖으로 유출되지 않음 — DB 탈취만으로는 DM 복호화 불가 |
 
-### 💬 Chat Experience
-| Feature | Description |
-|---------|-------------|
-| **Emoji picker** | Built-in emoji picker with search |
-| **Link detection** | URLs in messages are automatically converted to clickable links |
-| **Image & video preview** | Inline rendering of shared media |
-| **File attachment** | Attach any file type with one click |
-| **Chat history** | Messages persisted in local SQLite, restored on relaunch |
-| **Auto-scroll** | Automatically scrolls to the latest message |
+### 🔄 자동 업데이트
+| 기능 | 설명 |
+|------|------|
+| **업데이트 감지** | 앱 실행 시 GitHub Release를 확인해 새 버전을 백그라운드 다운로드 |
+| **인앱 업데이트** | 다운로드 완료 후 타이틀바에 "지금 업데이트" 버튼 표시 |
+| **원클릭 설치** | 버튼 클릭 시 앱 재시작과 함께 업데이트 자동 적용 |
+
+### 💬 채팅 경험
+| 기능 | 설명 |
+|------|------|
+| **이모지 피커** | 검색 기능이 포함된 내장 이모지 피커 |
+| **링크 감지** | 메시지 내 URL을 자동으로 클릭 가능한 링크로 변환 |
+| **이미지·영상 미리보기** | 공유된 미디어 인라인 렌더링 |
+| **파일 첨부** | 클릭 한 번으로 모든 파일 형식 첨부 |
+| **채팅 기록** | SQLite에 로컬 저장, 재실행 시 복원 |
+| **자동 스크롤** | 최신 메시지로 자동 이동 |
+| **안읽은 메시지 뱃지** | DM 목록에 안읽은 메시지 수 표시 |
 
 ## 보안 설계
 
@@ -75,10 +83,18 @@ npm run dev
 
 ### 빌드 (배포용)
 
+`.env` 파일에 GitHub 토큰을 설정한 뒤 빌드합니다.
+
 ```bash
+# 프로젝트 루트에 .env 파일 생성
+echo 'GH_TOKEN=ghp_xxxxxxxxxxxx' > .env
+
 npm run build
 # dist/app/ 에 설치 파일 생성 (dmg / exe / AppImage)
+# GitHub Release에 자동 업로드됨
 ```
+
+> `.env` 파일은 `.gitignore`에 포함되어 있어 커밋되지 않습니다.
 
 ### 테스트
 

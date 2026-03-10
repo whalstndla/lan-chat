@@ -4,3 +4,8 @@ dist/
 docs/
 *.db
 /electron/userData/
+*.pem
+*.db-journal
+
+.DS_Store
+.env

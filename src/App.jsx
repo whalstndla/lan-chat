@@ -1,5 +1,6 @@
 // src/App.jsx
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
+import logoImage from './assets/logo.png'
 import useAuthStore from './store/useAuthStore'
 import useUserStore from './store/useUserStore'
 import usePeerStore from './store/usePeerStore'
@@ -9,80 +10,145 @@ import LoginScreen from './components/LoginScreen'
 import Sidebar from './components/Sidebar'
 import ChatWindow from './components/ChatWindow'
 
+// macOS hiddenInset 타이틀바: 트래픽 라이트(80×38px) 안전 영역 + 드래그 핸들
+function TitleBar({ nickname, updateState }) {
+  const handleUpdateClick = () => {
+    if (updateState === 'downloaded') {
+      window.electronAPI.installUpdate()
+    }
+  }
+
+  return (
+    <div
+      style={{ WebkitAppRegion: 'drag', height: '38px' }}
+      className="shrink-0 bg-vsc-sidebar border-b border-vsc-border flex items-center justify-between pr-3"
+    >
+      {/* 좌측: 트래픽 라이트 안전 영역(pl-20) 후 앱 타이틀 */}
+      <div className="flex items-center gap-2 pl-20 select-none">
+        <img src={logoImage} alt="LAN Chat" className="w-4 h-4 object-contain shrink-0" />
+        <span className="text-vsc-text text-xs font-semibold">LAN Chat</span>
+        {nickname && <span className="text-vsc-muted text-xs">— {nickname}</span>}
+      </div>
+
+      {/* 업데이트 버튼 — 드래그 영역 안에서 클릭 가능하도록 pointer-events 복원 */}
+      {updateState === 'available' && (
+        <div style={{ WebkitAppRegion: 'no-drag' }} className="flex items-center gap-1.5 select-none">
+          <span className="text-vsc-muted text-xs">업데이트 다운로드 중...</span>
+        </div>
+      )}
+      {updateState === 'downloaded' && (
+        <div style={{ WebkitAppRegion: 'no-drag' }}>
+          <button
+            onClick={handleUpdateClick}
+            className="text-xs px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer select-none"
+          >
+            지금 업데이트
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
-  const { 인증상태, 인증된닉네임, 인증상태변경 } = useAuthStore()
-  const { 초기화 } = useUserStore()
-  const { 피어추가, 피어제거 } = usePeerStore()
-  const { 전체채팅기록설정, 전체채팅메시지추가, DM메시지추가 } = useChatStore()
-  const 나의피어아이디 = useUserStore(상태 => 상태.나의피어아이디)
+  const { authStatus, authenticatedNickname, setAuthStatus } = useAuthStore()
+  const { initialize } = useUserStore()
+  const { addPeer, removePeer } = usePeerStore()
+  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread } = useChatStore()
+  const myPeerId = useUserStore(state => state.myPeerId)
+  // 'idle' | 'available' | 'downloaded'
+  const [updateState, setUpdateState] = useState('idle')
 
   // 앱 시작 시 프로필 존재 여부로 첫 화면 결정
   useEffect(() => {
-    const 인증확인 = async () => {
-      const 프로필있음 = await window.electronAPI.프로필존재확인()
-      인증상태변경(프로필있음 ? 'login' : 'setup')
+    const checkAuth = async () => {
+      const hasProfile = await window.electronAPI.checkProfileExists()
+      setAuthStatus(hasProfile ? 'login' : 'setup')
     }
-    인증확인()
+    checkAuth()
+  }, [])
+
+  // 자동 업데이트 이벤트 구독
+  useEffect(() => {
+    window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
+    window.electronAPI.onUpdateDownloaded(() => setUpdateState('downloaded'))
   }, [])
 
   // 인증 완료 후 채팅 초기화
   useEffect(() => {
-    if (인증상태 !== 'authenticated' || !인증된닉네임) return
+    if (authStatus !== 'authenticated' || !authenticatedNickname) return
 
-    const 채팅초기화 = async () => {
-      const { 피어아이디, 닉네임 } = await window.electronAPI.내정보조회()
-      초기화(피어아이디, 닉네임)
+    const initChat = async () => {
+      const { peerId, nickname } = await window.electronAPI.getMyInfo()
+      initialize(peerId, nickname)
 
       // 이전 채팅 기록 불러오기
-      const 기록 = await window.electronAPI.전체채팅기록조회()
-      전체채팅기록설정(기록)
+      const history = await window.electronAPI.getGlobalHistory()
+      setGlobalHistory(history)
 
       // 피어 발견 시작
-      await window.electronAPI.피어발견시작()
+      await window.electronAPI.startPeerDiscovery()
 
       // 이벤트 구독
-      window.electronAPI.메시지수신구독((메시지) => {
-        if (메시지.type === 'message') {
-          전체채팅메시지추가(메시지)
-        } else if (메시지.type === 'dm') {
-          const 상대방아이디 = 메시지.fromId === 피어아이디 ? 메시지.to : 메시지.fromId
-          DM메시지추가(상대방아이디, 메시지)
+      window.electronAPI.subscribeToMessages((message) => {
+        if (message.type === 'message') {
+          addGlobalMessage(message)
+        } else if (message.type === 'dm') {
+          const senderId = message.fromId === peerId ? message.to : message.fromId
+          addDMMessage(senderId, message)
+
+          // 현재 보고 있지 않은 DM방이면 안읽은 수 증가
+          const { currentRoom } = useChatStore.getState()
+          if (!(currentRoom.type === 'dm' && currentRoom.peerId === senderId)) {
+            incrementUnread(senderId)
+          }
         }
       })
 
-      window.electronAPI.피어발견구독(피어추가)
-      window.electronAPI.피어퇴장구독(피어제거)
+      window.electronAPI.subscribeToPeerDiscovery(addPeer)
+      window.electronAPI.subscribeToPeerLeft(removePeer)
     }
 
-    채팅초기화()
+    initChat()
 
-    return () => window.electronAPI.모든구독해제()
-  }, [인증상태])
+    return () => window.electronAPI.unsubscribeAll()
+  }, [authStatus])
 
-  if (인증상태 === 'loading') {
+  if (authStatus === 'loading') {
     return (
-      <div className="flex h-screen bg-vsc-bg items-center justify-center">
-        <p className="text-vsc-muted text-sm">로딩 중...</p>
+      <div className="flex flex-col h-screen bg-vsc-bg">
+        <TitleBar updateState={updateState} />
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-vsc-muted text-sm">로딩 중...</p>
+        </div>
       </div>
     )
   }
 
-  if (인증상태 === 'setup') return <SetupScreen />
-  if (인증상태 === 'login') return <LoginScreen />
+  if (authStatus === 'setup') return <SetupScreen />
+  if (authStatus === 'login') return <LoginScreen />
 
   // 'authenticated' → 채팅 레이아웃
-  if (!나의피어아이디) {
+  if (!myPeerId) {
     return (
-      <div className="flex h-screen bg-vsc-bg items-center justify-center">
-        <p className="text-vsc-muted text-sm">초기화 중...</p>
+      <div className="flex flex-col h-screen bg-vsc-bg text-vsc-text">
+        <TitleBar nickname={authenticatedNickname} updateState={updateState} />
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-vsc-muted text-sm">초기화 중...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-screen bg-vsc-bg text-vsc-text overflow-hidden">
-      <Sidebar />
-      <ChatWindow />
+    <div className="flex flex-col h-screen bg-vsc-bg text-vsc-text overflow-hidden">
+      {/* macOS 타이틀 바 (트래픽 라이트 안전 영역) */}
+      <TitleBar nickname={authenticatedNickname} />
+      {/* 사이드바 + 채팅창 */}
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <ChatWindow />
+      </div>
     </div>
   )
 }
