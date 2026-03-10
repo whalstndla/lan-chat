@@ -7,16 +7,32 @@
 ![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-## 주요 기능
+## ✨ Features
 
-- **자동 피어 발견** — mDNS(Bonjour)로 같은 LAN의 앱을 자동 감지, 설정 불필요
-- **전체 채팅** — LAN 내 모든 접속자에게 브로드캐스트
-- **1:1 DM (E2E 암호화)** — ECDH P-256 키 교환 → AES-256-GCM 암호화, 개인키는 자신의 PC에만 존재
-- **파일 전송** — 이미지, 영상, 일반 파일 P2P 전송 (HTTP)
-- **이모지 피커** — 채팅 중 이모지 삽입
-- **링크 미리보기** — URL 자동 감지 및 클릭 가능한 링크 변환
-- **로컬 인증** — 최초 실행 시 닉네임/아이디/비밀번호 설정 (pbkdf2 해시, 네트워크 미전송)
-- **채팅 기록** — SQLite 로컬 저장, 재실행 시 복원
+### 🌐 Networking
+| Feature | Description |
+|---------|-------------|
+| **Zero-config peer discovery** | mDNS(Bonjour) automatically finds peers on the same LAN — no IP setup required |
+| **Global chat** | Broadcast messages to all connected peers in real time |
+| **1:1 Direct Messages** | Send private messages directly to a specific peer |
+| **P2P file transfer** | Share images, videos, and files via embedded HTTP server |
+
+### 🔐 Security
+| Feature | Description |
+|---------|-------------|
+| **E2E encrypted DMs** | ECDH P-256 key exchange → HKDF → AES-256-GCM — only sender & receiver can read |
+| **Local authentication** | Username + password on first launch, stored locally with pbkdf2 (310,000 iterations) |
+| **Private key isolation** | Private key never leaves your PC; DB theft cannot decrypt stored DMs |
+
+### 💬 Chat Experience
+| Feature | Description |
+|---------|-------------|
+| **Emoji picker** | Built-in emoji picker with search |
+| **Link detection** | URLs in messages are automatically converted to clickable links |
+| **Image & video preview** | Inline rendering of shared media |
+| **File attachment** | Attach any file type with one click |
+| **Chat history** | Messages persisted in local SQLite, restored on relaunch |
+| **Auto-scroll** | Automatically scrolls to the latest message |
 
 ## 보안 설계
 
