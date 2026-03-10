@@ -1,5 +1,6 @@
 // src/components/Message.jsx
 import React from 'react'
+import { Paperclip } from 'lucide-react'
 import { 텍스트에서링크변환 } from './LinkPreview'
 import useUserStore from '../store/useUserStore'
 
@@ -70,9 +71,10 @@ export default function Message({ 메시지 }) {
           <a
             href={파일URL}
             download={파일이름}
-            className="flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border"
+            className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
           >
-            📎 {파일이름 || '파일'}
+            <Paperclip size={14} className="shrink-0" />
+            {파일이름 || '파일'}
           </a>
         )}
       </div>

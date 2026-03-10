@@ -21,10 +21,18 @@
   "build": {
     "appId": "com.internal.lan-chat",
     "productName": "LAN Chat",
-    "directories": { "output": "dist/app" },
-    "mac": { "target": "dmg" },
-    "win": { "target": "nsis" },
-    "linux": { "target": "AppImage" }
+    "directories": {
+      "output": "dist/app"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
@@ -32,6 +40,7 @@
     "electron": "^40.8.0",
     "emoji-picker-react": "^4.18.0",
     "express": "^5.2.1",
+    "lucide-react": "^0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "uuid": "^13.0.0",

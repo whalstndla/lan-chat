@@ -1,5 +1,6 @@
 // src/components/Sidebar.jsx
 import React from 'react'
+import { Hash, MessageCircle, Wifi } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
@@ -15,9 +16,12 @@ export default function Sidebar() {
     <div className="w-52 bg-vsc-sidebar border-r border-vsc-border flex flex-col shrink-0">
       {/* 앱 타이틀 */}
       <div className="px-4 py-3 border-b border-vsc-border">
-        <h1 className="text-vsc-text font-semibold text-sm">💬 LAN Chat</h1>
+        <div className="flex items-center gap-2">
+          <MessageCircle size={16} className="text-vsc-accent shrink-0" />
+          <h1 className="text-vsc-text font-semibold text-sm">LAN Chat</h1>
+        </div>
         {나의닉네임 && (
-          <p className="text-vsc-muted text-xs mt-0.5">{나의닉네임}</p>
+          <p className="text-vsc-muted text-xs mt-1 pl-6">{나의닉네임}</p>
         )}
       </div>
 
@@ -26,13 +30,14 @@ export default function Sidebar() {
         <p className="text-vsc-muted text-xs px-2 py-1 mb-1 uppercase tracking-wider">채팅</p>
         <button
           onClick={() => 현재채팅방변경({ 타입: 'global' })}
-          className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
+          className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${
             전체채팅선택됨
               ? 'bg-vsc-selected text-vsc-text'
               : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
           }`}
         >
-          # 전체 채팅
+          <Hash size={14} className="shrink-0" />
+          전체 채팅
         </button>
       </div>
 
@@ -42,7 +47,10 @@ export default function Sidebar() {
           DM ({온라인피어목록.length})
         </p>
         {온라인피어목록.length === 0 ? (
-          <p className="text-vsc-muted text-xs px-3 py-1">대기 중...</p>
+          <div className="flex items-center gap-2 px-3 py-1.5 text-vsc-muted">
+            <Wifi size={13} className="opacity-40" />
+            <span className="text-xs">대기 중...</span>
+          </div>
         ) : (
           온라인피어목록.map((피어) => {
             const 선택됨 = 현재채팅방.타입 === 'dm' && 현재채팅방.상대피어아이디 === 피어.피어아이디
@@ -50,14 +58,14 @@ export default function Sidebar() {
               <button
                 key={피어.피어아이디}
                 onClick={() => 현재채팅방변경({ 타입: 'dm', 상대피어아이디: 피어.피어아이디, 상대닉네임: 피어.닉네임 })}
-                className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors flex items-center gap-2 ${
+                className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${
                   선택됨
                     ? 'bg-vsc-selected text-vsc-text'
                     : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
                 }`}
               >
-                <span className="text-vsc-accent text-xs">●</span>
-                {피어.닉네임}
+                <span className="w-1.5 h-1.5 rounded-full bg-vsc-accent shrink-0" />
+                <span className="truncate">{피어.닉네임}</span>
               </button>
             )
           })

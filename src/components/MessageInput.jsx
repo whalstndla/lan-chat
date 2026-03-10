@@ -1,6 +1,7 @@
 // src/components/MessageInput.jsx
 import React, { useState, useRef } from 'react'
 import EmojiPicker from 'emoji-picker-react'
+import { Paperclip, Smile, Send, Loader2 } from 'lucide-react'
 import useChatStore from '../store/useChatStore'
 
 // 파일 MIME 타입 → contentType 변환
@@ -79,6 +80,8 @@ export default function MessageInput() {
     이모지피커표시설정(false)
   }
 
+  const 전송가능 = 입력텍스트.trim().length > 0 && !전송중
+
   return (
     <div className="px-4 pb-4 pt-2 shrink-0 relative">
       {/* 이모지 피커 */}
@@ -93,7 +96,7 @@ export default function MessageInput() {
         </div>
       )}
 
-      <div className="flex items-end gap-2 bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors">
+      <div className="flex items-end gap-2 bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors duration-150">
         {/* 텍스트 입력 */}
         <textarea
           value={입력텍스트}
@@ -105,7 +108,7 @@ export default function MessageInput() {
         />
 
         {/* 버튼 영역 */}
-        <div className="flex items-center gap-1 pr-2 pb-1.5">
+        <div className="flex items-center gap-0.5 pr-2 pb-1.5">
           {/* 파일 첨부 */}
           <input
             ref={파일입력ref}
@@ -121,33 +124,43 @@ export default function MessageInput() {
           <button
             onClick={() => 파일입력ref.current?.click()}
             disabled={전송중}
-            className="text-vsc-muted hover:text-vsc-text disabled:opacity-40 p-1 rounded transition-colors"
+            aria-label="파일 첨부"
             title="파일 첨부"
+            className="cursor-pointer p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
           >
-            📎
+            <Paperclip size={16} />
           </button>
 
           {/* 이모지 */}
           <button
             onClick={() => 이모지피커표시설정(이전 => !이전)}
-            className="text-vsc-muted hover:text-vsc-text p-1 rounded transition-colors"
+            aria-label="이모지 선택"
             title="이모지"
+            className={`cursor-pointer p-1.5 rounded transition-colors duration-150 ${
+              이모지피커표시
+                ? 'text-vsc-accent bg-vsc-hover'
+                : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+            }`}
           >
-            😊
+            <Smile size={16} />
           </button>
 
           {/* 전송 */}
           <button
             onClick={메시지전송}
-            disabled={!입력텍스트.trim() || 전송중}
-            className="text-vsc-accent hover:opacity-80 disabled:opacity-30 p-1 rounded transition-opacity"
+            disabled={!전송가능}
+            aria-label="메시지 전송"
             title="전송 (Enter)"
+            className="cursor-pointer p-1.5 rounded transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-30 text-vsc-accent hover:bg-vsc-hover disabled:hover:bg-transparent"
           >
-            ➤
+            {전송중
+              ? <Loader2 size={16} className="animate-spin" />
+              : <Send size={16} />
+            }
           </button>
         </div>
       </div>
-      <p className="text-vsc-muted text-xs mt-1 ml-1">Enter 전송 · Shift+Enter 줄바꿈</p>
+      <p className="text-vsc-muted text-xs mt-1 ml-1 select-none">Enter 전송 · Shift+Enter 줄바꿈</p>
     </div>
   )
 }

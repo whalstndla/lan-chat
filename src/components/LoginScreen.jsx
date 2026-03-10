@@ -1,5 +1,6 @@
 // src/components/LoginScreen.jsx
 import React, { useState } from 'react'
+import { MessageCircle } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 
 export default function LoginScreen() {
@@ -30,7 +31,10 @@ export default function LoginScreen() {
   return (
     <div className="flex h-screen bg-vsc-bg items-center justify-center">
       <div className="w-72 bg-vsc-sidebar border border-vsc-border rounded-lg p-6">
-        <h1 className="text-vsc-text text-lg font-semibold mb-1">💬 LAN Chat</h1>
+        <div className="flex items-center gap-2 mb-1">
+          <MessageCircle size={18} className="text-vsc-accent" />
+          <h1 className="text-vsc-text text-lg font-semibold">LAN Chat</h1>
+        </div>
         <p className="text-vsc-muted text-xs mb-5">로그인하여 채팅을 시작하세요.</p>
 
         <div className="space-y-3">
