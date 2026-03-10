@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "dotenv -e .env -- sh -c 'vite build && electron-builder'",
+    "release": "dotenv -e .env -- sh -c 'vite build && electron-builder --publish always'",
     "test": "jest --testPathPattern=tests/",
-    "postinstall": "electron-rebuild -f -w better-sqlite3"
+    "postinstall": "electron-builder install-app-deps"
   },
   "jest": {
     "testEnvironment": "node"
@@ -59,7 +60,6 @@
     "dotenv-cli": "^11.0.0",
     "electron": "^40.8.0",
     "electron-builder": "^26.8.1",
-    "electron-rebuild": "^3.2.9",
     "jest": "^30.3.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
