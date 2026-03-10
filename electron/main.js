@@ -335,16 +335,32 @@ async function createWindow() {
 function setupAutoUpdater() {
   if (isDev) return
 
-  autoUpdater.checkForUpdatesAndNotify()
+  autoUpdater.autoDownload = true
 
   autoUpdater.on('update-available', () => {
     sendToRenderer('update-available')
   })
 
+  autoUpdater.on('update-not-available', () => {
+    sendToRenderer('update-not-available')
+  })
+
   autoUpdater.on('update-downloaded', () => {
     sendToRenderer('update-downloaded')
   })
+
+  autoUpdater.on('error', (error) => {
+    sendToRenderer('update-error', error.message)
+  })
+
+  autoUpdater.checkForUpdates()
 }
+
+// 수동 업데이트 확인 IPC 핸들러
+ipcMain.handle('check-for-updates', () => {
+  if (isDev) return
+  autoUpdater.checkForUpdates()
+})
 
 // 업데이트 설치 IPC 핸들러
 ipcMain.handle('install-update', () => {

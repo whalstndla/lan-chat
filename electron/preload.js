@@ -37,7 +37,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // 자동 업데이트
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   onUpdateAvailable: (callback) => ipcRenderer.on('update-available', () => callback()),
+  onUpdateNotAvailable: (callback) => ipcRenderer.on('update-not-available', () => callback()),
   onUpdateDownloaded: (callback) => ipcRenderer.on('update-downloaded', () => callback()),
+  onUpdateError: (callback) => ipcRenderer.on('update-error', (_, message) => callback(message)),
   installUpdate: () => ipcRenderer.invoke('install-update'),
 })

@@ -11,12 +11,32 @@ import Sidebar from './components/Sidebar'
 import ChatWindow from './components/ChatWindow'
 
 // macOS hiddenInset 타이틀바: 트래픽 라이트(80×38px) 안전 영역 + 드래그 핸들
-function TitleBar({ nickname, updateState }) {
-  const handleUpdateClick = () => {
+function TitleBar({ nickname, updateState, onCheckUpdate }) {
+  const handleRightButtonClick = () => {
     if (updateState === 'downloaded') {
       window.electronAPI.installUpdate()
+    } else if (updateState === 'idle' || updateState === 'not-available' || updateState === 'error') {
+      onCheckUpdate()
     }
   }
+
+  const rightButtonLabel = {
+    idle: '업데이트 확인',
+    checking: '확인 중...',
+    available: '다운로드 중...',
+    downloaded: '지금 업데이트',
+    'not-available': '최신 버전',
+    error: '재시도',
+  }[updateState] ?? '업데이트 확인'
+
+  const rightButtonStyle = {
+    downloaded: 'bg-blue-600 hover:bg-blue-500 text-white',
+    'not-available': 'bg-transparent text-vsc-muted cursor-default',
+    checking: 'bg-transparent text-vsc-muted cursor-default',
+    available: 'bg-transparent text-vsc-muted cursor-default',
+  }[updateState] ?? 'bg-transparent hover:bg-vsc-border text-vsc-muted hover:text-vsc-text'
+
+  const isDisabled = updateState === 'checking' || updateState === 'available' || updateState === 'not-available'
 
   return (
     <div
@@ -30,22 +50,16 @@ function TitleBar({ nickname, updateState }) {
         {nickname && <span className="text-vsc-muted text-xs">— {nickname}</span>}
       </div>
 
-      {/* 업데이트 버튼 — 드래그 영역 안에서 클릭 가능하도록 pointer-events 복원 */}
-      {updateState === 'available' && (
-        <div style={{ WebkitAppRegion: 'no-drag' }} className="flex items-center gap-1.5 select-none">
-          <span className="text-vsc-muted text-xs">업데이트 다운로드 중...</span>
-        </div>
-      )}
-      {updateState === 'downloaded' && (
-        <div style={{ WebkitAppRegion: 'no-drag' }}>
-          <button
-            onClick={handleUpdateClick}
-            className="text-xs px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer select-none"
-          >
-            지금 업데이트
-          </button>
-        </div>
-      )}
+      {/* 우측: 업데이트 버튼 */}
+      <div style={{ WebkitAppRegion: 'no-drag' }}>
+        <button
+          onClick={handleRightButtonClick}
+          disabled={isDisabled}
+          className={`text-xs px-2 py-0.5 rounded transition-colors select-none ${rightButtonStyle} ${isDisabled ? 'cursor-default' : 'cursor-pointer'}`}
+        >
+          {rightButtonLabel}
+        </button>
+      </div>
     </div>
   )
 }
@@ -56,7 +70,7 @@ export default function App() {
   const { addPeer, removePeer } = usePeerStore()
   const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
-  // 'idle' | 'available' | 'downloaded'
+  // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
   const [updateState, setUpdateState] = useState('idle')
 
   // 앱 시작 시 프로필 존재 여부로 첫 화면 결정
@@ -71,8 +85,15 @@ export default function App() {
   // 자동 업데이트 이벤트 구독
   useEffect(() => {
     window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
+    window.electronAPI.onUpdateNotAvailable(() => setUpdateState('not-available'))
     window.electronAPI.onUpdateDownloaded(() => setUpdateState('downloaded'))
+    window.electronAPI.onUpdateError(() => setUpdateState('error'))
   }, [])
+
+  const handleCheckUpdate = () => {
+    setUpdateState('checking')
+    window.electronAPI.checkForUpdates()
+  }
 
   // 인증 완료 후 채팅 초기화
   useEffect(() => {
@@ -117,7 +138,7 @@ export default function App() {
   if (authStatus === 'loading') {
     return (
       <div className="flex flex-col h-screen bg-vsc-bg">
-        <TitleBar updateState={updateState} />
+        <TitleBar updateState={updateState} onCheckUpdate={handleCheckUpdate} />
         <div className="flex-1 flex items-center justify-center">
           <p className="text-vsc-muted text-sm">로딩 중...</p>
         </div>
@@ -132,7 +153,7 @@ export default function App() {
   if (!myPeerId) {
     return (
       <div className="flex flex-col h-screen bg-vsc-bg text-vsc-text">
-        <TitleBar nickname={authenticatedNickname} updateState={updateState} />
+        <TitleBar nickname={authenticatedNickname} updateState={updateState} onCheckUpdate={handleCheckUpdate} />
         <div className="flex-1 flex items-center justify-center">
           <p className="text-vsc-muted text-sm">초기화 중...</p>
         </div>
@@ -143,7 +164,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-vsc-bg text-vsc-text overflow-hidden">
       {/* macOS 타이틀 바 (트래픽 라이트 안전 영역) */}
-      <TitleBar nickname={authenticatedNickname} />
+      <TitleBar nickname={authenticatedNickname} updateState={updateState} onCheckUpdate={handleCheckUpdate} />
       {/* 사이드바 + 채팅창 */}
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
