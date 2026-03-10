@@ -36,7 +36,8 @@
     "publish": {
       "provider": "github",
       "owner": "whalstndla",
-      "repo": "lan-chat"
+      "repo": "lan-chat",
+      "releaseType": "release"
     }
   },
   "dependencies": {
