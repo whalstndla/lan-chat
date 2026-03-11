@@ -8,7 +8,12 @@ function startWsServer({ onMessage }) {
     socket.on('message', (data) => {
       try {
         const message = JSON.parse(data.toString())
-        onMessage(message)
+        const reply = (response) => {
+          if (socket.readyState === socket.OPEN) {
+            socket.send(JSON.stringify(response))
+          }
+        }
+        onMessage(message, reply)
       } catch {
         // 잘못된 JSON 무시
       }

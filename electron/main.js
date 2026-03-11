@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, Notification } = require('electron')
 const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
@@ -25,12 +25,18 @@ const dbPath = path.join(appDataPath, 'chat.db')
 let mainWindow = null
 let database = null
 let wsServerInfo = null
+let peerId = null                       // 내 피어 ID (createWindow에서 초기화)
 let myPrivateKey = null                 // 내 ECDH 개인키
 let myPublicKeyBase64 = null            // 네트워크 전송용 공개키
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
 
 function sendToRenderer(channel, data) {
   if (mainWindow) mainWindow.webContents.send(channel, data)
+}
+
+function showNotification(title, body) {
+  if (!Notification.isSupported()) return
+  new Notification({ title, body: body?.slice(0, 100) || '' }).show()
 }
 
 async function initApp() {
@@ -50,12 +56,13 @@ async function initApp() {
 
   // WebSocket 서버 시작
   wsServerInfo = startWsServer({
-    onMessage: (message) => {
-      // 키 교환 메시지 처리 (저장 없음)
+    onMessage: (message, reply) => {
+      // 키 교환 메시지 처리 — 수신 즉시 내 키를 reply로 돌려보냄 (양방향 키 교환)
       if (message.type === 'key-exchange') {
         try {
           const publicKeyObj = importPublicKey(message.publicKey)
           peerPublicKeyMap.set(message.fromId, publicKeyObj)
+          reply({ type: 'key-exchange', fromId: peerId, publicKey: myPublicKeyBase64 })
         } catch {
           // 잘못된 공개키 무시
         }
@@ -85,6 +92,12 @@ async function initApp() {
             timestamp: message.timestamp,
           })
 
+          // DM 알림 (내 메시지 제외)
+          showNotification(
+            `${message.from || '알 수 없음'} (DM)`,
+            decryptedPayload.content || '파일을 보냈습니다.'
+          )
+
           // 렌더러에는 복호화된 내용 전달
           sendToRenderer('message-received', {
             ...message,
@@ -113,6 +126,15 @@ async function initApp() {
         file_name: message.fileName || null,
         timestamp: message.timestamp,
       })
+
+      // 전체 채팅 알림 (창 포커스 없을 때만)
+      if (mainWindow && !mainWindow.isFocused()) {
+        showNotification(
+          message.from || '알 수 없음',
+          message.content || '파일을 보냈습니다.'
+        )
+      }
+
       sendToRenderer('message-received', message)
     },
   })
@@ -301,10 +323,10 @@ function registerIpcHandlers(peerId, nickname) {
 }
 
 async function createWindow() {
-  await initApp()
-
-  const peerId = uuidv4()
+  peerId = uuidv4()
   const nickname = os.userInfo().username // 기본값: OS 사용자명 (로그인 후 프로필 닉네임으로 대체)
+
+  await initApp()
 
   registerIpcHandlers(peerId, nickname)
 
