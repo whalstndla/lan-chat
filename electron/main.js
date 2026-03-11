@@ -341,6 +341,10 @@ function setupAutoUpdater() {
     sendToRenderer('update-available')
   })
 
+  autoUpdater.on('download-progress', (progress) => {
+    sendToRenderer('update-download-progress', Math.floor(progress.percent))
+  })
+
   autoUpdater.on('update-not-available', () => {
     sendToRenderer('update-not-available')
   })

@@ -72,6 +72,7 @@ export default function App() {
   const myPeerId = useUserStore(state => state.myPeerId)
   // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
   const [updateState, setUpdateState] = useState('idle')
+  const [downloadPercent, setDownloadPercent] = useState(0)
 
   // 업데이트 확인 완료 후 인증 화면으로 진행
   const proceedToAuth = async () => {
@@ -84,6 +85,7 @@ export default function App() {
     setUpdateState('checking')
 
     window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
+    window.electronAPI.onDownloadProgress((percent) => setDownloadPercent(percent))
     window.electronAPI.onUpdateDownloaded(() => setUpdateState('downloaded'))
     window.electronAPI.onUpdateNotAvailable(() => {
       setUpdateState('not-available')
@@ -149,7 +151,7 @@ export default function App() {
   if (authStatus === 'loading') {
     const statusText = {
       checking: '업데이트 확인 중...',
-      available: '업데이트 다운로드 중...',
+      available: `다운로드 중... ${downloadPercent}%`,
       downloaded: '업데이트 준비 완료',
       error: '업데이트 확인 실패',
     }[updateState]
@@ -160,6 +162,24 @@ export default function App() {
         <div className="flex-1 flex flex-col items-center justify-center gap-4">
           <img src={logoImage} alt="LAN Chat" className="w-12 h-12 object-contain opacity-80" />
           <p className="text-vsc-muted text-sm">{statusText}</p>
+
+          {/* 다운로드 진행 바 */}
+          {updateState === 'available' && (
+            <div className="w-48 flex flex-col items-center gap-2">
+              <div className="w-full h-1 bg-vsc-border rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                  style={{ width: `${downloadPercent}%` }}
+                />
+              </div>
+              <button
+                onClick={handleSkipUpdate}
+                className="text-xs text-vsc-muted hover:text-vsc-text transition-colors cursor-pointer underline"
+              >
+                건너뛰기
+              </button>
+            </div>
+          )}
 
           {updateState === 'downloaded' && (
             <div className="flex gap-2 mt-1">
@@ -176,15 +196,6 @@ export default function App() {
                 건너뛰기
               </button>
             </div>
-          )}
-
-          {updateState === 'available' && (
-            <button
-              onClick={handleSkipUpdate}
-              className="text-xs text-vsc-muted hover:text-vsc-text transition-colors cursor-pointer underline"
-            >
-              건너뛰기
-            </button>
           )}
         </div>
       </div>
