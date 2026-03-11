@@ -75,6 +75,20 @@ export default function MessageInput() {
     }
   }
 
+  function handlePaste(event) {
+    const items = event.clipboardData?.items
+    if (!items) return
+
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        event.preventDefault()
+        const file = item.getAsFile()
+        if (file) sendFile(file)
+        return
+      }
+    }
+  }
+
   function onEmojiSelect(emojiData) {
     setInputText(prev => prev + emojiData.emoji)
     setShowEmojiPicker(false)
@@ -102,6 +116,7 @@ export default function MessageInput() {
           value={inputText}
           onChange={(event) => setInputText(event.target.value)}
           onKeyDown={handleEnterKey}
+          onPaste={handlePaste}
           placeholder={`${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`}
           className="flex-1 bg-transparent text-vsc-text text-sm px-3 py-2.5 resize-none outline-none placeholder-vsc-muted min-h-[40px] max-h-32"
           rows={1}
