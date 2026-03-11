@@ -8,7 +8,7 @@ const { saveMessage, getGlobalHistory, getDMHistory } = require('./storage/queri
 const { saveProfile, getProfile, verifyPassword } = require('./storage/profile')
 const { startPeerDiscovery, stopPeerDiscovery } = require('./peer/discovery')
 const { startWsServer, stopWsServer } = require('./peer/wsServer')
-const { connectToPeer, sendMessage, broadcastMessage } = require('./peer/wsClient')
+const { connectToPeer, sendMessage, broadcastMessage, getConnections } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
@@ -30,6 +30,8 @@ let peerId = null                       // 내 피어 ID (createWindow에서 초
 let downloadedUpdateFile = null         // 다운로드된 업데이트 파일 경로
 let myPrivateKey = null                 // 내 ECDH 개인키
 let myPublicKeyBase64 = null            // 네트워크 전송용 공개키
+let localIP = 'localhost'              // 내 LAN IP (key-exchange 및 파일 서버용)
+let handleIncomingMessage = null       // wsServer/wsClient 공용 메시지 핸들러
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
 
 function sendToRenderer(channel, data) {
@@ -45,6 +47,11 @@ async function initApp() {
   // 임시 파일 폴더 생성
   if (!fs.existsSync(tempFilePath)) fs.mkdirSync(tempFilePath, { recursive: true })
 
+  // LAN IP 계산 (key-exchange 및 파일 서버용)
+  localIP = Object.values(os.networkInterfaces())
+    .flat()
+    .find(iface => iface.family === 'IPv4' && !iface.internal)?.address || 'localhost'
+
   // ECDH 키 쌍 로드 (최초 실행 시 자동 생성)
   const { privateKey, publicKey } = loadOrCreateKeyPair(appDataPath)
   myPrivateKey = privateKey
@@ -56,90 +63,105 @@ async function initApp() {
   // 파일 서버 시작
   await startFileServer(tempFilePath)
 
-  // WebSocket 서버 시작
-  wsServerInfo = startWsServer({
-    onMessage: (message, reply) => {
-      // 키 교환 메시지 처리 — 수신 즉시 내 키를 reply로 돌려보냄 (양방향 키 교환)
-      if (message.type === 'key-exchange') {
-        try {
-          const publicKeyObj = importPublicKey(message.publicKey)
-          peerPublicKeyMap.set(message.fromId, publicKeyObj)
-          reply({ type: 'key-exchange', fromId: peerId, publicKey: myPublicKeyBase64 })
-        } catch {
-          // 잘못된 공개키 무시
+  // wsServer/wsClient 공용 메시지 핸들러
+  // reply: wsServer에서 온 경우 상대 소켓으로 응답, wsClient에서 온 경우 no-op
+  handleIncomingMessage = (message, reply) => {
+    // 키 교환 처리 — 내 키 즉시 reply + 역방향 연결 (mDNS 단방향 문제 해결)
+    if (message.type === 'key-exchange') {
+      try {
+        const publicKeyObj = importPublicKey(message.publicKey)
+        peerPublicKeyMap.set(message.fromId, publicKeyObj)
+        reply({ type: 'key-exchange', fromId: peerId, publicKey: myPublicKeyBase64 })
+
+        // 상대방이 내 mDNS를 못 찾은 경우 — key-exchange의 host/wsPort로 역방향 연결
+        if (message.host && message.wsPort && !getConnections().includes(message.fromId)) {
+          connectToPeer({
+            peerId: message.fromId,
+            host: message.host,
+            wsPort: message.wsPort,
+            onMessage: handleIncomingMessage,
+          }).then(() => {
+            sendToRenderer('peer-discovered', {
+              peerId: message.fromId,
+              nickname: message.nickname || '알 수 없음',
+              host: message.host,
+              wsPort: message.wsPort,
+              filePort: message.filePort || 0,
+            })
+          }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
         }
-        return
+      } catch {
+        // 잘못된 공개키 무시
       }
+      return
+    }
 
-      // DM: 암호문 복호화 후 렌더러 전달
-      if (message.type === 'dm' && message.encryptedPayload) {
-        const senderPublicKey = peerPublicKeyMap.get(message.fromId)
-        if (!senderPublicKey) return // 공개키 미수신 시 무시
+    // DM: 암호문 복호화 후 렌더러 전달
+    if (message.type === 'dm' && message.encryptedPayload) {
+      const senderPublicKey = peerPublicKeyMap.get(message.fromId)
+      if (!senderPublicKey) return
 
-        try {
-          const sharedSecret = deriveSharedSecret(myPrivateKey, senderPublicKey)
-          const decryptedPayload = decryptDM(message.encryptedPayload, sharedSecret)
+      try {
+        const sharedSecret = deriveSharedSecret(myPrivateKey, senderPublicKey)
+        const decryptedPayload = decryptDM(message.encryptedPayload, sharedSecret)
 
-          saveMessage(database, {
-            id: message.id,
-            type: message.type,
-            from_id: message.fromId,
-            from_name: message.from,
-            to_id: message.to,
-            content: null,                              // DB에는 평문 저장 안 함
-            content_type: decryptedPayload.contentType,
-            encrypted_payload: message.encryptedPayload, // 암호문 상태로 보관
-            file_url: decryptedPayload.fileUrl || null,
-            file_name: decryptedPayload.fileName || null,
-            timestamp: message.timestamp,
-          })
+        saveMessage(database, {
+          id: message.id,
+          type: message.type,
+          from_id: message.fromId,
+          from_name: message.from,
+          to_id: message.to,
+          content: null,
+          content_type: decryptedPayload.contentType,
+          encrypted_payload: message.encryptedPayload,
+          file_url: decryptedPayload.fileUrl || null,
+          file_name: decryptedPayload.fileName || null,
+          timestamp: message.timestamp,
+        })
 
-          // DM 알림 (내 메시지 제외)
-          showNotification(
-            `${message.from || '알 수 없음'} (DM)`,
-            decryptedPayload.content || '파일을 보냈습니다.'
-          )
-
-          // 렌더러에는 복호화된 내용 전달
-          sendToRenderer('message-received', {
-            ...message,
-            content: decryptedPayload.content,
-            contentType: decryptedPayload.contentType,
-            fileUrl: decryptedPayload.fileUrl,
-            fileName: decryptedPayload.fileName,
-          })
-        } catch {
-          // 복호화 실패 시 무시
-        }
-        return
-      }
-
-      // 전체채팅 메시지 (평문 저장)
-      saveMessage(database, {
-        id: message.id,
-        type: message.type,
-        from_id: message.fromId,
-        from_name: message.from,
-        to_id: null,
-        content: message.content || null,
-        content_type: message.contentType,
-        encrypted_payload: null,
-        file_url: message.fileUrl || null,
-        file_name: message.fileName || null,
-        timestamp: message.timestamp,
-      })
-
-      // 전체 채팅 알림 (창 포커스 없을 때만)
-      if (mainWindow && !mainWindow.isFocused()) {
         showNotification(
-          message.from || '알 수 없음',
-          message.content || '파일을 보냈습니다.'
+          `${message.from || '알 수 없음'} (DM)`,
+          decryptedPayload.content || '파일을 보냈습니다.'
         )
-      }
 
-      sendToRenderer('message-received', message)
-    },
-  })
+        sendToRenderer('message-received', {
+          ...message,
+          content: decryptedPayload.content,
+          contentType: decryptedPayload.contentType,
+          fileUrl: decryptedPayload.fileUrl,
+          fileName: decryptedPayload.fileName,
+        })
+      } catch { /* 복호화 실패 무시 */ }
+      return
+    }
+
+    // 전체채팅 메시지 (평문 저장)
+    saveMessage(database, {
+      id: message.id,
+      type: message.type,
+      from_id: message.fromId,
+      from_name: message.from,
+      to_id: null,
+      content: message.content || null,
+      content_type: message.contentType,
+      encrypted_payload: null,
+      file_url: message.fileUrl || null,
+      file_name: message.fileName || null,
+      timestamp: message.timestamp,
+    })
+
+    if (mainWindow && !mainWindow.isFocused()) {
+      showNotification(
+        message.from || '알 수 없음',
+        message.content || '파일을 보냈습니다.'
+      )
+    }
+
+    sendToRenderer('message-received', message)
+  }
+
+  // WebSocket 서버 시작 (공용 핸들러 사용)
+  wsServerInfo = startWsServer({ onMessage: handleIncomingMessage })
 }
 
 // IPC 핸들러 등록
@@ -196,12 +218,17 @@ function registerIpcHandlers(peerId, nickname) {
           peerId: peerInfo.peerId,
           host: peerInfo.host,
           wsPort: peerInfo.wsPort,
+          onMessage: handleIncomingMessage,
         })
-        // 연결 직후 내 공개키 전송 (키 교환)
+        // key-exchange에 내 접속 정보 포함 → 상대방이 역방향 연결 가능
         sendMessage(peerInfo.peerId, {
           type: 'key-exchange',
           fromId: peerId,
           publicKey: myPublicKeyBase64,
+          nickname: currentNickname,
+          host: localIP,
+          wsPort: wsServerInfo.port,
+          filePort: getFilePort(),
         })
         sendToRenderer('peer-discovered', peerInfo)
       },
@@ -316,10 +343,6 @@ function registerIpcHandlers(peerId, nickname) {
     const savedFileName = `${uuidv4()}${ext}`
     const savePath = path.join(tempFilePath, savedFileName)
     fs.writeFileSync(savePath, Buffer.from(new Uint8Array(fileBuffer)))
-    // 로컬 IP 기반 URL (같은 LAN에서 접근 가능)
-    const localIP = Object.values(os.networkInterfaces())
-      .flat()
-      .find(iface => iface.family === 'IPv4' && !iface.internal)?.address || 'localhost'
     return `http://${localIP}:${getFilePort()}/files/${savedFileName}`
   })
 }
