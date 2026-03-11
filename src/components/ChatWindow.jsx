@@ -9,6 +9,7 @@ export default function ChatWindow() {
   const currentRoom = useChatStore(state => state.currentRoom)
   const globalMessages = useChatStore(state => state.globalMessages)
   const dmMessages = useChatStore(state => state.dmMessages)
+  const typingUsers = useChatStore(state => state.typingUsers)
   const { setDMHistory, resetUnread } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
   const scrollEndRef = useRef(null)
@@ -20,6 +21,11 @@ export default function ChatWindow() {
   const chatTitle = currentRoom.type === 'global'
     ? '전체 채팅'
     : `${currentRoom.nickname} (DM)`
+
+  // 현재 방에 해당하는 타이핑 유저 목록
+  const typingUserList = currentRoom.type === 'global'
+    ? Object.values(typingUsers)
+    : (typingUsers[currentRoom.peerId] ? [typingUsers[currentRoom.peerId]] : [])
 
   // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화
   useEffect(() => {
@@ -53,6 +59,22 @@ export default function ChatWindow() {
             <Message key={message.id} message={message} />
           ))
         )}
+
+        {/* 타이핑 인디케이터 */}
+        {typingUserList.length > 0 && (
+          <div className="px-4 py-1 flex items-center gap-1.5 text-vsc-muted text-xs">
+            <span className="flex gap-0.5 items-end">
+              <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '0ms' }} />
+              <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '150ms' }} />
+              <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '300ms' }} />
+            </span>
+            <span>
+              {typingUserList.map(user => user.nickname).join(', ')}
+              {typingUserList.length === 1 ? '님이 입력 중...' : '님들이 입력 중...'}
+            </span>
+          </div>
+        )}
+
         <div ref={scrollEndRef} />
       </div>
 

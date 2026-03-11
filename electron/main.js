@@ -4,7 +4,7 @@ const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
 const { initDatabase } = require('./storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory } = require('./storage/queries')
+const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage } = require('./storage/queries')
 const { saveProfile, getProfile, verifyPassword } = require('./storage/profile')
 const { startPeerDiscovery, stopPeerDiscovery } = require('./peer/discovery')
 const { startWsServer, stopWsServer } = require('./peer/wsServer')
@@ -13,7 +13,7 @@ const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileSer
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
 const fs = require('fs')
-const { exec } = require('child_process')
+const { spawn } = require('child_process')
 const { autoUpdater } = require('electron-updater')
 
 const isDev = !app.isPackaged
@@ -45,9 +45,28 @@ function showNotification(title, body) {
   new Notification({ title, body: body?.slice(0, 100) || '' }).show()
 }
 
+// 업데이트 후 첫 실행 감지 — 이전 버전과 현재 버전 비교
+function checkAndNotifyUpdated() {
+  if (isDev) return
+  const versionFilePath = path.join(appDataPath, 'last-version.json')
+  const currentVersion = app.getVersion()
+  try {
+    const stored = fs.existsSync(versionFilePath)
+      ? JSON.parse(fs.readFileSync(versionFilePath, 'utf8'))
+      : null
+    if (stored && stored.version !== currentVersion) {
+      showNotification('LAN Chat 업데이트 완료', `v${stored.version} → v${currentVersion}`)
+    }
+    fs.writeFileSync(versionFilePath, JSON.stringify({ version: currentVersion }))
+  } catch { /* 무시 */ }
+}
+
 async function initApp() {
   // 임시 파일 폴더 생성
   if (!fs.existsSync(tempFilePath)) fs.mkdirSync(tempFilePath, { recursive: true })
+
+  // 업데이트 후 첫 실행 감지
+  checkAndNotifyUpdated()
 
   // LAN IP 계산 (key-exchange 및 파일 서버용)
   localIP = Object.values(os.networkInterfaces())
@@ -68,6 +87,24 @@ async function initApp() {
   // wsServer/wsClient 공용 메시지 핸들러
   // reply: wsServer에서 온 경우 상대 소켓으로 응답, wsClient에서 온 경우 no-op
   handleIncomingMessage = (message, reply) => {
+    // 타이핑 이벤트 — DB 저장 없이 렌더러로 전달만
+    if (message.type === 'typing') {
+      sendToRenderer('typing-event', { fromId: message.fromId, from: message.from, to: message.to || null })
+      return
+    }
+
+    // 메시지 삭제 이벤트 — DB 삭제 후 렌더러로 전달
+    if (message.type === 'delete-message') {
+      try { deleteMessage(database, message.messageId, message.fromId) } catch { /* 무시 */ }
+      sendToRenderer('message-received', {
+        type: 'delete-message',
+        messageId: message.messageId,
+        fromId: message.fromId,
+        to: message.to || null,
+      })
+      return
+    }
+
     // 키 교환 처리 — 내 키 즉시 reply + 역방향 연결 (mDNS 단방향 문제 해결)
     if (message.type === 'key-exchange') {
       try {
@@ -121,10 +158,12 @@ async function initApp() {
           timestamp: message.timestamp,
         })
 
-        showNotification(
-          `${message.from || '알 수 없음'} (DM)`,
-          decryptedPayload.content || '파일을 보냈습니다.'
-        )
+        if (mainWindow && !mainWindow.isFocused()) {
+          showNotification(
+            `${message.from || '알 수 없음'} (DM)`,
+            decryptedPayload.content || '파일을 보냈습니다.'
+          )
+        }
 
         sendToRenderer('message-received', {
           ...message,
@@ -311,6 +350,42 @@ function registerIpcHandlers(peerId, nickname) {
     return { ...message, content: content || null, fileUrl: fileUrl || null, fileName: fileName || null }
   })
 
+  // 타이핑 인디케이터 전송
+  ipcMain.handle('send-typing', (_, targetPeerId) => {
+    const currentNickname = getProfile(database)?.nickname || nickname
+    const typingMessage = {
+      type: 'typing',
+      fromId: peerId,
+      from: currentNickname,
+      to: targetPeerId || null,
+      timestamp: Date.now(),
+    }
+    if (targetPeerId) {
+      sendMessage(targetPeerId, typingMessage)
+    } else {
+      broadcastMessage(typingMessage)
+    }
+  })
+
+  // 메시지 삭제 (본인 메시지만)
+  ipcMain.handle('delete-message', (_, { messageId, targetPeerId }) => {
+    deleteMessage(database, messageId, peerId)
+    const currentNickname = getProfile(database)?.nickname || nickname
+    const deletePayload = {
+      type: 'delete-message',
+      messageId,
+      fromId: peerId,
+      from: currentNickname,
+      to: targetPeerId || null,
+      timestamp: Date.now(),
+    }
+    if (targetPeerId) {
+      sendMessage(targetPeerId, deletePayload)
+    } else {
+      broadcastMessage(deletePayload)
+    }
+  })
+
   // 채팅 기록 조회
   ipcMain.handle('get-global-history', () => getGlobalHistory(database))
   ipcMain.handle('get-dm-history', (_, { peerId1, peerId2 }) => {
@@ -432,7 +507,7 @@ ipcMain.handle('install-update', () => {
 
       const script = [
         '#!/bin/bash',
-        'sleep 1',
+        'sleep 2',
         `TEMP_DIR="${tempDir}"`,
         `mkdir -p "$TEMP_DIR"`,
         `unzip -o "${downloadedUpdateFile}" -d "$TEMP_DIR"`,
@@ -440,6 +515,7 @@ ipcMain.handle('install-update', () => {
         `if [ -n "$APP" ]; then`,
         `  rm -rf "${appBundlePath}"`,
         `  ditto "$APP" "${appBundlePath}"`,
+        `  rm -f "${downloadedUpdateFile}"`,
         `  open "${appBundlePath}"`,
         `fi`,
         `rm -rf "$TEMP_DIR"`,
@@ -447,8 +523,12 @@ ipcMain.handle('install-update', () => {
       ].join('\n')
 
       fs.writeFileSync(scriptPath, script, { mode: 0o755 })
-      exec(`bash "${scriptPath}"`, { detached: true })
-      setTimeout(() => app.quit(), 300)
+      const child = spawn('bash', [scriptPath], {
+        detached: true,
+        stdio: 'ignore',
+      })
+      child.unref()
+      setTimeout(() => app.quit(), 500)
       return
     }
   }

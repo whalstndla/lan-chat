@@ -24,16 +24,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 파일 저장 — ArrayBuffer를 Uint8Array로 변환 후 전송 (IPC 직렬화 안전)
   saveFile: (fileBuffer, fileName) => ipcRenderer.invoke('save-file', { fileBuffer: new Uint8Array(fileBuffer), fileName }),
 
+  // 타이핑 인디케이터 전송
+  sendTyping: (targetPeerId) => ipcRenderer.invoke('send-typing', targetPeerId),
+
+  // 메시지 삭제
+  deleteMessage: (messageId, targetPeerId) => ipcRenderer.invoke('delete-message', { messageId, targetPeerId }),
+
   // 이벤트 구독
   subscribeToMessages: (callback) => ipcRenderer.on('message-received', (_, message) => callback(message)),
   subscribeToPeerDiscovery: (callback) => ipcRenderer.on('peer-discovered', (_, peerInfo) => callback(peerInfo)),
   subscribeToPeerLeft: (callback) => ipcRenderer.on('peer-left', (_, peerId) => callback(peerId)),
+  onTypingEvent: (callback) => ipcRenderer.on('typing-event', (_, data) => callback(data)),
 
   // 이벤트 구독 해제
   unsubscribeAll: () => {
     ipcRenderer.removeAllListeners('message-received')
     ipcRenderer.removeAllListeners('peer-discovered')
     ipcRenderer.removeAllListeners('peer-left')
+    ipcRenderer.removeAllListeners('typing-event')
   },
 
   // 자동 업데이트

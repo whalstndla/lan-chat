@@ -1,6 +1,6 @@
 {
   "name": "lan-chat",
-  "version": "0.4.9",
+  "version": "0.5.4",
   "description": "",
   "main": "electron/main.js",
   "scripts": {
@@ -24,6 +24,27 @@
     "directories": {
       "output": "dist/app"
     },
+    "files": [
+      "dist/renderer/**",
+      "electron/**",
+      "node_modules/**",
+      "!node_modules/lucide-react/**",
+      "!node_modules/react/**",
+      "!node_modules/react-dom/**",
+      "!node_modules/scheduler/**",
+      "!node_modules/emoji-picker-react/**",
+      "!node_modules/emoji-datasource*/**",
+      "!node_modules/zustand/**",
+      "!node_modules/flairup/**",
+      "!node_modules/better-sqlite3/deps/**",
+      "!node_modules/better-sqlite3/src/**",
+      "!node_modules/**/{test,tests,spec,__tests__}/**",
+      "!node_modules/**/*.{md,markdown,txt,rst,map}",
+      "!node_modules/**/{.bin,.github,.nyc_output}/**"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/build/Release/*.node"
+    ],
     "mac": {
       "target": [
         {

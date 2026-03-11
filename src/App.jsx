@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import logoImage from './assets/logo.png'
 import useAuthStore from './store/useAuthStore'
 import useUserStore from './store/useUserStore'
@@ -68,11 +68,12 @@ export default function App() {
   const { authStatus, authenticatedNickname, setAuthStatus } = useAuthStore()
   const { initialize } = useUserStore()
   const { addPeer, removePeer } = usePeerStore()
-  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread } = useChatStore()
+  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread, setTyping, clearExpiredTyping, removeGlobalMessage, removeDMMessage } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
   // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
   const [updateState, setUpdateState] = useState('idle')
   const [downloadPercent, setDownloadPercent] = useState(0)
+  const updateDownloadedRef = useRef(false)
 
   // 업데이트 확인 완료 후 인증 화면으로 진행
   const proceedToAuth = async () => {
@@ -86,14 +87,17 @@ export default function App() {
 
     window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
     window.electronAPI.onDownloadProgress((percent) => setDownloadPercent(percent))
-    window.electronAPI.onUpdateDownloaded(() => setUpdateState('downloaded'))
+    window.electronAPI.onUpdateDownloaded(() => {
+      updateDownloadedRef.current = true
+      setUpdateState('downloaded')
+    })
     window.electronAPI.onUpdateNotAvailable(() => {
       setUpdateState('not-available')
-      proceedToAuth()
+      if (!updateDownloadedRef.current) proceedToAuth()
     })
     window.electronAPI.onUpdateError(() => {
       setUpdateState('error')
-      proceedToAuth()
+      if (!updateDownloadedRef.current) proceedToAuth()
     })
 
     window.electronAPI.checkForUpdates()
@@ -136,7 +140,19 @@ export default function App() {
           if (!(currentRoom.type === 'dm' && currentRoom.peerId === senderId)) {
             incrementUnread(senderId)
           }
+        } else if (message.type === 'delete-message') {
+          if (message.to) {
+            // DM 메시지 삭제 — 대화 상대방의 peerId 추출
+            const dmPeerId = message.fromId === peerId ? message.to : message.fromId
+            removeDMMessage(dmPeerId, message.messageId)
+          } else {
+            removeGlobalMessage(message.messageId)
+          }
         }
+      })
+
+      window.electronAPI.onTypingEvent((data) => {
+        setTyping(data.fromId, data.from)
       })
 
       window.electronAPI.subscribeToPeerDiscovery(addPeer)
@@ -145,7 +161,12 @@ export default function App() {
 
     initChat()
 
-    return () => window.electronAPI.unsubscribeAll()
+    const typingCleanupInterval = setInterval(clearExpiredTyping, 1000)
+
+    return () => {
+      window.electronAPI.unsubscribeAll()
+      clearInterval(typingCleanupInterval)
+    }
   }, [authStatus])
 
   if (authStatus === 'loading') {

@@ -8,6 +8,7 @@ const useChatStore = create((set) => ({
   globalMessages: [],
   dmMessages: {}, // { peerId: [메시지...] }
   unreadCounts: {}, // { peerId: 숫자 }
+  typingUsers: {}, // { peerId: { nickname, timestamp } }
 
   setCurrentRoom: (room) => set({ currentRoom: room }),
 
@@ -44,6 +45,37 @@ const useChatStore = create((set) => ({
       unreadCounts: {
         ...state.unreadCounts,
         [peerId]: 0,
+      },
+    })),
+
+  setTyping: (peerId, nickname) =>
+    set((state) => ({
+      typingUsers: {
+        ...state.typingUsers,
+        [peerId]: { nickname, timestamp: Date.now() },
+      },
+    })),
+
+  clearExpiredTyping: () =>
+    set((state) => {
+      const now = Date.now()
+      const filtered = {}
+      for (const [key, value] of Object.entries(state.typingUsers)) {
+        if (now - value.timestamp < 3000) filtered[key] = value
+      }
+      return { typingUsers: filtered }
+    }),
+
+  removeGlobalMessage: (messageId) =>
+    set((state) => ({
+      globalMessages: state.globalMessages.filter((message) => message.id !== messageId),
+    })),
+
+  removeDMMessage: (peerId, messageId) =>
+    set((state) => ({
+      dmMessages: {
+        ...state.dmMessages,
+        [peerId]: (state.dmMessages[peerId] || []).filter((message) => message.id !== messageId),
       },
     })),
 }))

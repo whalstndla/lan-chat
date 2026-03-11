@@ -26,4 +26,8 @@ function getDMHistory(db, peerId1, peerId2, limit = 100) {
   `).all(peerId1, peerId2, peerId2, peerId1, limit).reverse()
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory }
+function deleteMessage(db, messageId, fromId) {
+  return db.prepare('DELETE FROM messages WHERE id = ? AND from_id = ?').run(messageId, fromId)
+}
+
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage }
