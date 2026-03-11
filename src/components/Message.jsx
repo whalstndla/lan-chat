@@ -1,9 +1,10 @@
 // src/components/Message.jsx
 import React, { useState, useEffect } from 'react'
-import { Paperclip, Trash2, X } from 'lucide-react'
+import { Paperclip, Trash2, X, Clock } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
+import usePeerStore from '../store/usePeerStore'
 
 // timestamp → "오후 2:30" 형식
 function formatTime(timestamp) {
@@ -15,7 +16,9 @@ function formatTime(timestamp) {
 
 export default function Message({ message }) {
   const myPeerId = useUserStore(state => state.myPeerId)
+  const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   const { removeGlobalMessage, removeDMMessage } = useChatStore()
+  const onlinePeers = usePeerStore(state => state.onlinePeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
   const [lightboxUrl, setLightboxUrl] = useState(null)
 
@@ -23,6 +26,11 @@ export default function Message({ message }) {
   const contentType = message.contentType || message.content_type
   const fileUrl = message.fileUrl || message.file_url
   const fileName = message.fileName || message.file_name
+  const senderId = message.fromId || message.from_id
+
+  // 발신자 아바타 URL 계산
+  const senderPeer = onlinePeers.find(p => p.peerId === senderId)
+  const avatarUrl = isMyMessage ? myProfileImageUrl : senderPeer?.profileImageUrl
 
   // Escape 키로 라이트박스 닫기
   useEffect(() => {
@@ -52,14 +60,24 @@ export default function Message({ message }) {
 
   return (
     <>
-      <div className={`flex gap-3 px-4 py-1.5 hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''}`}>
+      <div className={`flex gap-3 px-4 py-1.5 hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''}`}>
         {/* 아바타 */}
-        <div className="w-8 h-8 rounded bg-vsc-border flex items-center justify-center text-xs text-vsc-accent font-bold shrink-0 mt-0.5">
-          {sender?.[0]?.toUpperCase() || '?'}
+        <div className="relative w-8 h-8 shrink-0 mt-0.5">
+          <div className="w-8 h-8 rounded bg-vsc-border flex items-center justify-center text-xs text-vsc-accent font-bold">
+            {sender?.[0]?.toUpperCase() || '?'}
+          </div>
+          {avatarUrl && (
+            <img
+              src={avatarUrl}
+              alt={sender}
+              className="absolute inset-0 w-8 h-8 rounded object-cover"
+              onError={(e) => { e.target.style.display = 'none' }}
+            />
+          )}
         </div>
 
         <div className={`flex flex-col max-w-[70%] ${isMyMessage ? 'items-end' : ''}`}>
-          {/* 닉네임 + 시간 + 삭제 버튼 */}
+          {/* 닉네임 + 시간 + pending 아이콘 + 삭제 버튼 */}
           <div className="flex items-baseline gap-2 mb-0.5">
             <span className={`text-xs font-semibold ${isMyMessage ? 'text-vsc-accent' : 'text-vsc-text'}`}>
               {isMyMessage ? '나' : sender}
@@ -67,7 +85,10 @@ export default function Message({ message }) {
             <span className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity">
               {formatTime(message.timestamp)}
             </span>
-            {isMyMessage && (
+            {message.pending && (
+              <Clock size={11} className="text-vsc-muted" title="전송 대기 중" />
+            )}
+            {isMyMessage && !message.pending && (
               <button
                 onClick={handleDelete}
                 aria-label="메시지 삭제"

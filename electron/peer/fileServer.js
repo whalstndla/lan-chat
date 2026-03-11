@@ -5,10 +5,13 @@ const express = require('express')
 let serverInstance = null
 let filePort = 0
 
-function startFileServer(tempFolderPath) {
+function startFileServer(tempFolderPath, profileFolderPath) {
   return new Promise((resolve) => {
     const app = express()
     app.use('/files', express.static(tempFolderPath))
+    if (profileFolderPath) {
+      app.use('/profile', express.static(profileFolderPath))
+    }
     // http.createServer를 사용하여 listen 이전에 서버 인스턴스를 확보
     serverInstance = http.createServer(app)
     serverInstance.listen(0, () => {

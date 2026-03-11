@@ -39,4 +39,27 @@ function verifyPassword(db, username, password) {
   )
 }
 
-module.exports = { saveProfile, getProfile, verifyPassword }
+function updatePeerId(db, peerId) {
+  db.prepare('UPDATE profile SET peer_id = ? WHERE id = 1').run(peerId)
+}
+
+function updateLastLogin(db) {
+  db.prepare('UPDATE profile SET last_login_at = ? WHERE id = 1').run(Date.now())
+}
+
+function clearLastLogin(db) {
+  db.prepare('UPDATE profile SET last_login_at = NULL WHERE id = 1').run()
+}
+
+function updateNickname(db, nickname) {
+  db.prepare('UPDATE profile SET nickname = ? WHERE id = 1').run(nickname)
+}
+
+function updateProfileImage(db, imageName) {
+  db.prepare('UPDATE profile SET profile_image = ? WHERE id = 1').run(imageName)
+}
+
+module.exports = {
+  saveProfile, getProfile, verifyPassword,
+  updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
+}

@@ -47,4 +47,16 @@ function stopPeerDiscovery() {
   bonjourInstance = null
 }
 
-module.exports = { startPeerDiscovery, stopPeerDiscovery }
+// browse는 유지하고 서비스 공고만 재등록 (닉네임 변경 시 사용)
+function republishService({ nickname, peerId, wsPort, filePort }) {
+  if (!bonjourInstance) return
+  if (publishedService) publishedService.stop()
+  publishedService = bonjourInstance.publish({
+    name: `${nickname}__${peerId}`,
+    type: SERVICE_TYPE,
+    port: wsPort,
+    txt: { nickname, peerId, filePort: String(filePort) },
+  })
+}
+
+module.exports = { startPeerDiscovery, stopPeerDiscovery, republishService }

@@ -64,4 +64,11 @@ function getConnections() {
   return Array.from(connectionMap.keys())
 }
 
-module.exports = { connectToPeer, sendMessage, broadcastMessage, disconnectFromPeer, getConnections }
+function disconnectAll() {
+  connectionMap.forEach((socket) => {
+    socket.close()
+  })
+  connectionMap.clear()
+}
+
+module.exports = { connectToPeer, sendMessage, broadcastMessage, disconnectFromPeer, disconnectAll, getConnections }

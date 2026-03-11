@@ -67,18 +67,28 @@ function TitleBar({ nickname, updateState, onCheckUpdate }) {
 export default function App() {
   const { authStatus, authenticatedNickname, setAuthStatus } = useAuthStore()
   const { initialize } = useUserStore()
-  const { addPeer, removePeer } = usePeerStore()
-  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread, setTyping, clearExpiredTyping, removeGlobalMessage, removeDMMessage } = useChatStore()
+  const { addPeer, removePeer, updatePeerNickname, updatePeer } = usePeerStore()
+  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread, setTyping, clearExpiredTyping, removeGlobalMessage, removeDMMessage, clearPendingMessages } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
   // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
   const [updateState, setUpdateState] = useState('idle')
   const [downloadPercent, setDownloadPercent] = useState(0)
   const updateDownloadedRef = useRef(false)
 
-  // 업데이트 확인 완료 후 인증 화면으로 진행
+  // 업데이트 확인 완료 후 인증 화면으로 진행 (자동 로그인 체크 포함)
   const proceedToAuth = async () => {
     const hasProfile = await window.electronAPI.checkProfileExists()
-    setAuthStatus(hasProfile ? 'login' : 'setup')
+    if (!hasProfile) {
+      setAuthStatus('setup')
+      return
+    }
+    const result = await window.electronAPI.checkAutoLogin()
+    if (result.autoLogin) {
+      const { completeAuth } = useAuthStore.getState()
+      completeAuth(result.nickname)
+    } else {
+      setAuthStatus('login')
+    }
   }
 
   // 앱 시작 시 업데이트 확인 → 완료 후 인증 화면으로 전환
@@ -117,8 +127,8 @@ export default function App() {
     if (authStatus !== 'authenticated' || !authenticatedNickname) return
 
     const initChat = async () => {
-      const { peerId, nickname } = await window.electronAPI.getMyInfo()
-      initialize(peerId, nickname)
+      const { peerId, nickname, profileImageUrl } = await window.electronAPI.getMyInfo()
+      initialize(peerId, nickname, profileImageUrl)
 
       // 이전 채팅 기록 불러오기
       const history = await window.electronAPI.getGlobalHistory()
@@ -153,6 +163,25 @@ export default function App() {
 
       window.electronAPI.onTypingEvent((data) => {
         setTyping(data.fromId, data.from)
+      })
+
+      // 피어 닉네임 변경 이벤트
+      window.electronAPI.onPeerNicknameChanged(({ peerId: changedPeerId, nickname: newNickname }) => {
+        updatePeerNickname(changedPeerId, newNickname)
+        const { currentRoom, setCurrentRoom } = useChatStore.getState()
+        if (currentRoom.type === 'dm' && currentRoom.peerId === changedPeerId) {
+          setCurrentRoom({ ...currentRoom, nickname: newNickname })
+        }
+      })
+
+      // 피어 프로필 이미지 업데이트 이벤트
+      window.electronAPI.onPeerProfileUpdated(({ peerId: updatedPeerId, profileImageUrl: updatedImageUrl }) => {
+        updatePeer(updatedPeerId, { profileImageUrl: updatedImageUrl })
+      })
+
+      // 오프라인 메시지 전송 완료 이벤트
+      window.electronAPI.onPendingMessagesFlushed(({ targetPeerId, messageIds }) => {
+        clearPendingMessages(targetPeerId, messageIds)
       })
 
       window.electronAPI.subscribeToPeerDiscovery(addPeer)

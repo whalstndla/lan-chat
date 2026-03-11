@@ -3,12 +3,16 @@ const { app, BrowserWindow, ipcMain, Notification } = require('electron')
 const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
-const { initDatabase } = require('./storage/database')
+const { initDatabase, migrateDatabase } = require('./storage/database')
 const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage } = require('./storage/queries')
-const { saveProfile, getProfile, verifyPassword } = require('./storage/profile')
-const { startPeerDiscovery, stopPeerDiscovery } = require('./peer/discovery')
+const {
+  saveProfile, getProfile, verifyPassword,
+  updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
+} = require('./storage/profile')
+const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
+const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
 const { startWsServer, stopWsServer } = require('./peer/wsServer')
-const { connectToPeer, sendMessage, broadcastMessage, getConnections } = require('./peer/wsClient')
+const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
@@ -21,6 +25,7 @@ const isDev = !app.isPackaged
 // 앱 데이터 경로
 const appDataPath = app.getPath('userData')
 const tempFilePath = path.join(appDataPath, 'files')
+const profileFolderPath = path.join(appDataPath, 'profile')
 const dbPath = path.join(appDataPath, 'chat.db')
 
 let mainWindow = null
@@ -61,9 +66,68 @@ function checkAndNotifyUpdated() {
   } catch { /* 무시 */ }
 }
 
+// 오프라인 메시지를 대상 피어에게 전송
+async function flushPendingMessages(targetPeerId) {
+  const pendingList = getPendingMessages(database, targetPeerId)
+  if (pendingList.length === 0) return
+
+  const recipientPublicKey = peerPublicKeyMap.get(targetPeerId)
+  if (!recipientPublicKey) return
+
+  const currentNickname = getProfile(database)?.nickname || ''
+  const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
+  const flushedMessageIds = []
+
+  for (const pending of pendingList) {
+    const { messagePayload } = pending
+    try {
+      const encryptedPayload = encryptDM(
+        {
+          content: messagePayload.content,
+          contentType: messagePayload.contentType,
+          fileUrl: messagePayload.fileUrl,
+          fileName: messagePayload.fileName,
+        },
+        sharedSecret
+      )
+      const message = {
+        id: pending.id,
+        type: 'dm',
+        from: currentNickname,
+        fromId: peerId,
+        to: targetPeerId,
+        content: null,
+        contentType: messagePayload.contentType,
+        encryptedPayload,
+        fileUrl: null,
+        fileName: null,
+        timestamp: pending.created_at,
+      }
+      const sent = sendMessage(targetPeerId, message)
+      if (sent) {
+        deletePendingMessage(database, pending.id)
+        flushedMessageIds.push(pending.id)
+      }
+    } catch { /* 암호화 또는 전송 실패 시 무시 */ }
+  }
+
+  if (flushedMessageIds.length > 0) {
+    sendToRenderer('pending-messages-flushed', { targetPeerId, messageIds: flushedMessageIds })
+  }
+}
+
+// 내 프로필 이미지 URL 생성
+function buildMyProfileImageUrl() {
+  const profile = getProfile(database)
+  if (!profile?.profile_image) return null
+  return `http://${localIP}:${getFilePort()}/profile/${profile.profile_image}`
+}
+
 async function initApp() {
   // 임시 파일 폴더 생성
   if (!fs.existsSync(tempFilePath)) fs.mkdirSync(tempFilePath, { recursive: true })
+  // 프로필 이미지 폴더 생성
+  if (!fs.existsSync(profileFolderPath)) fs.mkdirSync(profileFolderPath, { recursive: true })
 
   // 업데이트 후 첫 실행 감지
   checkAndNotifyUpdated()
@@ -78,11 +142,8 @@ async function initApp() {
   myPrivateKey = privateKey
   myPublicKeyBase64 = exportPublicKey(publicKey)
 
-  // SQLite 초기화
-  database = initDatabase(dbPath)
-
-  // 파일 서버 시작
-  await startFileServer(tempFilePath)
+  // 파일 서버 시작 (파일 + 프로필 이미지 제공)
+  await startFileServer(tempFilePath, profileFolderPath)
 
   // wsServer/wsClient 공용 메시지 핸들러
   // reply: wsServer에서 온 경우 상대 소켓으로 응답, wsClient에서 온 경우 no-op
@@ -105,12 +166,28 @@ async function initApp() {
       return
     }
 
+    // 닉네임 변경 이벤트
+    if (message.type === 'nickname-changed') {
+      sendToRenderer('peer-nickname-changed', { peerId: message.fromId, nickname: message.nickname })
+      return
+    }
+
     // 키 교환 처리 — 내 키 즉시 reply + 역방향 연결 (mDNS 단방향 문제 해결)
     if (message.type === 'key-exchange') {
       try {
         const publicKeyObj = importPublicKey(message.publicKey)
         peerPublicKeyMap.set(message.fromId, publicKeyObj)
-        reply({ type: 'key-exchange', fromId: peerId, publicKey: myPublicKeyBase64 })
+        reply({
+          type: 'key-exchange',
+          fromId: peerId,
+          publicKey: myPublicKeyBase64,
+          profileImageUrl: buildMyProfileImageUrl(),
+        })
+
+        // 상대방 프로필 이미지 URL 업데이트
+        if (message.profileImageUrl !== undefined) {
+          sendToRenderer('peer-profile-updated', { peerId: message.fromId, profileImageUrl: message.profileImageUrl })
+        }
 
         // 상대방이 내 mDNS를 못 찾은 경우 — key-exchange의 host/wsPort로 역방향 연결
         if (message.host && message.wsPort && !getConnections().includes(message.fromId)) {
@@ -126,9 +203,13 @@ async function initApp() {
               host: message.host,
               wsPort: message.wsPort,
               filePort: message.filePort || 0,
+              profileImageUrl: message.profileImageUrl || null,
             })
           }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
         }
+
+        // 키 교환 완료 → 대기 중인 메시지 전송
+        flushPendingMessages(message.fromId)
       } catch {
         // 잘못된 공개키 무시
       }
@@ -206,7 +287,7 @@ async function initApp() {
 }
 
 // IPC 핸들러 등록
-function registerIpcHandlers(peerId, nickname) {
+function registerIpcHandlers(currentPeerId, defaultNickname) {
   // 프로필 존재 여부 확인 (앱 시작 시 첫 화면 결정용)
   ipcMain.handle('check-profile-exists', () => {
     return getProfile(database) !== null
@@ -222,6 +303,8 @@ function registerIpcHandlers(peerId, nickname) {
     }
     try {
       saveProfile(database, { username: username.trim(), nickname: nick.trim(), password })
+      updatePeerId(database, currentPeerId)
+      updateLastLogin(database)
       return { success: true }
     } catch (error) {
       return { success: false, error: error.message }
@@ -234,24 +317,47 @@ function registerIpcHandlers(peerId, nickname) {
     if (!isValid) return { success: false, error: '아이디 또는 비밀번호가 틀렸습니다.' }
 
     const profile = getProfile(database)
+    updateLastLogin(database)
     return { success: true, nickname: profile.nickname }
+  })
+
+  // 자동 로그인 확인 — last_login_at이 24시간 이내이면 자동 로그인
+  ipcMain.handle('check-auto-login', () => {
+    const profile = getProfile(database)
+    if (!profile?.last_login_at) return { autoLogin: false }
+    const elapsedMs = Date.now() - profile.last_login_at
+    const twentyFourHoursMs = 24 * 60 * 60 * 1000
+    if (elapsedMs < twentyFourHoursMs) {
+      updateLastLogin(database)
+      return { autoLogin: true, nickname: profile.nickname }
+    }
+    return { autoLogin: false }
+  })
+
+  // 로그아웃 — last_login_at 초기화 + 연결 종료
+  ipcMain.handle('logout', () => {
+    clearLastLogin(database)
+    stopPeerDiscovery()
+    disconnectAll()
+    peerPublicKeyMap.clear()
   })
 
   // 내 정보 조회 (프로필 닉네임 우선)
   ipcMain.handle('get-my-info', () => {
     const profile = getProfile(database)
     return {
-      peerId,
-      nickname: profile?.nickname || nickname,
+      peerId: currentPeerId,
+      nickname: profile?.nickname || defaultNickname,
+      profileImageUrl: buildMyProfileImageUrl(),
     }
   })
 
   // 피어 발견 시작 — 닉네임은 클로저의 값을 사용 (렌더러 파라미터 무시)
   ipcMain.handle('start-peer-discovery', (_event, _params) => {
-    const currentNickname = getProfile(database)?.nickname || nickname
+    const currentNickname = getProfile(database)?.nickname || defaultNickname
     startPeerDiscovery({
       nickname: currentNickname,
-      peerId,
+      peerId: currentPeerId,
       wsPort: wsServerInfo.port,
       filePort: getFilePort(),
       onPeerFound: async (peerInfo) => {
@@ -261,15 +367,16 @@ function registerIpcHandlers(peerId, nickname) {
           wsPort: peerInfo.wsPort,
           onMessage: handleIncomingMessage,
         })
-        // key-exchange에 내 접속 정보 포함 → 상대방이 역방향 연결 가능
+        // key-exchange에 내 접속 정보 + 프로필 이미지 포함
         sendMessage(peerInfo.peerId, {
           type: 'key-exchange',
-          fromId: peerId,
+          fromId: currentPeerId,
           publicKey: myPublicKeyBase64,
           nickname: currentNickname,
           host: localIP,
           wsPort: wsServerInfo.port,
           filePort: getFilePort(),
+          profileImageUrl: buildMyProfileImageUrl(),
         })
         sendToRenderer('peer-discovered', peerInfo)
       },
@@ -279,14 +386,51 @@ function registerIpcHandlers(peerId, nickname) {
     })
   })
 
+  // 닉네임 변경
+  ipcMain.handle('update-nickname', (_, newNickname) => {
+    if (!newNickname?.trim()) return { success: false, error: '닉네임을 입력해주세요.' }
+    try {
+      updateNickname(database, newNickname.trim())
+      republishService({
+        nickname: newNickname.trim(),
+        peerId: currentPeerId,
+        wsPort: wsServerInfo.port,
+        filePort: getFilePort(),
+      })
+      broadcastMessage({
+        type: 'nickname-changed',
+        fromId: currentPeerId,
+        nickname: newNickname.trim(),
+        timestamp: Date.now(),
+      })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
+  // 프로필 이미지 저장 — 항상 avatar.png로 저장
+  ipcMain.handle('save-profile-image', (_, imageBuffer) => {
+    try {
+      const imageName = 'avatar.png'
+      const savePath = path.join(profileFolderPath, imageName)
+      fs.writeFileSync(savePath, Buffer.from(new Uint8Array(imageBuffer)))
+      updateProfileImage(database, imageName)
+      const url = `http://${localIP}:${getFilePort()}/profile/${imageName}`
+      return { success: true, url }
+    } catch (error) {
+      return { success: false, error: error.message }
+    }
+  })
+
   // 전체채팅 메시지 전송
   ipcMain.handle('send-global-message', (_, { content, contentType, fileUrl, fileName }) => {
-    const currentNickname = getProfile(database)?.nickname || nickname
+    const currentNickname = getProfile(database)?.nickname || defaultNickname
     const message = {
       id: uuidv4(),
       type: 'message',
       from: currentNickname,
-      fromId: peerId,
+      fromId: currentPeerId,
       to: null,
       content: content || null,
       contentType,
@@ -308,10 +452,35 @@ function registerIpcHandlers(peerId, nickname) {
     return message
   })
 
-  // DM 전송 (E2E 암호화)
+  // DM 전송 (E2E 암호화, 오프라인이면 pending 큐에 저장)
   ipcMain.handle('send-dm', (_, { recipientPeerId, content, contentType, fileUrl, fileName }) => {
+    const currentNickname = getProfile(database)?.nickname || defaultNickname
+    const messageId = uuidv4()
+    const timestamp = Date.now()
+
     const recipientPublicKey = peerPublicKeyMap.get(recipientPeerId)
-    if (!recipientPublicKey) throw new Error('수신자 공개키 미수신 — 키 교환 완료 전')
+    if (!recipientPublicKey) {
+      // 오프라인 — 평문으로 pending 큐에 저장
+      savePendingMessage(database, {
+        id: messageId,
+        targetPeerId: recipientPeerId,
+        messagePayload: { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
+      })
+      // messages 테이블에 평문으로 저장 (히스토리 표시용)
+      saveMessage(database, {
+        id: messageId, type: 'dm',
+        from_id: currentPeerId, from_name: currentNickname,
+        to_id: recipientPeerId, content: content || null,
+        content_type: contentType, encrypted_payload: null,
+        file_url: fileUrl || null, file_name: fileName || null,
+        timestamp,
+      })
+      return {
+        id: messageId, type: 'dm', from: currentNickname, fromId: currentPeerId,
+        to: recipientPeerId, content: content || null, contentType,
+        fileUrl: fileUrl || null, fileName: fileName || null, timestamp, pending: true,
+      }
+    }
 
     const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
     const encryptedPayload = encryptDM(
@@ -319,43 +488,46 @@ function registerIpcHandlers(peerId, nickname) {
       sharedSecret
     )
 
-    const currentNickname = getProfile(database)?.nickname || nickname
     const message = {
-      id: uuidv4(),
-      type: 'dm',
-      from: currentNickname,
-      fromId: peerId,
-      to: recipientPeerId,
-      content: null,              // 평문은 네트워크로 전송하지 않음
-      contentType,
-      encryptedPayload,
-      fileUrl: null,
-      fileName: null,
-      timestamp: Date.now(),
+      id: messageId, type: 'dm', from: currentNickname, fromId: currentPeerId,
+      to: recipientPeerId, content: null, contentType, encryptedPayload,
+      fileUrl: null, fileName: null, timestamp,
     }
-    sendMessage(recipientPeerId, message)
+
+    const sent = sendMessage(recipientPeerId, message)
+
+    if (!sent) {
+      // 소켓은 있지만 연결 끊긴 경우 → pending 저장
+      savePendingMessage(database, {
+        id: messageId,
+        targetPeerId: recipientPeerId,
+        messagePayload: { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
+      })
+    }
 
     // 내 DB에는 암호문 저장
     saveMessage(database, {
       id: message.id, type: message.type,
       from_id: message.fromId, from_name: message.from,
       to_id: message.to, content: null,
-      content_type: contentType,
-      encrypted_payload: encryptedPayload,
+      content_type: contentType, encrypted_payload: encryptedPayload,
       file_url: fileUrl || null, file_name: fileName || null,
       timestamp: message.timestamp,
     })
 
-    // 렌더러에는 복호화된 내용으로 반환 (내가 방금 보낸 내용이므로 알고 있음)
-    return { ...message, content: content || null, fileUrl: fileUrl || null, fileName: fileName || null }
+    // 렌더러에는 복호화된 내용으로 반환
+    return {
+      ...message, content: content || null, fileUrl: fileUrl || null, fileName: fileName || null,
+      ...(sent ? {} : { pending: true }),
+    }
   })
 
   // 타이핑 인디케이터 전송
   ipcMain.handle('send-typing', (_, targetPeerId) => {
-    const currentNickname = getProfile(database)?.nickname || nickname
+    const currentNickname = getProfile(database)?.nickname || defaultNickname
     const typingMessage = {
       type: 'typing',
-      fromId: peerId,
+      fromId: currentPeerId,
       from: currentNickname,
       to: targetPeerId || null,
       timestamp: Date.now(),
@@ -369,12 +541,12 @@ function registerIpcHandlers(peerId, nickname) {
 
   // 메시지 삭제 (본인 메시지만)
   ipcMain.handle('delete-message', (_, { messageId, targetPeerId }) => {
-    deleteMessage(database, messageId, peerId)
-    const currentNickname = getProfile(database)?.nickname || nickname
+    deleteMessage(database, messageId, currentPeerId)
+    const currentNickname = getProfile(database)?.nickname || defaultNickname
     const deletePayload = {
       type: 'delete-message',
       messageId,
-      fromId: peerId,
+      fromId: currentPeerId,
       from: currentNickname,
       to: targetPeerId || null,
       timestamp: Date.now(),
@@ -425,12 +597,27 @@ function registerIpcHandlers(peerId, nickname) {
 }
 
 async function createWindow() {
-  peerId = uuidv4()
-  const nickname = os.userInfo().username // 기본값: OS 사용자명 (로그인 후 프로필 닉네임으로 대체)
+  // DB 먼저 초기화 (peerId 복원을 위해)
+  database = initDatabase(dbPath)
+  migrateDatabase(database)
+
+  // peerId 복원 또는 신규 생성
+  const existingProfile = getProfile(database)
+  if (existingProfile?.peer_id) {
+    peerId = existingProfile.peer_id
+  } else {
+    peerId = uuidv4()
+    // 프로필이 있으면 즉시 저장, 없으면 register 시 저장
+    if (existingProfile) {
+      updatePeerId(database, peerId)
+    }
+  }
+
+  const defaultNickname = os.userInfo().username // 기본값: OS 사용자명
 
   await initApp()
 
-  registerIpcHandlers(peerId, nickname)
+  registerIpcHandlers(peerId, defaultNickname)
 
   mainWindow = new BrowserWindow({
     width: 1000,

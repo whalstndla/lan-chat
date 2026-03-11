@@ -6,9 +6,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkProfileExists: () => ipcRenderer.invoke('check-profile-exists'),
   register: (data) => ipcRenderer.invoke('register', data),
   login: (data) => ipcRenderer.invoke('login', data),
+  checkAutoLogin: () => ipcRenderer.invoke('check-auto-login'),
+  logout: () => ipcRenderer.invoke('logout'),
 
   // 내 정보
   getMyInfo: () => ipcRenderer.invoke('get-my-info'),
+
+  // 프로필 관리
+  updateNickname: (nickname) => ipcRenderer.invoke('update-nickname', nickname),
+  saveProfileImage: (imageBuffer) => ipcRenderer.invoke('save-profile-image', imageBuffer),
 
   // 피어 발견
   startPeerDiscovery: () => ipcRenderer.invoke('start-peer-discovery'),
@@ -35,6 +41,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   subscribeToPeerDiscovery: (callback) => ipcRenderer.on('peer-discovered', (_, peerInfo) => callback(peerInfo)),
   subscribeToPeerLeft: (callback) => ipcRenderer.on('peer-left', (_, peerId) => callback(peerId)),
   onTypingEvent: (callback) => ipcRenderer.on('typing-event', (_, data) => callback(data)),
+  onPeerNicknameChanged: (callback) => ipcRenderer.on('peer-nickname-changed', (_, data) => callback(data)),
+  onPeerProfileUpdated: (callback) => ipcRenderer.on('peer-profile-updated', (_, data) => callback(data)),
+  onPendingMessagesFlushed: (callback) => ipcRenderer.on('pending-messages-flushed', (_, data) => callback(data)),
 
   // 이벤트 구독 해제
   unsubscribeAll: () => {
@@ -42,6 +51,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-discovered')
     ipcRenderer.removeAllListeners('peer-left')
     ipcRenderer.removeAllListeners('typing-event')
+    ipcRenderer.removeAllListeners('peer-nickname-changed')
+    ipcRenderer.removeAllListeners('peer-profile-updated')
+    ipcRenderer.removeAllListeners('pending-messages-flushed')
   },
 
   // 자동 업데이트

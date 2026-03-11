@@ -1,6 +1,6 @@
 // src/components/SetupScreen.jsx
-import React, { useState } from 'react'
-import { Eye, EyeOff } from 'lucide-react'
+import React, { useState, useRef } from 'react'
+import { Eye, EyeOff, Camera } from 'lucide-react'
 import logoImage from '../assets/logo.png'
 import useAuthStore from '../store/useAuthStore'
 
@@ -13,7 +13,19 @@ export default function SetupScreen() {
   const [showPasswordConfirm, setShowPasswordConfirm] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [profileImageBuffer, setProfileImageBuffer] = useState(null)
+  const [profileImagePreview, setProfileImagePreview] = useState(null)
+  const fileInputRef = useRef(null)
   const { completeAuth } = useAuthStore()
+
+  async function handleImageSelect(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const buffer = await file.arrayBuffer()
+    setProfileImageBuffer(new Uint8Array(buffer))
+    setProfileImagePreview(URL.createObjectURL(file))
+    event.target.value = ''
+  }
 
   async function handleRegister() {
     setErrorMessage('')
@@ -33,11 +45,15 @@ export default function SetupScreen() {
 
     setIsLoading(true)
     const result = await window.electronAPI.register({ username: username.trim(), nickname: nickname.trim(), password })
-    setIsLoading(false)
 
     if (result.success) {
+      if (profileImageBuffer) {
+        await window.electronAPI.saveProfileImage(profileImageBuffer)
+      }
+      setIsLoading(false)
       completeAuth(nickname.trim())
     } else {
+      setIsLoading(false)
       setErrorMessage(result.error)
     }
   }
@@ -53,7 +69,33 @@ export default function SetupScreen() {
             <img src={logoImage} alt="LAN Chat" className="w-8 h-8 object-contain" />
             <h1 className="text-vsc-text text-lg font-semibold">LAN Chat</h1>
           </div>
-          <p className="text-vsc-muted text-xs mb-5">처음 실행되었습니다. 프로필을 설정해주세요.</p>
+          <p className="text-vsc-muted text-xs mb-4">처음 실행되었습니다. 프로필을 설정해주세요.</p>
+
+          {/* 프로필 이미지 선택 */}
+          <div className="flex justify-center mb-4">
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="relative cursor-pointer group"
+            >
+              <div className="w-16 h-16 rounded-full overflow-hidden bg-vsc-border flex items-center justify-center">
+                {profileImagePreview ? (
+                  <img src={profileImagePreview} alt="프로필 미리보기" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-vsc-muted text-2xl select-none">+</span>
+                )}
+              </div>
+              <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Camera size={16} className="text-white" />
+              </div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+          </div>
 
           <div className="space-y-3">
             <div>

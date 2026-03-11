@@ -78,6 +78,26 @@ const useChatStore = create((set) => ({
         [peerId]: (state.dmMessages[peerId] || []).filter((message) => message.id !== messageId),
       },
     })),
+
+  // pending 플래그 제거 (오프라인 메시지 전송 완료 시)
+  clearPendingMessages: (peerId, messageIds) =>
+    set((state) => ({
+      dmMessages: {
+        ...state.dmMessages,
+        [peerId]: (state.dmMessages[peerId] || []).map(msg =>
+          messageIds.includes(msg.id) ? { ...msg, pending: false } : msg
+        ),
+      },
+    })),
+
+  // 로그아웃 시 채팅 상태 초기화
+  resetAll: () => set({
+    currentRoom: { type: 'global' },
+    globalMessages: [],
+    dmMessages: {},
+    unreadCounts: {},
+    typingUsers: {},
+  }),
 }))
 
 export default useChatStore
