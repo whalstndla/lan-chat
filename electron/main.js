@@ -698,7 +698,7 @@ ipcMain.handle('install-update', () => {
         `TEMP_DIR="${tempDir}"`,
         `mkdir -p "$TEMP_DIR"`,
         `unzip -o "${downloadedUpdateFile}" -d "$TEMP_DIR"`,
-        `APP=$(find "$TEMP_DIR" -name "*.app" -maxdepth 1 | head -1)`,
+        `APP=$(find "$TEMP_DIR" -name "*.app" | head -1)`,
         `if [ -n "$APP" ]; then`,
         `  rm -rf "${appBundlePath}"`,
         `  ditto "$APP" "${appBundlePath}"`,
@@ -709,26 +709,52 @@ ipcMain.handle('install-update', () => {
         `rm -f "${scriptPath}"`,
       ].join('\n')
 
-      fs.writeFileSync(scriptPath, script, { mode: 0o755 })
-      const child = spawn('bash', [scriptPath], {
-        detached: true,
-        stdio: 'ignore',
-      })
-      child.unref()
-      setTimeout(() => app.quit(), 500)
-      return
+      try {
+        fs.writeFileSync(scriptPath, script, { mode: 0o755 })
+        const child = spawn('bash', [scriptPath], {
+          detached: true,
+          stdio: 'ignore',
+        })
+        // 오류 이벤트 핸들러 등록 — 없으면 unhandled error로 main process crash
+        child.on('error', (err) => {
+          console.error('[install-update] 스크립트 실행 오류:', err.message)
+        })
+        child.unref()
+        setTimeout(() => app.quit(), 500)
+        return
+      } catch (err) {
+        console.error('[install-update] 스크립트 쓰기/실행 실패, fallback으로 전환:', err.message)
+      }
     }
   }
 
-  autoUpdater.quitAndInstall(false, true)
+  // macOS shell script 방식이 불가한 경우 fallback
+  try {
+    autoUpdater.quitAndInstall(false, true)
+  } catch (err) {
+    console.error('[install-update] quitAndInstall 실패, 강제 종료:', err.message)
+    setTimeout(() => app.quit(), 500)
+  }
 })
 
 app.whenReady().then(createWindow)
 
+// cleanup 중복 실행 방지 플래그
+let hasCleanedUp = false
+
+function performCleanup() {
+  if (hasCleanedUp) return
+  hasCleanedUp = true
+  try { stopPeerDiscovery() } catch { /* 무시 */ }
+  try { stopFileServer() } catch { /* 무시 */ }
+  try { if (wsServerInfo) stopWsServer(wsServerInfo) } catch { /* 무시 */ }
+  try { if (database) database.close() } catch { /* 무시 */ }
+}
+
+// before-quit: app.quit()가 어디서 호출되든 cleanup 실행
+app.on('before-quit', performCleanup)
+
 app.on('window-all-closed', () => {
-  stopPeerDiscovery()
-  stopFileServer()
-  if (wsServerInfo) stopWsServer(wsServerInfo)
-  if (database) database.close()
+  // macOS에서 창을 모두 닫아도 앱이 유지되는 기본 동작 방지
   app.quit()
 })

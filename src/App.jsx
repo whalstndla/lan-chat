@@ -106,8 +106,10 @@ export default function App() {
       if (!updateDownloadedRef.current) proceedToAuth()
     })
     window.electronAPI.onUpdateError(() => {
+      // 다운로드 완료 후 발생하는 후속 에러는 무시 (downloaded 상태 유지)
+      if (updateDownloadedRef.current) return
       setUpdateState('error')
-      if (!updateDownloadedRef.current) proceedToAuth()
+      proceedToAuth()
     })
 
     window.electronAPI.checkForUpdates()
