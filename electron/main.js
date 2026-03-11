@@ -13,6 +13,7 @@ const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileSer
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
 const fs = require('fs')
+const { exec } = require('child_process')
 const { autoUpdater } = require('electron-updater')
 
 const isDev = !app.isPackaged
@@ -26,6 +27,7 @@ let mainWindow = null
 let database = null
 let wsServerInfo = null
 let peerId = null                       // 내 피어 ID (createWindow에서 초기화)
+let downloadedUpdateFile = null         // 다운로드된 업데이트 파일 경로
 let myPrivateKey = null                 // 내 ECDH 개인키
 let myPublicKeyBase64 = null            // 네트워크 전송용 공개키
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
@@ -371,7 +373,8 @@ function setupAutoUpdater() {
     sendToRenderer('update-not-available')
   })
 
-  autoUpdater.on('update-downloaded', () => {
+  autoUpdater.on('update-downloaded', (info) => {
+    downloadedUpdateFile = info.downloadedFile
     sendToRenderer('update-downloaded')
   })
 
@@ -390,8 +393,42 @@ ipcMain.handle('check-for-updates', () => {
 })
 
 // 업데이트 설치 IPC 핸들러
+// macOS: ad-hoc 서명 앱은 Squirrel.Mac이 파일 교체를 거부하므로 shell script로 직접 교체
 ipcMain.handle('install-update', () => {
-  autoUpdater.quitAndInstall()
+  if (process.platform === 'darwin' && downloadedUpdateFile && fs.existsSync(downloadedUpdateFile)) {
+    const exePath = app.getPath('exe')
+    const appBundlePath = exePath.includes('/Contents/MacOS/')
+      ? exePath.split('/Contents/MacOS/')[0]
+      : null
+
+    if (appBundlePath) {
+      const tempDir = path.join(os.tmpdir(), `lan-chat-update-${Date.now()}`)
+      const scriptPath = path.join(os.tmpdir(), 'lan-chat-update.sh')
+
+      const script = [
+        '#!/bin/bash',
+        'sleep 1',
+        `TEMP_DIR="${tempDir}"`,
+        `mkdir -p "$TEMP_DIR"`,
+        `unzip -o "${downloadedUpdateFile}" -d "$TEMP_DIR"`,
+        `APP=$(find "$TEMP_DIR" -name "*.app" -maxdepth 1 | head -1)`,
+        `if [ -n "$APP" ]; then`,
+        `  rm -rf "${appBundlePath}"`,
+        `  ditto "$APP" "${appBundlePath}"`,
+        `  open "${appBundlePath}"`,
+        `fi`,
+        `rm -rf "$TEMP_DIR"`,
+        `rm -f "${scriptPath}"`,
+      ].join('\n')
+
+      fs.writeFileSync(scriptPath, script, { mode: 0o755 })
+      exec(`bash "${scriptPath}"`, { detached: true })
+      setTimeout(() => app.quit(), 300)
+      return
+    }
+  }
+
+  autoUpdater.quitAndInstall(false, true)
 })
 
 app.whenReady().then(createWindow)
