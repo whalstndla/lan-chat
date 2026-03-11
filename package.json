@@ -1,6 +1,6 @@
 {
   "name": "lan-chat",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "",
   "main": "electron/main.js",
   "scripts": {

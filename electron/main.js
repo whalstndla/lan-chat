@@ -35,7 +35,9 @@ let handleIncomingMessage = null       // wsServer/wsClient 공용 메시지 핸
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
 
 function sendToRenderer(channel, data) {
-  if (mainWindow) mainWindow.webContents.send(channel, data)
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send(channel, data)
+  }
 }
 
 function showNotification(title, body) {
