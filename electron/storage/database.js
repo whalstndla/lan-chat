@@ -44,6 +44,9 @@ function migrateDatabase(db) {
     'ALTER TABLE profile ADD COLUMN peer_id TEXT',
     'ALTER TABLE profile ADD COLUMN profile_image TEXT',
     'ALTER TABLE profile ADD COLUMN last_login_at INTEGER',
+    "ALTER TABLE profile ADD COLUMN notification_sound TEXT DEFAULT 'notification1'",
+    'ALTER TABLE profile ADD COLUMN notification_volume REAL DEFAULT 0.7',
+    'ALTER TABLE profile ADD COLUMN notification_custom_sound TEXT',
   ]
   for (const sql of profileMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }

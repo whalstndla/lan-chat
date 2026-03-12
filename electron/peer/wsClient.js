@@ -6,10 +6,15 @@ const connectionMap = new Map()
 
 function connectToPeer({ peerId, host, wsPort, onMessage }) {
   return new Promise((resolve, reject) => {
-    // 이미 연결되어 있으면 재연결 없이 바로 반환
-    if (connectionMap.has(peerId)) {
-      resolve()
-      return
+    const existingSocket = connectionMap.get(peerId)
+    if (existingSocket) {
+      if (existingSocket.readyState === WebSocket.OPEN) {
+        // 정상 연결 중이면 재연결 불필요
+        resolve()
+        return
+      }
+      // CLOSING/CLOSED 좀비 소켓 정리 후 재연결
+      connectionMap.delete(peerId)
     }
 
     const socket = new WebSocket(`ws://${host}:${wsPort}`)

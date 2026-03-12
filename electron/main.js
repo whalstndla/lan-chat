@@ -1,13 +1,14 @@
 // electron/main.js
-const { app, BrowserWindow, ipcMain, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, Notification, shell } = require('electron')
 const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
 const { initDatabase, migrateDatabase } = require('./storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage } = require('./storage/queries')
+const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers } = require('./storage/queries')
 const {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
+  getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound,
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
@@ -48,6 +49,13 @@ function sendToRenderer(channel, data) {
 function showNotification(title, body) {
   if (!Notification.isSupported()) return
   new Notification({ title, body: body?.slice(0, 100) || '' }).show()
+}
+
+// 창이 비활성화 상태일 때 렌더러에 소리 재생 요청
+function playNotificationSound() {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
+    sendToRenderer('play-notification-sound')
+  }
 }
 
 // 업데이트 후 첫 실행 감지 — 이전 버전과 현재 버전 비교
@@ -177,10 +185,15 @@ async function initApp() {
       try {
         const publicKeyObj = importPublicKey(message.publicKey)
         peerPublicKeyMap.set(message.fromId, publicKeyObj)
+        const currentNicknameForReply = getProfile(database)?.nickname || ''
         reply({
           type: 'key-exchange',
           fromId: peerId,
           publicKey: myPublicKeyBase64,
+          nickname: currentNicknameForReply,
+          host: localIP,
+          wsPort: wsServerInfo.port,
+          filePort: getFilePort(),
           profileImageUrl: buildMyProfileImageUrl(),
         })
 
@@ -244,6 +257,7 @@ async function initApp() {
             `${message.from || '알 수 없음'} (DM)`,
             decryptedPayload.content || '파일을 보냈습니다.'
           )
+          playNotificationSound()
         }
 
         sendToRenderer('message-received', {
@@ -277,6 +291,7 @@ async function initApp() {
         message.from || '알 수 없음',
         message.content || '파일을 보냈습니다.'
       )
+      playNotificationSound()
     }
 
     sendToRenderer('message-received', message)
@@ -335,9 +350,9 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   })
 
   // 로그아웃 — last_login_at 초기화 + 연결 종료
-  ipcMain.handle('logout', () => {
+  ipcMain.handle('logout', async () => {
     clearLastLogin(database)
-    stopPeerDiscovery()
+    await stopPeerDiscovery()
     disconnectAll()
     peerPublicKeyMap.clear()
   })
@@ -352,8 +367,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     }
   })
 
-  // 피어 발견 시작 — 닉네임은 클로저의 값을 사용 (렌더러 파라미터 무시)
-  ipcMain.handle('start-peer-discovery', (_event, _params) => {
+  // 피어 발견 시작 — 기존 인스턴스 정리 후 재시작 (Cmd+R 등 재호출 시 Bonjour 좀비 방지)
+  ipcMain.handle('start-peer-discovery', async (_event, _params) => {
+    await stopPeerDiscovery()
+    disconnectAll()
+    peerPublicKeyMap.clear()
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     startPeerDiscovery({
       nickname: currentNickname,
@@ -361,12 +379,17 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       wsPort: wsServerInfo.port,
       filePort: getFilePort(),
       onPeerFound: async (peerInfo) => {
-        await connectToPeer({
-          peerId: peerInfo.peerId,
-          host: peerInfo.host,
-          wsPort: peerInfo.wsPort,
-          onMessage: handleIncomingMessage,
-        })
+        try {
+          await connectToPeer({
+            peerId: peerInfo.peerId,
+            host: peerInfo.host,
+            wsPort: peerInfo.wsPort,
+            onMessage: handleIncomingMessage,
+          })
+        } catch {
+          // 연결 실패 시 무시 (상대방이 아직 서버를 준비 중일 수 있음)
+          return
+        }
         // key-exchange에 내 접속 정보 + 프로필 이미지 포함
         sendMessage(peerInfo.peerId, {
           type: 'key-exchange',
@@ -585,6 +608,24 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     })
   })
 
+  // 과거 DM 상대 목록 조회 (오프라인 포함)
+  ipcMain.handle('get-dm-peers', () => getDMPeers(database, currentPeerId))
+
+  // 알림 설정 조회
+  ipcMain.handle('get-notification-settings', () =>
+    getNotificationSettings(database, appDataPath)
+  )
+
+  // 알림 설정 저장
+  ipcMain.handle('save-notification-settings', (_, { sound, volume }) => {
+    saveNotificationSettings(database, { sound, volume })
+  })
+
+  // 커스텀 사운드 파일 저장
+  ipcMain.handle('save-custom-notification-sound', (_, { buffer, extension }) => {
+    saveCustomNotificationSound(database, appDataPath, buffer, extension)
+  })
+
   // 파일 임시 저장 후 URL 반환
   // 주의: Electron IPC에서 ArrayBuffer는 Uint8Array로 전달해야 안전하게 직렬화됨
   ipcMain.handle('save-file', (_, { fileBuffer, fileName }) => {
@@ -669,6 +710,13 @@ function setupAutoUpdater() {
     sendToRenderer('update-error', error.message)
   })
 }
+
+// 외부 링크 IPC 핸들러 — http/https URL만 OS 기본 브라우저로 열기
+ipcMain.handle('open-external', (_, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+    shell.openExternal(url)
+  }
+})
 
 // 업데이트 확인 IPC 핸들러 — dev에서는 즉시 not-available 반환
 ipcMain.handle('check-for-updates', () => {

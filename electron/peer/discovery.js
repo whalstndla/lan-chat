@@ -40,11 +40,21 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
   })
 }
 
-function stopPeerDiscovery() {
-  if (publishedService) publishedService.stop()
-  if (browseInstance) browseInstance.stop()
-  if (bonjourInstance) bonjourInstance.destroy()
-  bonjourInstance = null
+async function stopPeerDiscovery() {
+  if (publishedService) {
+    publishedService.stop()
+    publishedService = null
+  }
+  if (browseInstance) {
+    browseInstance.stop()
+    browseInstance = null
+  }
+  if (bonjourInstance) {
+    bonjourInstance.destroy()
+    bonjourInstance = null
+  }
+  // mDNS goodbye 패킷이 네트워크에 전파될 때까지 대기
+  await new Promise(resolve => setTimeout(resolve, 500))
 }
 
 // browse는 유지하고 서비스 공고만 재등록 (닉네임 변경 시 사용)

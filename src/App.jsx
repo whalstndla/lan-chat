@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import logoImage from './assets/logo.png'
 import useAuthStore from './store/useAuthStore'
 import useUserStore from './store/useUserStore'
+import useNotificationSound from './hooks/useNotificationSound'
 import usePeerStore from './store/usePeerStore'
 import useChatStore from './store/useChatStore'
 import SetupScreen from './components/SetupScreen'
@@ -67,7 +68,9 @@ function TitleBar({ nickname, updateState, onCheckUpdate }) {
 export default function App() {
   const { authStatus, authenticatedNickname, setAuthStatus } = useAuthStore()
   const { initialize } = useUserStore()
-  const { addPeer, removePeer, updatePeerNickname, updatePeer } = usePeerStore()
+  const { addPeer, removePeer, updatePeerNickname, updatePeer, setPastDMPeers, addPastDMPeer } = usePeerStore()
+  const { setNotificationSettings } = useUserStore()
+  const { play: playNotification } = useNotificationSound()
   const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread, setTyping, clearExpiredTyping, removeGlobalMessage, removeDMMessage, clearPendingMessages } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
   // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
@@ -136,16 +139,25 @@ export default function App() {
       const history = await window.electronAPI.getGlobalHistory()
       setGlobalHistory(history)
 
-      // 피어 발견 시작
-      await window.electronAPI.startPeerDiscovery()
+      // 과거 DM 상대 목록 불러오기 (오프라인이어도 사이드바에 표시)
+      const dmPeers = await window.electronAPI.getDMPeers()
+      setPastDMPeers(dmPeers)
 
-      // 이벤트 구독
+      // 알림 설정 불러오기
+      const notificationSettings = await window.electronAPI.getNotificationSettings()
+      setNotificationSettings(notificationSettings)
+
+      // 이벤트 구독 — 피어 발견 시작 전에 등록해야 race condition 방지
       window.electronAPI.subscribeToMessages((message) => {
         if (message.type === 'message') {
           addGlobalMessage(message)
         } else if (message.type === 'dm') {
           const senderId = message.fromId === peerId ? message.to : message.fromId
           addDMMessage(senderId, message)
+
+          // 처음 DM을 나누는 상대면 과거 목록에 추가
+          const senderPeer = usePeerStore.getState().onlinePeers.find(p => p.peerId === senderId)
+          if (senderPeer) addPastDMPeer({ peerId: senderId, nickname: senderPeer.nickname })
 
           // 현재 보고 있지 않은 DM방이면 안읽은 수 증가
           const { currentRoom } = useChatStore.getState()
@@ -188,6 +200,13 @@ export default function App() {
 
       window.electronAPI.subscribeToPeerDiscovery(addPeer)
       window.electronAPI.subscribeToPeerLeft(removePeer)
+
+      window.electronAPI.onPlayNotificationSound(() => {
+        playNotification()
+      })
+
+      // 피어 발견 시작 — 구독 등록 후 시작해야 race condition 방지
+      await window.electronAPI.startPeerDiscovery()
     }
 
     initChat()

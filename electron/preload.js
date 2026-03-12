@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 기록 조회
   getGlobalHistory: () => ipcRenderer.invoke('get-global-history'),
   getDMHistory: (peerId1, peerId2) => ipcRenderer.invoke('get-dm-history', { peerId1, peerId2 }),
+  getDMPeers: () => ipcRenderer.invoke('get-dm-peers'),
 
   // 파일 저장 — ArrayBuffer를 Uint8Array로 변환 후 전송 (IPC 직렬화 안전)
   saveFile: (fileBuffer, fileName) => ipcRenderer.invoke('save-file', { fileBuffer: new Uint8Array(fileBuffer), fileName }),
@@ -36,14 +37,35 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 메시지 삭제
   deleteMessage: (messageId, targetPeerId) => ipcRenderer.invoke('delete-message', { messageId, targetPeerId }),
 
-  // 이벤트 구독
-  subscribeToMessages: (callback) => ipcRenderer.on('message-received', (_, message) => callback(message)),
-  subscribeToPeerDiscovery: (callback) => ipcRenderer.on('peer-discovered', (_, peerInfo) => callback(peerInfo)),
-  subscribeToPeerLeft: (callback) => ipcRenderer.on('peer-left', (_, peerId) => callback(peerId)),
-  onTypingEvent: (callback) => ipcRenderer.on('typing-event', (_, data) => callback(data)),
-  onPeerNicknameChanged: (callback) => ipcRenderer.on('peer-nickname-changed', (_, data) => callback(data)),
-  onPeerProfileUpdated: (callback) => ipcRenderer.on('peer-profile-updated', (_, data) => callback(data)),
-  onPendingMessagesFlushed: (callback) => ipcRenderer.on('pending-messages-flushed', (_, data) => callback(data)),
+  // 이벤트 구독 — 중복 등록 방지를 위해 기존 리스너 제거 후 재등록
+  subscribeToMessages: (callback) => {
+    ipcRenderer.removeAllListeners('message-received')
+    ipcRenderer.on('message-received', (_, message) => callback(message))
+  },
+  subscribeToPeerDiscovery: (callback) => {
+    ipcRenderer.removeAllListeners('peer-discovered')
+    ipcRenderer.on('peer-discovered', (_, peerInfo) => callback(peerInfo))
+  },
+  subscribeToPeerLeft: (callback) => {
+    ipcRenderer.removeAllListeners('peer-left')
+    ipcRenderer.on('peer-left', (_, peerId) => callback(peerId))
+  },
+  onTypingEvent: (callback) => {
+    ipcRenderer.removeAllListeners('typing-event')
+    ipcRenderer.on('typing-event', (_, data) => callback(data))
+  },
+  onPeerNicknameChanged: (callback) => {
+    ipcRenderer.removeAllListeners('peer-nickname-changed')
+    ipcRenderer.on('peer-nickname-changed', (_, data) => callback(data))
+  },
+  onPeerProfileUpdated: (callback) => {
+    ipcRenderer.removeAllListeners('peer-profile-updated')
+    ipcRenderer.on('peer-profile-updated', (_, data) => callback(data))
+  },
+  onPendingMessagesFlushed: (callback) => {
+    ipcRenderer.removeAllListeners('pending-messages-flushed')
+    ipcRenderer.on('pending-messages-flushed', (_, data) => callback(data))
+  },
 
   // 이벤트 구독 해제
   unsubscribeAll: () => {
@@ -54,6 +76,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-nickname-changed')
     ipcRenderer.removeAllListeners('peer-profile-updated')
     ipcRenderer.removeAllListeners('pending-messages-flushed')
+    ipcRenderer.removeAllListeners('play-notification-sound')
+  },
+
+  // 외부 링크 열기
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
+  // 알림 설정
+  getNotificationSettings: () => ipcRenderer.invoke('get-notification-settings'),
+  saveNotificationSettings: (settings) => ipcRenderer.invoke('save-notification-settings', settings),
+  saveCustomNotificationSound: (buffer, extension) =>
+    ipcRenderer.invoke('save-custom-notification-sound', { buffer: new Uint8Array(buffer), extension }),
+
+  // 알림 소리 재생 이벤트
+  onPlayNotificationSound: (callback) => {
+    ipcRenderer.removeAllListeners('play-notification-sound')
+    ipcRenderer.on('play-notification-sound', () => callback())
   },
 
   // 자동 업데이트

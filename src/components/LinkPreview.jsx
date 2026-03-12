@@ -18,8 +18,7 @@ export function parseLinksInText(text) {
           className="text-vsc-accent underline hover:opacity-80"
           onClick={(event) => {
             event.preventDefault()
-            // Electron에서 외부 링크는 shell.openExternal로 열어야 함
-            window.open(part)
+            window.electronAPI.openExternal(part)
           }}
         >
           {part}

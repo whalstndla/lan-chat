@@ -5,23 +5,29 @@ import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import SettingsPanel from './SettingsPanel'
 
-// 피어 아바타: 이미지 로드 성공 시 이미지, 실패 시 이니셜 표시
-function PeerAvatar({ peer, size = 5 }) {
-  const sizeClass = `w-${size} h-${size}`
-  const textSize = size <= 5 ? 'text-[9px]' : 'text-sm'
+// 피어 아바타: 이미지 로드 성공 시 이미지, 실패 시 이니셜 표시 + 온라인 상태 dot
+function PeerAvatar({ peer, isOnline }) {
   return (
-    <div className={`relative ${sizeClass} shrink-0`}>
-      <div className={`${sizeClass} rounded-full bg-vsc-border flex items-center justify-center ${textSize} text-vsc-accent font-bold`}>
+    <div className="relative w-5 h-5 shrink-0">
+      {/* 이니셜 배경 */}
+      <div className="w-5 h-5 rounded-full bg-vsc-border overflow-hidden flex items-center justify-center text-[9px] text-vsc-accent font-bold">
         {peer.nickname?.[0]?.toUpperCase() || '?'}
       </div>
+      {/* 프로필 이미지 — 이니셜 위에 덮어씌움 */}
       {peer.profileImageUrl && (
         <img
           src={peer.profileImageUrl}
           alt={peer.nickname}
-          className={`absolute inset-0 ${sizeClass} rounded-full object-cover`}
+          className="absolute inset-0 w-5 h-5 rounded-full object-cover"
           onError={(e) => { e.target.style.display = 'none' }}
         />
       )}
+      {/* 온라인 상태 dot */}
+      <span
+        className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-vsc-sidebar ${
+          isOnline ? 'bg-green-400' : 'bg-vsc-muted'
+        }`}
+      />
     </div>
   )
 }
@@ -30,6 +36,11 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const onlinePeers = usePeerStore(state => state.onlinePeers)
+  const pastDMPeers = usePeerStore(state => state.pastDMPeers)
+
+  // 온라인 피어 + 오프라인 과거 DM 상대 병합 (온라인 우선)
+  const onlinePeerIds = new Set(onlinePeers.map(p => p.peerId))
+  const offlinePastPeers = pastDMPeers.filter(p => !onlinePeerIds.has(p.peerId))
   const { currentRoom, setCurrentRoom } = useChatStore()
   const unreadCounts = useChatStore(state => state.unreadCounts)
 
@@ -56,19 +67,20 @@ export default function Sidebar() {
           <Hash size={14} />
         </button>
 
-        {onlinePeers.map((peer) => {
+        {[...onlinePeers, ...offlinePastPeers].map((peer) => {
           const isSelected = currentRoom.type === 'dm' && currentRoom.peerId === peer.peerId
           const hasUnread = unreadCounts[peer.peerId] > 0
+          const isOnline = onlinePeerIds.has(peer.peerId)
           return (
             <button
               key={peer.peerId}
               onClick={() => setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
-              title={peer.nickname}
+              title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}`}
               className={`cursor-pointer relative p-1.5 rounded transition-colors ${
                 isSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
               }`}
             >
-              <PeerAvatar peer={peer} size={5} />
+              <PeerAvatar peer={peer} isOnline={isOnline} />
               {hasUnread && (
                 <span className="absolute top-0 right-0 w-2 h-2 bg-vsc-accent rounded-full" />
               )}
@@ -119,16 +131,17 @@ export default function Sidebar() {
 
           <div className="px-2 py-2 flex-1 overflow-y-auto">
             <p className="text-vsc-muted text-xs px-2 py-1 mb-1 uppercase tracking-wider">
-              DM ({onlinePeers.length})
+              DM ({onlinePeers.length}/{onlinePeers.length + offlinePastPeers.length})
             </p>
-            {onlinePeers.length === 0 ? (
+            {onlinePeers.length === 0 && offlinePastPeers.length === 0 ? (
               <div className="flex items-center gap-2 px-3 py-1.5 text-vsc-muted">
                 <Wifi size={13} className="opacity-40" />
                 <span className="text-xs">대기 중...</span>
               </div>
             ) : (
-              onlinePeers.map((peer) => {
+              [...onlinePeers, ...offlinePastPeers].map((peer) => {
                 const isSelected = currentRoom.type === 'dm' && currentRoom.peerId === peer.peerId
+                const isOnline = onlinePeerIds.has(peer.peerId)
                 return (
                   <button
                     key={peer.peerId}
@@ -139,8 +152,8 @@ export default function Sidebar() {
                         : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
                     }`}
                   >
-                    <PeerAvatar peer={peer} size={5} />
-                    <span className="truncate">{peer.nickname}</span>
+                    <PeerAvatar peer={peer} isOnline={isOnline} />
+                    <span className={`truncate ${!isOnline ? 'opacity-50' : ''}`}>{peer.nickname}</span>
                     {unreadCounts[peer.peerId] > 0 && (
                       <span className="ml-auto bg-vsc-accent text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center leading-none">
                         {unreadCounts[peer.peerId]}

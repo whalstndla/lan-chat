@@ -20,3 +20,8 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #3e3e42; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* 메시지 텍스트 선택 허용 — body의 user-select:none을 오버라이드 */
+.select-text {
+  user-select: text;
+}

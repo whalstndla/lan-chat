@@ -1,10 +1,11 @@
 // src/components/SettingsPanel.jsx
 import React, { useState, useRef } from 'react'
-import { X, LogOut, Camera, Check } from 'lucide-react'
+import { X, LogOut, Camera, Check, Volume2, Play } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useUserStore from '../store/useUserStore'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
+import useNotificationSound from '../hooks/useNotificationSound'
 
 export default function SettingsPanel({ onClose }) {
   const { setAuthStatus } = useAuthStore()
@@ -12,10 +13,24 @@ export default function SettingsPanel({ onClose }) {
   const { clearAllPeers } = usePeerStore()
   const { resetAll } = useChatStore()
 
+  const notificationSound = useUserStore(state => state.notificationSound)
+  const notificationVolume = useUserStore(state => state.notificationVolume)
+  const { setNotificationSettings } = useUserStore()
+  const { play: playNotification } = useNotificationSound()
+
   const [nicknameInput, setNicknameInput] = useState(myNickname || '')
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const fileInputRef = useRef(null)
+  const soundFileInputRef = useRef(null)
+
+  const SOUND_OPTIONS = [
+    { value: 'notification1', label: '소리 1' },
+    { value: 'notification2', label: '소리 2' },
+    { value: 'notification3', label: '소리 3' },
+    { value: 'notification4', label: '소리 4' },
+    { value: 'custom',        label: '직접 업로드' },
+  ]
 
   async function handleNicknameSave() {
     const trimmed = nicknameInput.trim()
@@ -43,6 +58,28 @@ export default function SettingsPanel({ onClose }) {
     event.target.value = ''
   }
 
+  async function handleSoundChange(newSound) {
+    setNotificationSettings({ sound: newSound, volume: notificationVolume })
+    await window.electronAPI.saveNotificationSettings({ sound: newSound, volume: notificationVolume })
+  }
+
+  async function handleVolumeChange(newVolume) {
+    setNotificationSettings({ sound: notificationSound, volume: newVolume })
+    await window.electronAPI.saveNotificationSettings({ sound: notificationSound, volume: newVolume })
+  }
+
+  async function handleCustomSoundUpload(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const extension = file.name.split('.').pop().toLowerCase()
+    const buffer = await file.arrayBuffer()
+    const newBuffer = new Uint8Array(buffer)
+    await window.electronAPI.saveCustomNotificationSound(buffer, extension)
+    setNotificationSettings({ sound: 'custom', volume: notificationVolume, customSoundBuffer: newBuffer })
+    await window.electronAPI.saveNotificationSettings({ sound: 'custom', volume: notificationVolume })
+    event.target.value = ''
+  }
+
   async function handleLogout() {
     await window.electronAPI.logout()
     clearAllPeers()
@@ -52,7 +89,7 @@ export default function SettingsPanel({ onClose }) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* 헤더 */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-vsc-border">
         <span className="text-vsc-muted text-xs uppercase tracking-wider">설정</span>
@@ -63,6 +100,9 @@ export default function SettingsPanel({ onClose }) {
           <X size={13} />
         </button>
       </div>
+
+      {/* 스크롤 가능한 콘텐츠 영역 */}
+      <div className="flex-1 overflow-y-auto">
 
       {/* 프로필 이미지 */}
       <div className="flex flex-col items-center py-5 gap-1">
@@ -121,8 +161,76 @@ export default function SettingsPanel({ onClose }) {
         </div>
       </div>
 
+      {/* 알림 설정 */}
+      <div className="px-3 mt-4 space-y-3">
+        <label className="text-vsc-muted text-xs block">알림 소리</label>
+
+        {/* 소리 선택 */}
+        <div className="flex flex-col gap-1">
+          {SOUND_OPTIONS.map(option => (
+            <div key={option.value} className="flex items-center gap-2">
+              <button
+                onClick={() => option.value !== 'custom' && handleSoundChange(option.value)}
+                className={`flex-1 text-left px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+                  notificationSound === option.value
+                    ? 'bg-vsc-selected text-vsc-text'
+                    : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
+                }`}
+              >
+                {option.label}
+              </button>
+              {option.value === 'custom' ? (
+                <button
+                  onClick={() => soundFileInputRef.current?.click()}
+                  className="cursor-pointer px-2 py-1 rounded text-xs bg-vsc-panel border border-vsc-border text-vsc-muted hover:text-vsc-text transition-colors"
+                >
+                  파일 선택
+                </button>
+              ) : (
+                <button
+                  onClick={() => { handleSoundChange(option.value); setTimeout(playNotification, 50) }}
+                  title="미리듣기"
+                  className="cursor-pointer p-1 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
+                >
+                  <Play size={11} />
+                </button>
+              )}
+            </div>
+          ))}
+          <input
+            ref={soundFileInputRef}
+            type="file"
+            accept="audio/*"
+            className="hidden"
+            onChange={handleCustomSoundUpload}
+          />
+        </div>
+
+        {/* 볼륨 슬라이더 */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="text-vsc-muted text-xs flex items-center gap-1">
+              <Volume2 size={11} />
+              볼륨
+            </label>
+            <span className="text-vsc-muted text-xs">{Math.round(notificationVolume * 100)}%</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={notificationVolume}
+            onChange={e => handleVolumeChange(Number(e.target.value))}
+            className="w-full accent-vsc-accent cursor-pointer"
+          />
+        </div>
+      </div>
+
+      </div>{/* 스크롤 영역 끝 */}
+
       {/* 로그아웃 버튼 */}
-      <div className="mt-auto px-3 pb-3">
+      <div className="px-3 pb-3 border-t border-vsc-border pt-2">
         <button
           onClick={handleLogout}
           className="cursor-pointer w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded text-xs text-red-400 hover:bg-vsc-hover transition-colors"
