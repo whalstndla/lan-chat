@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 프로필 관리
   updateNickname: (nickname) => ipcRenderer.invoke('update-nickname', nickname),
   saveProfileImage: (imageBuffer) => ipcRenderer.invoke('save-profile-image', imageBuffer),
+  updatePassword: (data) => ipcRenderer.invoke('update-password', data),
 
   // 피어 발견
   startPeerDiscovery: () => ipcRenderer.invoke('start-peer-discovery'),
@@ -96,10 +97,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 자동 업데이트
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-  onUpdateAvailable: (callback) => ipcRenderer.on('update-available', () => callback()),
-  onDownloadProgress: (callback) => ipcRenderer.on('update-download-progress', (_, percent) => callback(percent)),
-  onUpdateNotAvailable: (callback) => ipcRenderer.on('update-not-available', () => callback()),
-  onUpdateDownloaded: (callback) => ipcRenderer.on('update-downloaded', () => callback()),
-  onUpdateError: (callback) => ipcRenderer.on('update-error', (_, message) => callback(message)),
+  onUpdateAvailable: (callback) => {
+    ipcRenderer.removeAllListeners('update-available')
+    ipcRenderer.on('update-available', () => callback())
+  },
+  onDownloadProgress: (callback) => {
+    ipcRenderer.removeAllListeners('update-download-progress')
+    ipcRenderer.on('update-download-progress', (_, percent) => callback(percent))
+  },
+  onUpdateNotAvailable: (callback) => {
+    ipcRenderer.removeAllListeners('update-not-available')
+    ipcRenderer.on('update-not-available', () => callback())
+  },
+  onUpdateDownloaded: (callback) => {
+    ipcRenderer.removeAllListeners('update-downloaded')
+    ipcRenderer.on('update-downloaded', () => callback())
+  },
+  onUpdateError: (callback) => {
+    ipcRenderer.removeAllListeners('update-error')
+    ipcRenderer.on('update-error', (_, message) => callback(message))
+  },
   installUpdate: () => ipcRenderer.invoke('install-update'),
 })

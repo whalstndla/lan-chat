@@ -4,7 +4,7 @@ const WebSocket = require('ws')
 // 피어 ID → WebSocket 소켓 매핑
 const connectionMap = new Map()
 
-function connectToPeer({ peerId, host, wsPort, onMessage }) {
+function connectToPeer({ peerId, host, wsPort, onMessage, onClose }) {
   return new Promise((resolve, reject) => {
     const existingSocket = connectionMap.get(peerId)
     if (existingSocket) {
@@ -34,8 +34,10 @@ function connectToPeer({ peerId, host, wsPort, onMessage }) {
       }
     })
 
+    // onClose: 소켓 종료 시 호출 (강제 종료 감지용)
     socket.on('close', () => {
       connectionMap.delete(peerId)
+      if (onClose) onClose()
     })
 
     socket.on('error', reject)

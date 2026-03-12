@@ -9,6 +9,7 @@ const {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
   getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound,
+  updatePassword,
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
@@ -136,6 +137,15 @@ async function initApp() {
   if (!fs.existsSync(tempFilePath)) fs.mkdirSync(tempFilePath, { recursive: true })
   // 프로필 이미지 폴더 생성
   if (!fs.existsSync(profileFolderPath)) fs.mkdirSync(profileFolderPath, { recursive: true })
+
+  // 임시 파일 7일 이상 된 것 자동 정리 (디스크 누적 방지)
+  try {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    fs.readdirSync(tempFilePath).forEach(file => {
+      const filePath = path.join(tempFilePath, file)
+      if (fs.statSync(filePath).mtimeMs < sevenDaysAgo) fs.unlinkSync(filePath)
+    })
+  } catch { /* 정리 실패 시 무시 */ }
 
   // 업데이트 후 첫 실행 감지
   checkAndNotifyUpdated()
@@ -385,6 +395,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             host: peerInfo.host,
             wsPort: peerInfo.wsPort,
             onMessage: handleIncomingMessage,
+            // 소켓 강제 종료 시 즉시 peer-left 전송 (mDNS TTL 75초 대기 불필요)
+            onClose: () => sendToRenderer('peer-left', peerInfo.peerId),
           })
         } catch {
           // 연결 실패 시 무시 (상대방이 아직 서버를 준비 중일 수 있음)
@@ -621,9 +633,20 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     saveNotificationSettings(database, { sound, volume })
   })
 
-  // 커스텀 사운드 파일 저장
+  // 커스텀 사운드 파일 저장 — 허용 확장자 검증 (경로 탈출 방지)
   ipcMain.handle('save-custom-notification-sound', (_, { buffer, extension }) => {
+    const allowedExtensions = ['mp3', 'ogg', 'wav']
+    if (!allowedExtensions.includes(String(extension).toLowerCase())) {
+      return { success: false, error: '허용되지 않는 파일 형식입니다.' }
+    }
     saveCustomNotificationSound(database, appDataPath, buffer, extension)
+  })
+
+  // 비밀번호 변경 — 기존 비밀번호 검증 후 변경
+  ipcMain.handle('update-password', (_, { currentPassword, newPassword }) => {
+    const profile = getProfile(database)
+    if (!profile) return { success: false, error: '프로필이 없습니다.' }
+    return updatePassword(database, profile.username, currentPassword, newPassword)
   })
 
   // 파일 임시 저장 후 URL 반환
@@ -790,17 +813,22 @@ app.whenReady().then(createWindow)
 // cleanup 중복 실행 방지 플래그
 let hasCleanedUp = false
 
-function performCleanup() {
+async function performCleanup() {
   if (hasCleanedUp) return
   hasCleanedUp = true
-  try { stopPeerDiscovery() } catch { /* 무시 */ }
+  // mDNS goodbye 패킷 전파를 위해 await (500ms 대기 포함)
+  try { await stopPeerDiscovery() } catch { /* 무시 */ }
   try { stopFileServer() } catch { /* 무시 */ }
   try { if (wsServerInfo) stopWsServer(wsServerInfo) } catch { /* 무시 */ }
   try { if (database) database.close() } catch { /* 무시 */ }
 }
 
-// before-quit: app.quit()가 어디서 호출되든 cleanup 실행
-app.on('before-quit', performCleanup)
+// before-quit: app.quit()가 어디서 호출되든 cleanup 실행 (async 처리로 goodbye 전파 보장)
+app.on('before-quit', (event) => {
+  if (hasCleanedUp) return
+  event.preventDefault()
+  performCleanup().then(() => app.quit())
+})
 
 app.on('window-all-closed', () => {
   // macOS에서 창을 모두 닫아도 앱이 유지되는 기본 동작 방지

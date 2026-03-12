@@ -15,9 +15,11 @@ const useChatStore = create((set) => ({
   setGlobalHistory: (messages) => set({ globalMessages: messages }),
 
   addGlobalMessage: (message) =>
-    set((state) => ({
-      globalMessages: [...state.globalMessages, message],
-    })),
+    set((state) => {
+      const updated = [...state.globalMessages, message]
+      // 최근 500개만 유지 (메모리 누수 방지)
+      return { globalMessages: updated.length > 500 ? updated.slice(-500) : updated }
+    }),
 
   setDMHistory: (peerId, messages) =>
     set((state) => ({

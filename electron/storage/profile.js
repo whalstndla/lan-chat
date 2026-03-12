@@ -95,8 +95,20 @@ function saveCustomNotificationSound(db, appDataPath, buffer, extension) {
   return filename
 }
 
+// 비밀번호 변경 — 기존 비밀번호 검증 후 새 비밀번호로 교체
+function updatePassword(db, username, oldPassword, newPassword) {
+  const isValid = verifyPassword(db, username, oldPassword)
+  if (!isValid) return { success: false, error: '현재 비밀번호가 올바르지 않습니다.' }
+
+  const newSalt = crypto.randomBytes(16).toString('hex')
+  const newHash = hashPassword(newPassword, newSalt)
+  db.prepare('UPDATE profile SET password_hash = ?, salt = ? WHERE id = 1').run(newHash, newSalt)
+  return { success: true }
+}
+
 module.exports = {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
   getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound,
+  updatePassword,
 }

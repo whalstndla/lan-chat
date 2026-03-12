@@ -2,7 +2,8 @@
 const { WebSocketServer } = require('ws')
 
 function startWsServer({ onMessage }) {
-  const server = new WebSocketServer({ port: 0 })
+  // 최대 페이로드 10MB 제한 — 대용량 메시지로 인한 메모리 소진 방지
+  const server = new WebSocketServer({ port: 0, maxPayload: 10 * 1024 * 1024 })
 
   server.on('connection', (socket) => {
     socket.on('message', (data) => {

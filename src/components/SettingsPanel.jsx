@@ -21,6 +21,11 @@ export default function SettingsPanel({ onClose }) {
   const [nicknameInput, setNicknameInput] = useState(myNickname || '')
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordMessage, setPasswordMessage] = useState(null) // { type: 'success'|'error', text }
   const fileInputRef = useRef(null)
   const soundFileInputRef = useRef(null)
 
@@ -78,6 +83,30 @@ export default function SettingsPanel({ onClose }) {
     setNotificationSettings({ sound: 'custom', volume: notificationVolume, customSoundBuffer: newBuffer })
     await window.electronAPI.saveNotificationSettings({ sound: 'custom', volume: notificationVolume })
     event.target.value = ''
+  }
+
+  const handlePasswordChange = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordMessage({ type: 'error', text: '모든 항목을 입력해주세요.' })
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage({ type: 'error', text: '새 비밀번호가 일치하지 않습니다.' })
+      return
+    }
+    if (newPassword.length < 4) {
+      setPasswordMessage({ type: 'error', text: '비밀번호는 4자 이상이어야 합니다.' })
+      return
+    }
+    const result = await window.electronAPI.updatePassword({ currentPassword, newPassword })
+    if (result.success) {
+      setPasswordMessage({ type: 'success', text: '비밀번호가 변경됐습니다.' })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } else {
+      setPasswordMessage({ type: 'error', text: result.error || '변경에 실패했습니다.' })
+    }
   }
 
   async function handleLogout() {
@@ -158,6 +187,46 @@ export default function SettingsPanel({ onClose }) {
           >
             {saveSuccess ? <Check size={12} /> : '저장'}
           </button>
+        </div>
+      </div>
+
+      {/* 비밀번호 변경 */}
+      <div className="px-4 py-3 border-t border-vsc-border">
+        <p className="text-vsc-muted text-xs uppercase tracking-wider mb-2">비밀번호 변경</p>
+        <div className="flex flex-col gap-2">
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            placeholder="현재 비밀번호"
+            className="w-full bg-vsc-bg border border-vsc-border rounded px-2 py-1 text-sm text-vsc-text placeholder-vsc-muted focus:outline-none focus:border-vsc-accent"
+          />
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            placeholder="새 비밀번호"
+            className="w-full bg-vsc-bg border border-vsc-border rounded px-2 py-1 text-sm text-vsc-text placeholder-vsc-muted focus:outline-none focus:border-vsc-accent"
+          />
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="새 비밀번호 확인"
+            onKeyDown={(e) => e.key === 'Enter' && handlePasswordChange()}
+            className="w-full bg-vsc-bg border border-vsc-border rounded px-2 py-1 text-sm text-vsc-text placeholder-vsc-muted focus:outline-none focus:border-vsc-accent"
+          />
+          <button
+            onClick={handlePasswordChange}
+            className="cursor-pointer w-full py-1 rounded bg-vsc-accent hover:opacity-90 text-white text-sm transition-opacity"
+          >
+            변경
+          </button>
+          {passwordMessage && (
+            <p className={`text-xs ${passwordMessage.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
+              {passwordMessage.text}
+            </p>
+          )}
         </div>
       </div>
 
