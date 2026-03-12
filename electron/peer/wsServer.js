@@ -6,6 +6,9 @@ function startWsServer({ onMessage }) {
   const server = new WebSocketServer({ port: 0, maxPayload: 10 * 1024 * 1024 })
 
   server.on('connection', (socket) => {
+    // maxPayload 초과 등 소켓 에러를 개별 처리 — 없으면 uncaughtException으로 번짐
+    socket.on('error', () => {})
+
     socket.on('message', (data) => {
       try {
         const message = JSON.parse(data.toString())

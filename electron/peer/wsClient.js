@@ -18,8 +18,11 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose }) {
     }
 
     const socket = new WebSocket(`ws://${host}:${wsPort}`)
+    // 연결 성공 여부 플래그 — 연결 실패 시 onClose가 오발되지 않도록 방지
+    let connected = false
 
     socket.on('open', () => {
+      connected = true
       connectionMap.set(peerId, socket)
       resolve()
     })
@@ -34,10 +37,10 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose }) {
       }
     })
 
-    // onClose: 소켓 종료 시 호출 (강제 종료 감지용)
+    // onClose: 연결 성공 후 소켓 종료 시에만 호출 (강제 종료 감지용)
     socket.on('close', () => {
       connectionMap.delete(peerId)
-      if (onClose) onClose()
+      if (connected && onClose) onClose()
     })
 
     socket.on('error', reject)

@@ -78,6 +78,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-profile-updated')
     ipcRenderer.removeAllListeners('pending-messages-flushed')
     ipcRenderer.removeAllListeners('play-notification-sound')
+    ipcRenderer.removeAllListeners('update-available')
+    ipcRenderer.removeAllListeners('update-download-progress')
+    ipcRenderer.removeAllListeners('update-not-available')
+    ipcRenderer.removeAllListeners('update-downloaded')
+    ipcRenderer.removeAllListeners('update-error')
   },
 
   // 외부 링크 열기
