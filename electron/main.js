@@ -4,7 +4,7 @@ const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
 const { initDatabase, migrateDatabase } = require('./storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers } = require('./storage/queries')
+const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs } = require('./storage/queries')
 const {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
@@ -631,6 +631,16 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
   // 과거 DM 상대 목록 조회 (오프라인 포함)
   ipcMain.handle('get-dm-peers', () => getDMPeers(database, currentPeerId))
+
+  // 전체 채팅 기록 삭제 (global + DM + pending 모두)
+  ipcMain.handle('clear-all-messages', () => {
+    clearAllMessages(database)
+  })
+
+  // DM 기록만 삭제
+  ipcMain.handle('clear-all-dms', () => {
+    clearAllDMs(database)
+  })
 
   // 알림 설정 조회
   ipcMain.handle('get-notification-settings', () =>

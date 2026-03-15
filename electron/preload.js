@@ -29,6 +29,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDMHistory: (peerId1, peerId2) => ipcRenderer.invoke('get-dm-history', { peerId1, peerId2 }),
   getDMPeers: () => ipcRenderer.invoke('get-dm-peers'),
 
+  // 데이터 관리
+  clearAllMessages: () => ipcRenderer.invoke('clear-all-messages'),
+  clearAllDMs: () => ipcRenderer.invoke('clear-all-dms'),
+
   // 파일 저장 — ArrayBuffer를 Uint8Array로 변환 후 전송 (IPC 직렬화 안전)
   saveFile: (fileBuffer, fileName) => ipcRenderer.invoke('save-file', { fileBuffer: new Uint8Array(fileBuffer), fileName }),
 
