@@ -2,13 +2,22 @@
 const { WebSocketServer } = require('ws')
 
 function startWsServer({ onMessage }) {
-  const server = new WebSocketServer({ port: 0 })
+  // 최대 페이로드 10MB 제한 — 대용량 메시지로 인한 메모리 소진 방지
+  const server = new WebSocketServer({ port: 0, maxPayload: 10 * 1024 * 1024 })
 
   server.on('connection', (socket) => {
+    // maxPayload 초과 등 소켓 에러를 개별 처리 — 없으면 uncaughtException으로 번짐
+    socket.on('error', () => {})
+
     socket.on('message', (data) => {
       try {
         const message = JSON.parse(data.toString())
-        onMessage(message)
+        const reply = (response) => {
+          if (socket.readyState === socket.OPEN) {
+            socket.send(JSON.stringify(response))
+          }
+        }
+        onMessage(message, reply)
       } catch {
         // 잘못된 JSON 무시
       }
@@ -23,4 +32,9 @@ function stopWsServer({ server }) {
   server.close()
 }
 
-module.exports = { startWsServer, stopWsServer }
+// 서버에 연결된 모든 클라이언트 소켓 강제 종료 (새로고침/재로그인 시 좀비 소켓 정리용)
+function closeAllServerClients({ server }) {
+  server.clients.forEach((socket) => socket.close())
+}
+
+module.exports = { startWsServer, stopWsServer, closeAllServerClients }

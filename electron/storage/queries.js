@@ -26,4 +26,34 @@ function getDMHistory(db, peerId1, peerId2, limit = 100) {
   `).all(peerId1, peerId2, peerId2, peerId1, limit).reverse()
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory }
+function deleteMessage(db, messageId, fromId) {
+  return db.prepare('DELETE FROM messages WHERE id = ? AND from_id = ?').run(messageId, fromId)
+}
+
+// 나와 DM을 나눈 고유 상대 목록 (최신 메시지 순)
+function getDMPeers(db, myPeerId) {
+  const rows = db.prepare(`
+    SELECT
+      CASE WHEN from_id = ? THEN to_id ELSE from_id END AS peer_id,
+      MAX(timestamp) AS last_timestamp
+    FROM messages
+    WHERE type = 'dm' AND (from_id = ? OR to_id = ?)
+    GROUP BY CASE WHEN from_id = ? THEN to_id ELSE from_id END
+    ORDER BY last_timestamp DESC
+  `).all(myPeerId, myPeerId, myPeerId, myPeerId)
+
+  return rows.map(row => {
+    // 상대방이 보낸 가장 최근 메시지에서 닉네임 추출
+    const lastFromPeer = db.prepare(`
+      SELECT from_name FROM messages
+      WHERE type = 'dm' AND from_id = ?
+      ORDER BY timestamp DESC LIMIT 1
+    `).get(row.peer_id)
+    return {
+      peerId: row.peer_id,
+      nickname: lastFromPeer?.from_name || '알 수 없음',
+    }
+  })
+}
+
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers }

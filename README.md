@@ -81,21 +81,6 @@ npm install
 npm run dev
 ```
 
-### 빌드 (배포용)
-
-`.env` 파일에 GitHub 토큰을 설정한 뒤 빌드합니다.
-
-```bash
-# 프로젝트 루트에 .env 파일 생성
-echo 'GH_TOKEN=ghp_xxxxxxxxxxxx' > .env
-
-npm run build
-# dist/app/ 에 설치 파일 생성 (dmg / exe / AppImage)
-# GitHub Release에 자동 업로드됨
-```
-
-> `.env` 파일은 `.gitignore`에 포함되어 있어 커밋되지 않습니다.
-
 ### 테스트
 
 ```bash

@@ -37,8 +37,35 @@ function initDatabase(dbPath) {
   return db
 }
 
+// 기존 DB에 새 컬럼/테이블 추가 (이미 존재하면 무시)
+function migrateDatabase(db) {
+  // profile 테이블 신규 컬럼 추가
+  const profileMigrations = [
+    'ALTER TABLE profile ADD COLUMN peer_id TEXT',
+    'ALTER TABLE profile ADD COLUMN profile_image TEXT',
+    'ALTER TABLE profile ADD COLUMN last_login_at INTEGER',
+    "ALTER TABLE profile ADD COLUMN notification_sound TEXT DEFAULT 'notification1'",
+    'ALTER TABLE profile ADD COLUMN notification_volume REAL DEFAULT 0.7',
+    'ALTER TABLE profile ADD COLUMN notification_custom_sound TEXT',
+  ]
+  for (const sql of profileMigrations) {
+    try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
+  }
+
+  // 오프라인 메시지 큐 테이블
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pending_messages (
+      id              TEXT PRIMARY KEY,
+      target_peer_id  TEXT NOT NULL,
+      message_payload TEXT NOT NULL,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_target ON pending_messages(target_peer_id);
+  `)
+}
+
 function closeDatabase(db) {
   db.close()
 }
 
-module.exports = { initDatabase, closeDatabase }
+module.exports = { initDatabase, migrateDatabase, closeDatabase }

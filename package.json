@@ -1,12 +1,15 @@
 {
   "name": "lan-chat",
-  "version": "0.1.0",
+  "version": "0.6.3",
   "description": "",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "dotenv -e .env -- sh -c 'vite build && electron-builder'",
-    "test": "jest --testPathPattern=tests/"
+    "prerelease": "node_modules/app-builder-lib/node_modules/.bin/electron-rebuild -f -w better-sqlite3",
+    "release": "dotenv -e .env -- sh -c 'vite build && electron-builder --publish always'",
+    "pretest": "npm rebuild better-sqlite3",
+    "test": "jest --testPathPatterns=tests/",
+    "postinstall": "electron-builder install-app-deps"
   },
   "jest": {
     "testEnvironment": "node"
@@ -21,8 +24,42 @@
     "directories": {
       "output": "dist/app"
     },
+    "files": [
+      "dist/renderer/**",
+      "electron/**",
+      "node_modules/**",
+      "!node_modules/lucide-react/**",
+      "!node_modules/react/**",
+      "!node_modules/react-dom/**",
+      "!node_modules/scheduler/**",
+      "!node_modules/emoji-picker-react/**",
+      "!node_modules/emoji-datasource*/**",
+      "!node_modules/zustand/**",
+      "!node_modules/flairup/**",
+      "!node_modules/better-sqlite3/deps/**",
+      "!node_modules/better-sqlite3/src/**",
+      "!node_modules/**/{test,tests,spec,__tests__}/**",
+      "!node_modules/**/*.{md,markdown,txt,rst,map}",
+      "!node_modules/**/{.bin,.github,.nyc_output}/**"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/build/Release/*.node"
+    ],
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "icon": "logo.png"
     },
     "win": {
@@ -34,7 +71,8 @@
     "publish": {
       "provider": "github",
       "owner": "whalstndla",
-      "repo": "lan-chat"
+      "repo": "lan-chat",
+      "releaseType": "release"
     }
   },
   "dependencies": {
