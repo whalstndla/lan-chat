@@ -120,8 +120,8 @@ export default function SettingsPanel({ onClose }) {
 
   async function handleClearAllDMs() {
     await window.electronAPI.clearAllDMs()
-    // DM 메시지 + 목록 초기화, 전체채팅은 유지
-    useChatStore.setState({ dmMessages: {}, unreadCounts: {}, currentRoom: { type: 'global' } })
+    // DM 메시지 + 목록 + 타이핑 초기화, 전체채팅은 유지
+    useChatStore.setState({ dmMessages: {}, unreadCounts: {}, typingUsers: {}, currentRoom: { type: 'global' } })
     clearPastDMPeers()
     setConfirmAction(null)
   }

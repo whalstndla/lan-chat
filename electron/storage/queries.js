@@ -56,16 +56,20 @@ function getDMPeers(db, myPeerId) {
   })
 }
 
-// 전체 채팅 기록 삭제 (global + DM + pending 모두)
+// 전체 채팅 기록 삭제 (global + DM + pending 모두) — 트랜잭션으로 원자적 실행
 function clearAllMessages(db) {
-  db.prepare('DELETE FROM messages').run()
-  db.prepare('DELETE FROM pending_messages').run()
+  db.transaction(() => {
+    db.prepare('DELETE FROM messages').run()
+    db.prepare('DELETE FROM pending_messages').run()
+  })()
 }
 
-// DM 기록만 삭제 (DM 메시지 + pending)
+// DM 기록만 삭제 (DM 메시지 + pending) — 트랜잭션으로 원자적 실행
 function clearAllDMs(db) {
-  db.prepare("DELETE FROM messages WHERE type = 'dm'").run()
-  db.prepare('DELETE FROM pending_messages').run()
+  db.transaction(() => {
+    db.prepare("DELETE FROM messages WHERE type = 'dm'").run()
+    db.prepare('DELETE FROM pending_messages').run()
+  })()
 }
 
 module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs }
