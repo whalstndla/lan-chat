@@ -224,20 +224,20 @@ async function initApp() {
         }
         sendToRenderer('peer-discovered', peerDiscoveredData)
 
-        // 역방향 연결 — force로 좀비 소켓 교체 (identity 체크로 race-safe)
-        if (message.host && message.wsPort) {
+        // 역방향 연결 — 기존 연결이 없는 경우에만 (mDNS 단방향 문제 해결)
+        // 좀비 소켓은 start-peer-discovery의 closeAllServerClients가 사전 정리
+        if (message.host && message.wsPort && !getConnections().includes(message.fromId)) {
           connectToPeer({
             peerId: message.fromId,
             host: message.host,
             wsPort: message.wsPort,
             onMessage: handleIncomingMessage,
             onClose: () => sendToRenderer('peer-left', message.fromId),
-            force: true,
           }).then(() => {
             flushPendingMessages(message.fromId)
           }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
         } else {
-          // host/wsPort 없으면 즉시 flush
+          // 이미 연결 중이거나 host/wsPort 없으면 즉시 flush
           flushPendingMessages(message.fromId)
         }
       } catch {
