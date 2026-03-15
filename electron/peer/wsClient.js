@@ -39,12 +39,14 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force }) {
     })
 
     // onClose: 연결 성공 후 소켓 종료 시에만 호출 (강제 종료 감지용)
-    // old 소켓의 비동기 close가 새 소켓 매핑을 지우지 않도록 identity 체크
+    // identity 체크: force 교체된 old 소켓의 close가 새 매핑 삭제 및 false peer-left 방지
     socket.on('close', () => {
-      if (connectionMap.get(peerId) === socket) {
+      const isCurrent = connectionMap.get(peerId) === socket
+      if (isCurrent) {
         connectionMap.delete(peerId)
       }
-      if (connected && onClose) onClose()
+      // 교체된(replaced) 소켓은 onClose를 호출하지 않음 — 의도된 교체이므로 peer-left 불필요
+      if (isCurrent && connected && onClose) onClose()
     })
 
     socket.on('error', reject)
