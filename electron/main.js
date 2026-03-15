@@ -13,8 +13,8 @@ const {
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
-const { startWsServer, stopWsServer } = require('./peer/wsServer')
-const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll } = require('./peer/wsClient')
+const { startWsServer, stopWsServer, closeAllServerClients } = require('./peer/wsServer')
+const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
@@ -212,27 +212,32 @@ async function initApp() {
           sendToRenderer('peer-profile-updated', { peerId: message.fromId, profileImageUrl: message.profileImageUrl })
         }
 
-        // 상대방이 내 mDNS를 못 찾은 경우 — key-exchange의 host/wsPort로 역방향 연결
-        if (message.host && message.wsPort && !getConnections().includes(message.fromId)) {
+        // key-exchange 수신 = 상대방 온라인 확실 → 무조건 peer-discovered 전송
+        sendToRenderer('peer-discovered', {
+          peerId: message.fromId,
+          nickname: message.nickname || '알 수 없음',
+          host: message.host,
+          wsPort: message.wsPort,
+          filePort: message.filePort || 0,
+          profileImageUrl: message.profileImageUrl || null,
+        })
+
+        // 역방향 연결 — 기존 좀비 소켓 정리 후 재연결 (onClose 포함)
+        if (message.host && message.wsPort) {
+          disconnectFromPeer(message.fromId)
           connectToPeer({
             peerId: message.fromId,
             host: message.host,
             wsPort: message.wsPort,
             onMessage: handleIncomingMessage,
+            onClose: () => sendToRenderer('peer-left', message.fromId),
           }).then(() => {
-            sendToRenderer('peer-discovered', {
-              peerId: message.fromId,
-              nickname: message.nickname || '알 수 없음',
-              host: message.host,
-              wsPort: message.wsPort,
-              filePort: message.filePort || 0,
-              profileImageUrl: message.profileImageUrl || null,
-            })
+            flushPendingMessages(message.fromId)
           }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
+        } else {
+          // host/wsPort 없으면 즉시 flush
+          flushPendingMessages(message.fromId)
         }
-
-        // 키 교환 완료 → 대기 중인 메시지 전송
-        flushPendingMessages(message.fromId)
       } catch {
         // 잘못된 공개키 무시
       }
@@ -381,6 +386,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   ipcMain.handle('start-peer-discovery', async (_event, _params) => {
     await stopPeerDiscovery()
     disconnectAll()
+    // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
+    if (wsServerInfo) closeAllServerClients(wsServerInfo)
     peerPublicKeyMap.clear()
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     startPeerDiscovery({

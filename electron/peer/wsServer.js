@@ -32,4 +32,9 @@ function stopWsServer({ server }) {
   server.close()
 }
 
-module.exports = { startWsServer, stopWsServer }
+// 서버에 연결된 모든 클라이언트 소켓 강제 종료 (새로고침/재로그인 시 좀비 소켓 정리용)
+function closeAllServerClients({ server }) {
+  server.clients.forEach((socket) => socket.close())
+}
+
+module.exports = { startWsServer, stopWsServer, closeAllServerClients }
