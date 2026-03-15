@@ -36,6 +36,8 @@ const usePeerStore = create((set) => ({
 
   setPastDMPeers: (peers) => set({ pastDMPeers: peers }),
 
+  clearPastDMPeers: () => set({ pastDMPeers: [] }),
+
   // 새 DM 수신 시 과거 목록에 없는 상대 추가
   addPastDMPeer: (peerInfo) =>
     set((state) => ({

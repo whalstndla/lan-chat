@@ -1,6 +1,6 @@
 // src/components/SettingsPanel.jsx
 import React, { useState, useRef } from 'react'
-import { X, LogOut, Camera, Check, Volume2, Play } from 'lucide-react'
+import { X, LogOut, Camera, Check, Volume2, Play, Trash2 } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useUserStore from '../store/useUserStore'
 import usePeerStore from '../store/usePeerStore'
@@ -10,7 +10,7 @@ import useNotificationSound from '../hooks/useNotificationSound'
 export default function SettingsPanel({ onClose }) {
   const { setAuthStatus } = useAuthStore()
   const { myNickname, myProfileImageUrl, updateMyNickname, updateMyProfileImageUrl, reset: resetUser } = useUserStore()
-  const { clearAllPeers } = usePeerStore()
+  const { clearAllPeers, clearPastDMPeers } = usePeerStore()
   const { resetAll } = useChatStore()
 
   const notificationSound = useUserStore(state => state.notificationSound)
@@ -107,6 +107,23 @@ export default function SettingsPanel({ onClose }) {
     } else {
       setPasswordMessage({ type: 'error', text: result.error || '변경에 실패했습니다.' })
     }
+  }
+
+  const [confirmAction, setConfirmAction] = useState(null) // 'clearAll' | 'clearDMs' | null
+
+  async function handleClearAllMessages() {
+    await window.electronAPI.clearAllMessages()
+    resetAll()
+    clearPastDMPeers()
+    setConfirmAction(null)
+  }
+
+  async function handleClearAllDMs() {
+    await window.electronAPI.clearAllDMs()
+    // DM 메시지 + 목록 + 타이핑 초기화, 전체채팅은 유지
+    useChatStore.setState({ dmMessages: {}, unreadCounts: {}, typingUsers: {}, currentRoom: { type: 'global' } })
+    clearPastDMPeers()
+    setConfirmAction(null)
   }
 
   async function handleLogout() {
@@ -294,6 +311,52 @@ export default function SettingsPanel({ onClose }) {
             className="w-full accent-vsc-accent cursor-pointer"
           />
         </div>
+      </div>
+
+      {/* 데이터 관리 */}
+      <div className="px-3 mt-4 mb-3 space-y-2">
+        <label className="text-vsc-muted text-xs block">데이터 관리</label>
+
+        {confirmAction === null ? (
+          <>
+            <button
+              onClick={() => setConfirmAction('clearAll')}
+              className="cursor-pointer w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text transition-colors"
+            >
+              <Trash2 size={12} />
+              전체 채팅 기록 삭제
+            </button>
+            <button
+              onClick={() => setConfirmAction('clearDMs')}
+              className="cursor-pointer w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text transition-colors"
+            >
+              <Trash2 size={12} />
+              DM 기록 삭제
+            </button>
+          </>
+        ) : (
+          <div className="bg-vsc-panel border border-vsc-border rounded p-2 space-y-2">
+            <p className="text-xs text-red-400">
+              {confirmAction === 'clearAll'
+                ? '모든 채팅 기록(전체채팅 + DM)이 삭제됩니다. 복구할 수 없습니다.'
+                : 'DM 대화 기록이 모두 삭제됩니다. 복구할 수 없습니다.'}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={confirmAction === 'clearAll' ? handleClearAllMessages : handleClearAllDMs}
+                className="cursor-pointer flex-1 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-xs transition-colors"
+              >
+                삭제
+              </button>
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="cursor-pointer flex-1 py-1 rounded bg-vsc-border hover:bg-vsc-sidebar text-vsc-muted text-xs transition-colors"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       </div>{/* 스크롤 영역 끝 */}
