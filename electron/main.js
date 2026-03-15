@@ -14,7 +14,7 @@ const {
 const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
 const { startWsServer, stopWsServer, closeAllServerClients } = require('./peer/wsServer')
-const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
+const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
@@ -213,24 +213,26 @@ async function initApp() {
         }
 
         // key-exchange 수신 = 상대방 온라인 확실 → 무조건 peer-discovered 전송
-        sendToRenderer('peer-discovered', {
+        // (mDNS 재발견 실패 시에도 UI 복구 보장)
+        const peerDiscoveredData = {
           peerId: message.fromId,
           nickname: message.nickname || '알 수 없음',
-          host: message.host,
-          wsPort: message.wsPort,
+          ...(message.host && { host: message.host }),
+          ...(message.wsPort && { wsPort: message.wsPort }),
           filePort: message.filePort || 0,
           profileImageUrl: message.profileImageUrl || null,
-        })
+        }
+        sendToRenderer('peer-discovered', peerDiscoveredData)
 
-        // 역방향 연결 — 기존 좀비 소켓 정리 후 재연결 (onClose 포함)
+        // 역방향 연결 — force로 좀비 소켓 교체 (identity 체크로 race-safe)
         if (message.host && message.wsPort) {
-          disconnectFromPeer(message.fromId)
           connectToPeer({
             peerId: message.fromId,
             host: message.host,
             wsPort: message.wsPort,
             onMessage: handleIncomingMessage,
             onClose: () => sendToRenderer('peer-left', message.fromId),
+            force: true,
           }).then(() => {
             flushPendingMessages(message.fromId)
           }).catch(() => { /* 역방향 연결 실패 시 무시 */ })

@@ -4,17 +4,18 @@ const WebSocket = require('ws')
 // 피어 ID → WebSocket 소켓 매핑
 const connectionMap = new Map()
 
-function connectToPeer({ peerId, host, wsPort, onMessage, onClose }) {
+function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force }) {
   return new Promise((resolve, reject) => {
     const existingSocket = connectionMap.get(peerId)
     if (existingSocket) {
-      if (existingSocket.readyState === WebSocket.OPEN) {
-        // 정상 연결 중이면 재연결 불필요
+      if (existingSocket.readyState === WebSocket.OPEN && !force) {
+        // 정상 연결 중이면 재연결 불필요 (force 시 강제 교체)
         resolve()
         return
       }
-      // CLOSING/CLOSED 좀비 소켓 정리 후 재연결
+      // 기존 소켓 정리 — connectionMap에서 먼저 제거하여 비동기 close가 새 매핑을 건드리지 않도록 함
       connectionMap.delete(peerId)
+      existingSocket.close()
     }
 
     const socket = new WebSocket(`ws://${host}:${wsPort}`)
@@ -38,8 +39,11 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose }) {
     })
 
     // onClose: 연결 성공 후 소켓 종료 시에만 호출 (강제 종료 감지용)
+    // old 소켓의 비동기 close가 새 소켓 매핑을 지우지 않도록 identity 체크
     socket.on('close', () => {
-      connectionMap.delete(peerId)
+      if (connectionMap.get(peerId) === socket) {
+        connectionMap.delete(peerId)
+      }
       if (connected && onClose) onClose()
     })
 
