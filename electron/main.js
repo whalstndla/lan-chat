@@ -14,7 +14,7 @@ const {
 const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
 const { startWsServer, stopWsServer, closeAllServerClients } = require('./peer/wsServer')
-const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll } = require('./peer/wsClient')
+const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
@@ -241,6 +241,11 @@ async function initApp() {
               }
             },
           }).then(() => {
+            // 역방향 연결 성공 후 epoch 재확인 — stale이면 폐기
+            if (epochAtReverse !== discoveryEpoch) {
+              disconnectFromPeer(message.fromId)
+              return
+            }
             flushPendingMessages(message.fromId)
           }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
         } else {
@@ -424,6 +429,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           })
         } catch {
           // 연결 실패 시 무시 (상대방이 아직 서버를 준비 중일 수 있음)
+          return
+        }
+        // 연결 성공 후 epoch 재확인 — 연결 중에 refresh가 발생했으면 stale 소켓 폐기
+        if (currentEpoch !== discoveryEpoch) {
+          disconnectFromPeer(peerInfo.peerId)
           return
         }
         // key-exchange에 내 접속 정보 + 프로필 이미지 포함
