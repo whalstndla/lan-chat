@@ -76,8 +76,15 @@ function disconnectFromPeer(peerId) {
   }
 }
 
+// OPEN 상태인 연결만 반환 — CLOSING/CLOSED 좀비 소켓은 제외
 function getConnections() {
-  return Array.from(connectionMap.keys())
+  const activeConnections = []
+  connectionMap.forEach((socket, peerId) => {
+    if (socket.readyState === WebSocket.OPEN) {
+      activeConnections.push(peerId)
+    }
+  })
+  return activeConnections
 }
 
 function disconnectAll() {
