@@ -232,7 +232,11 @@ async function initApp() {
             host: message.host,
             wsPort: message.wsPort,
             onMessage: handleIncomingMessage,
-            onClose: () => sendToRenderer('peer-left', message.fromId),
+            onClose: () => {
+              if (!getConnections().includes(message.fromId)) {
+                sendToRenderer('peer-left', message.fromId)
+              }
+            },
           }).then(() => {
             flushPendingMessages(message.fromId)
           }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
@@ -391,6 +395,9 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
     if (wsServerInfo) closeAllServerClients(wsServerInfo)
     peerPublicKeyMap.clear()
+    // terminate 후 상대방의 close 이벤트가 이벤트 루프에서 처리될 시간 확보
+    // 이 대기 없이 바로 startPeerDiscovery하면, 새 peer-discovered가 stale peer-left보다 먼저 도착
+    await new Promise(resolve => setTimeout(resolve, 200))
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     startPeerDiscovery({
       nickname: currentNickname,
@@ -404,8 +411,12 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             host: peerInfo.host,
             wsPort: peerInfo.wsPort,
             onMessage: handleIncomingMessage,
-            // 소켓 강제 종료 시 즉시 peer-left 전송 (mDNS TTL 75초 대기 불필요)
-            onClose: () => sendToRenderer('peer-left', peerInfo.peerId),
+            // 소켓 종료 시 다른 경로(역방향 연결 등)로 아직 연결 중이 아닌 경우에만 peer-left 전송
+            onClose: () => {
+              if (!getConnections().includes(peerInfo.peerId)) {
+                sendToRenderer('peer-left', peerInfo.peerId)
+              }
+            },
           })
         } catch {
           // 연결 실패 시 무시 (상대방이 아직 서버를 준비 중일 수 있음)
@@ -425,7 +436,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         sendToRenderer('peer-discovered', peerInfo)
       },
       onPeerLeft: (leftPeerId) => {
-        sendToRenderer('peer-left', leftPeerId)
+        // active connection이 있으면 peer-left를 보내지 않음
+        // mDNS goodbye 지연 도착 시 이미 재연결된 피어를 잘못 제거하는 것 방지
+        if (!getConnections().includes(leftPeerId)) {
+          sendToRenderer('peer-left', leftPeerId)
+        }
       },
     })
   })
