@@ -10,8 +10,11 @@ let browseInstance = null
 function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, onPeerLeft }) {
   bonjourInstance = new Bonjour()
 
+  // 서비스 이름에 세션 ID 추가 — 새로고침 시 다른 이름으로 등록되어
+  // 상대방 browser의 캐시 문제 없이 항상 새 서비스로 인식됨
+  const sessionId = Date.now().toString(36)
   publishedService = bonjourInstance.publish({
-    name: `${nickname}__${peerId}`,
+    name: `${nickname}__${peerId}__${sessionId}`,
     type: SERVICE_TYPE,
     port: wsPort,
     txt: {
@@ -61,8 +64,9 @@ async function stopPeerDiscovery() {
 function republishService({ nickname, peerId, wsPort, filePort }) {
   if (!bonjourInstance) return
   if (publishedService) publishedService.stop()
+  const sessionId = Date.now().toString(36)
   publishedService = bonjourInstance.publish({
-    name: `${nickname}__${peerId}`,
+    name: `${nickname}__${peerId}__${sessionId}`,
     type: SERVICE_TYPE,
     port: wsPort,
     txt: { nickname, peerId, filePort: String(filePort) },

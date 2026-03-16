@@ -14,7 +14,7 @@ const {
 const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
 const { startWsServer, stopWsServer, closeAllServerClients } = require('./peer/wsServer')
-const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll } = require('./peer/wsClient')
+const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
@@ -40,6 +40,7 @@ let myPublicKeyBase64 = null            // 네트워크 전송용 공개키
 let localIP = 'localhost'              // 내 LAN IP (key-exchange 및 파일 서버용)
 let handleIncomingMessage = null       // wsServer/wsClient 공용 메시지 핸들러
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
+let discoveryEpoch = 0                  // 글로벌 세대 번호 — start-peer-discovery마다 증가
 
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
@@ -227,13 +228,24 @@ async function initApp() {
         // 역방향 연결 — 기존 연결이 없는 경우에만 (mDNS 단방향 문제 해결)
         // 좀비 소켓은 start-peer-discovery의 closeAllServerClients가 사전 정리
         if (message.host && message.wsPort && !getConnections().includes(message.fromId)) {
+          const epochAtReverse = discoveryEpoch
           connectToPeer({
             peerId: message.fromId,
             host: message.host,
             wsPort: message.wsPort,
             onMessage: handleIncomingMessage,
-            onClose: () => sendToRenderer('peer-left', message.fromId),
+            onClose: () => {
+              if (epochAtReverse !== discoveryEpoch) return
+              if (!getConnections().includes(message.fromId)) {
+                sendToRenderer('peer-left', message.fromId)
+              }
+            },
           }).then(() => {
+            // 역방향 연결 성공 후 epoch 재확인 — stale이면 폐기
+            if (epochAtReverse !== discoveryEpoch) {
+              disconnectFromPeer(message.fromId)
+              return
+            }
             flushPendingMessages(message.fromId)
           }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
         } else {
@@ -391,6 +403,9 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
     if (wsServerInfo) closeAllServerClients(wsServerInfo)
     peerPublicKeyMap.clear()
+    // 글로벌 세대 증가 — 이전 세대의 연결에서 발생하는 stale close/peer-left를 무시하기 위함
+    discoveryEpoch++
+    const currentEpoch = discoveryEpoch
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     startPeerDiscovery({
       nickname: currentNickname,
@@ -404,11 +419,21 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             host: peerInfo.host,
             wsPort: peerInfo.wsPort,
             onMessage: handleIncomingMessage,
-            // 소켓 강제 종료 시 즉시 peer-left 전송 (mDNS TTL 75초 대기 불필요)
-            onClose: () => sendToRenderer('peer-left', peerInfo.peerId),
+            onClose: () => {
+              // 현재 세대의 연결이 아니면 stale → peer-left 무시
+              if (currentEpoch !== discoveryEpoch) return
+              if (!getConnections().includes(peerInfo.peerId)) {
+                sendToRenderer('peer-left', peerInfo.peerId)
+              }
+            },
           })
         } catch {
           // 연결 실패 시 무시 (상대방이 아직 서버를 준비 중일 수 있음)
+          return
+        }
+        // 연결 성공 후 epoch 재확인 — 연결 중에 refresh가 발생했으면 stale 소켓 폐기
+        if (currentEpoch !== discoveryEpoch) {
+          disconnectFromPeer(peerInfo.peerId)
           return
         }
         // key-exchange에 내 접속 정보 + 프로필 이미지 포함
@@ -425,7 +450,12 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         sendToRenderer('peer-discovered', peerInfo)
       },
       onPeerLeft: (leftPeerId) => {
-        sendToRenderer('peer-left', leftPeerId)
+        // 현재 세대가 아니면 stale mDNS 이벤트 → 무시
+        if (currentEpoch !== discoveryEpoch) return
+        // active outbound connection이 있으면 peer-left를 보내지 않음
+        if (!getConnections().includes(leftPeerId)) {
+          sendToRenderer('peer-left', leftPeerId)
+        }
       },
     })
   })
