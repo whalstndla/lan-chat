@@ -40,7 +40,7 @@ let myPublicKeyBase64 = null            // 네트워크 전송용 공개키
 let localIP = 'localhost'              // 내 LAN IP (key-exchange 및 파일 서버용)
 let handleIncomingMessage = null       // wsServer/wsClient 공용 메시지 핸들러
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
-const peerEpochMap = new Map()          // peerId → 세대 번호 (stale peer-left 무시용)
+let discoveryEpoch = 0                  // 글로벌 세대 번호 — start-peer-discovery마다 증가
 
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
@@ -196,8 +196,6 @@ async function initApp() {
       try {
         const publicKeyObj = importPublicKey(message.publicKey)
         peerPublicKeyMap.set(message.fromId, publicKeyObj)
-        // epoch 증가 — 이 피어에 대한 이전 연결의 stale peer-left를 무시하기 위한 세대 번호
-        peerEpochMap.set(message.fromId, (peerEpochMap.get(message.fromId) || 0) + 1)
         const currentNicknameForReply = getProfile(database)?.nickname || ''
         reply({
           type: 'key-exchange',
@@ -230,15 +228,14 @@ async function initApp() {
         // 역방향 연결 — 기존 연결이 없는 경우에만 (mDNS 단방향 문제 해결)
         // 좀비 소켓은 start-peer-discovery의 closeAllServerClients가 사전 정리
         if (message.host && message.wsPort && !getConnections().includes(message.fromId)) {
-          const epochAtReverse = peerEpochMap.get(message.fromId) || 0
+          const epochAtReverse = discoveryEpoch
           connectToPeer({
             peerId: message.fromId,
             host: message.host,
             wsPort: message.wsPort,
             onMessage: handleIncomingMessage,
             onClose: () => {
-              const currentEpoch = peerEpochMap.get(message.fromId) || 0
-              if (currentEpoch !== epochAtReverse) return
+              if (epochAtReverse !== discoveryEpoch) return
               if (!getConnections().includes(message.fromId)) {
                 sendToRenderer('peer-left', message.fromId)
               }
@@ -382,7 +379,6 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     await stopPeerDiscovery()
     disconnectAll()
     peerPublicKeyMap.clear()
-    peerEpochMap.clear()
   })
 
   // 내 정보 조회 (프로필 닉네임 우선)
@@ -402,7 +398,9 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
     if (wsServerInfo) closeAllServerClients(wsServerInfo)
     peerPublicKeyMap.clear()
-    peerEpochMap.clear()
+    // 글로벌 세대 증가 — 이전 세대의 연결에서 발생하는 stale close/peer-left를 무시하기 위함
+    discoveryEpoch++
+    const currentEpoch = discoveryEpoch
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     startPeerDiscovery({
       nickname: currentNickname,
@@ -410,8 +408,6 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       wsPort: wsServerInfo.port,
       filePort: getFilePort(),
       onPeerFound: async (peerInfo) => {
-        // epoch 캡처 — 이 연결이 생성될 때의 세대 번호. close 시 epoch가 변경되었으면 stale이므로 무시
-        const epochAtConnect = peerEpochMap.get(peerInfo.peerId) || 0
         try {
           await connectToPeer({
             peerId: peerInfo.peerId,
@@ -419,9 +415,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             wsPort: peerInfo.wsPort,
             onMessage: handleIncomingMessage,
             onClose: () => {
-              // epoch가 변경되었으면 새 key-exchange가 완료된 것이므로 stale peer-left 무시
-              const currentEpoch = peerEpochMap.get(peerInfo.peerId) || 0
-              if (currentEpoch !== epochAtConnect) return
+              // 현재 세대의 연결이 아니면 stale → peer-left 무시
+              if (currentEpoch !== discoveryEpoch) return
               if (!getConnections().includes(peerInfo.peerId)) {
                 sendToRenderer('peer-left', peerInfo.peerId)
               }
@@ -445,9 +440,10 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         sendToRenderer('peer-discovered', peerInfo)
       },
       onPeerLeft: (leftPeerId) => {
-        // active connection이 있거나 key-exchange가 완료된 상태면 peer-left를 보내지 않음
-        // mDNS goodbye 지연 도착 시 이미 재연결된 피어를 잘못 제거하는 것 방지
-        if (!getConnections().includes(leftPeerId) && !peerPublicKeyMap.has(leftPeerId)) {
+        // 현재 세대가 아니면 stale mDNS 이벤트 → 무시
+        if (currentEpoch !== discoveryEpoch) return
+        // active outbound connection이 있으면 peer-left를 보내지 않음
+        if (!getConnections().includes(leftPeerId)) {
           sendToRenderer('peer-left', leftPeerId)
         }
       },
