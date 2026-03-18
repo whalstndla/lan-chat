@@ -99,10 +99,10 @@ export default function ChatWindow() {
     }
   }, [currentMessages, currentRoom])
 
-  // 채팅방 변경 시 항상 하단으로 이동 + 토스트/카운터 초기화
+  // 채팅방 변경 시 항상 하단으로 이동 + 토스트 초기화
+  // prevMessageCountRef는 새 메시지 effect에서 방 변경 감지 시 동기화됨
   useEffect(() => {
     isNearBottomRef.current = true
-    prevMessageCountRef.current = 0
     setNewMessageToast(null)
     scrollEndRef.current?.scrollIntoView({ behavior: 'auto' })
   }, [currentRoom])
