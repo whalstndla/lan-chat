@@ -17,6 +17,7 @@ export default function ChatWindow() {
   const messagesContainerRef = useRef(null)
   const isNearBottomRef = useRef(true)
   const prevMessageCountRef = useRef(0)
+  const currentRoomKeyRef = useRef(null)
   // 스크롤 위에 있을 때 새 메시지 토스트 표시용
   const [newMessageToast, setNewMessageToast] = useState(null)
 
@@ -62,6 +63,14 @@ export default function ChatWindow() {
 
   // 새 메시지 처리: 배열 길이 증가만 감지 (삭제/pending 해제는 무시)
   useEffect(() => {
+    // 방 변경 시 카운터만 동기화하고 토스트 표시하지 않음
+    const roomKey = currentRoom.type === 'global' ? 'global' : currentRoom.peerId
+    if (currentRoomKeyRef.current !== roomKey) {
+      currentRoomKeyRef.current = roomKey
+      prevMessageCountRef.current = currentMessages.length
+      return
+    }
+
     const prevCount = prevMessageCountRef.current
     prevMessageCountRef.current = currentMessages.length
 
@@ -88,7 +97,7 @@ export default function ChatWindow() {
       else if (contentType === 'file') preview = `📎 ${lastMessage.fileName || lastMessage.file_name || '파일'}`
       setNewMessageToast({ sender, preview })
     }
-  }, [currentMessages])
+  }, [currentMessages, currentRoom])
 
   // 채팅방 변경 시 항상 하단으로 이동 + 토스트/카운터 초기화
   useEffect(() => {
