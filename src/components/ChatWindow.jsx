@@ -1,5 +1,6 @@
 // src/components/ChatWindow.jsx
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import Message from './Message'
@@ -15,6 +16,8 @@ export default function ChatWindow() {
   const scrollEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const isNearBottomRef = useRef(true)
+  // 스크롤 위에 있을 때 새 메시지 토스트 표시용
+  const [newMessageToast, setNewMessageToast] = useState(null)
 
   const currentMessages = currentRoom.type === 'global'
     ? globalMessages
@@ -34,7 +37,16 @@ export default function ChatWindow() {
     const container = messagesContainerRef.current
     if (!container) return
     const { scrollTop, scrollHeight, clientHeight } = container
-    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight <= 50
+    const nearBottom = scrollHeight - scrollTop - clientHeight <= 50
+    isNearBottomRef.current = nearBottom
+    // 하단 도달 시 토스트 자동 숨김
+    if (nearBottom) setNewMessageToast(null)
+  }
+
+  // 하단으로 스크롤 이동
+  function scrollToBottom() {
+    scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    setNewMessageToast(null)
   }
 
   // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화
@@ -46,16 +58,35 @@ export default function ChatWindow() {
     }
   }, [currentRoom, myPeerId])
 
-  // 새 메시지 시 스크롤이 하단 근처에 있을 때만 자동 스크롤
+  // 새 메시지 처리: 하단이면 자동 스크롤, 위에 있으면 토스트 표시
   useEffect(() => {
+    if (currentMessages.length === 0) return
+    const lastMessage = currentMessages[currentMessages.length - 1]
+
     if (isNearBottomRef.current) {
       scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    } else {
+      // 내 메시지는 토스트 없이 바로 스크롤
+      const isMyMessage = lastMessage.fromId === myPeerId || lastMessage.from_id === myPeerId
+      if (isMyMessage) {
+        scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+        return
+      }
+      // 새 메시지 토스트 표시
+      const sender = lastMessage.from || lastMessage.from_name || '알 수 없음'
+      const contentType = lastMessage.contentType || lastMessage.content_type
+      let preview = lastMessage.content || ''
+      if (contentType === 'image') preview = '사진을 보냈습니다'
+      else if (contentType === 'video') preview = '동영상을 보냈습니다'
+      else if (contentType === 'file') preview = `📎 ${lastMessage.fileName || lastMessage.file_name || '파일'}`
+      setNewMessageToast({ sender, preview })
     }
   }, [currentMessages])
 
-  // 채팅방 변경 시 항상 하단으로 이동
+  // 채팅방 변경 시 항상 하단으로 이동 + 토스트 초기화
   useEffect(() => {
     isNearBottomRef.current = true
+    setNewMessageToast(null)
     scrollEndRef.current?.scrollIntoView({ behavior: 'auto' })
   }, [currentRoom])
 
@@ -66,34 +97,48 @@ export default function ChatWindow() {
         <h2 className="text-sm font-semibold text-vsc-text">{chatTitle}</h2>
       </div>
 
-      {/* 메시지 목록 */}
-      <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-2">
-        {currentMessages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>
-          </div>
-        ) : (
-          currentMessages.map((message) => (
-            <Message key={message.id} message={message} />
-          ))
-        )}
+      {/* 메시지 목록 — 토스트 위치 기준을 위한 relative */}
+      <div className="flex-1 overflow-hidden relative">
+        <div ref={messagesContainerRef} onScroll={handleScroll} className="h-full overflow-y-auto py-2">
+          {currentMessages.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>
+            </div>
+          ) : (
+            currentMessages.map((message) => (
+              <Message key={message.id} message={message} />
+            ))
+          )}
 
-        {/* 타이핑 인디케이터 */}
-        {typingUserList.length > 0 && (
-          <div className="px-4 py-1 flex items-center gap-1.5 text-vsc-muted text-xs">
-            <span className="flex gap-0.5 items-end">
-              <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '300ms' }} />
-            </span>
-            <span>
-              {typingUserList.map(user => user.nickname).join(', ')}
-              {typingUserList.length === 1 ? '님이 입력 중...' : '님들이 입력 중...'}
-            </span>
-          </div>
-        )}
+          {/* 타이핑 인디케이터 */}
+          {typingUserList.length > 0 && (
+            <div className="px-4 py-1 flex items-center gap-1.5 text-vsc-muted text-xs">
+              <span className="flex gap-0.5 items-end">
+                <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce" style={{ animationDelay: '300ms' }} />
+              </span>
+              <span>
+                {typingUserList.map(user => user.nickname).join(', ')}
+                {typingUserList.length === 1 ? '님이 입력 중...' : '님들이 입력 중...'}
+              </span>
+            </div>
+          )}
 
-        <div ref={scrollEndRef} />
+          <div ref={scrollEndRef} />
+        </div>
+
+        {/* 새 메시지 토스트 — 메시지 목록 하단에 고정 */}
+        {newMessageToast && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-white text-gray-900 shadow-lg cursor-pointer hover:bg-gray-100 transition-colors max-w-[80%]"
+          >
+            <ChevronDown size={14} className="shrink-0 text-gray-500" />
+            <span className="text-xs font-semibold shrink-0">{newMessageToast.sender}</span>
+            <span className="text-xs text-gray-500 truncate">{newMessageToast.preview}</span>
+          </button>
+        )}
       </div>
 
       {/* 메시지 입력창 */}
