@@ -16,6 +16,7 @@ export default function ChatWindow() {
   const scrollEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const isNearBottomRef = useRef(true)
+  const prevMessageCountRef = useRef(0)
   // 스크롤 위에 있을 때 새 메시지 토스트 표시용
   const [newMessageToast, setNewMessageToast] = useState(null)
 
@@ -45,6 +46,7 @@ export default function ChatWindow() {
 
   // 하단으로 스크롤 이동
   function scrollToBottom() {
+    isNearBottomRef.current = true
     scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     setNewMessageToast(null)
   }
@@ -58,9 +60,14 @@ export default function ChatWindow() {
     }
   }, [currentRoom, myPeerId])
 
-  // 새 메시지 처리: 하단이면 자동 스크롤, 위에 있으면 토스트 표시
+  // 새 메시지 처리: 배열 길이 증가만 감지 (삭제/pending 해제는 무시)
   useEffect(() => {
-    if (currentMessages.length === 0) return
+    const prevCount = prevMessageCountRef.current
+    prevMessageCountRef.current = currentMessages.length
+
+    // 길이가 줄었거나 같으면 새 메시지가 아님 (삭제, pending 해제 등)
+    if (currentMessages.length <= prevCount || currentMessages.length === 0) return
+
     const lastMessage = currentMessages[currentMessages.length - 1]
 
     if (isNearBottomRef.current) {
@@ -83,9 +90,10 @@ export default function ChatWindow() {
     }
   }, [currentMessages])
 
-  // 채팅방 변경 시 항상 하단으로 이동 + 토스트 초기화
+  // 채팅방 변경 시 항상 하단으로 이동 + 토스트/카운터 초기화
   useEffect(() => {
     isNearBottomRef.current = true
+    prevMessageCountRef.current = 0
     setNewMessageToast(null)
     scrollEndRef.current?.scrollIntoView({ behavior: 'auto' })
   }, [currentRoom])
