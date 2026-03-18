@@ -138,6 +138,11 @@ export default function MessageInput() {
     setShowEmojiPicker(false)
   }
 
+  // inputText 변경 시 항상 높이 재계산 (이모지, 붙여넣기 등 모든 경로 커버)
+  useEffect(() => {
+    adjustTextareaHeight()
+  }, [inputText])
+
   // textarea 높이 자동 조절 — 내용에 맞게 늘어나고 최대 높이 제한
   function adjustTextareaHeight() {
     const textarea = textareaRef.current
@@ -149,7 +154,6 @@ export default function MessageInput() {
   // 입력 시 타이핑 인디케이터 전송 (2초 쓰로틀)
   function handleInputChange(event) {
     setInputText(event.target.value)
-    adjustTextareaHeight()
     const now = Date.now()
     if (event.target.value.length > 0 && now - lastTypingSentAtRef.current > 2000) {
       lastTypingSentAtRef.current = now

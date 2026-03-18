@@ -34,7 +34,7 @@ export default function ChatWindow() {
     const container = messagesContainerRef.current
     if (!container) return
     const { scrollTop, scrollHeight, clientHeight } = container
-    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 50
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight <= 50
   }
 
   // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화
