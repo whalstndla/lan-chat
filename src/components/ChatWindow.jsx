@@ -13,6 +13,8 @@ export default function ChatWindow() {
   const { setDMHistory, resetUnread } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
   const scrollEndRef = useRef(null)
+  const messagesContainerRef = useRef(null)
+  const isNearBottomRef = useRef(true)
 
   const currentMessages = currentRoom.type === 'global'
     ? globalMessages
@@ -27,6 +29,14 @@ export default function ChatWindow() {
     ? Object.values(typingUsers)
     : (typingUsers[currentRoom.peerId] ? [typingUsers[currentRoom.peerId]] : [])
 
+  // 스크롤 위치 추적 — 하단 근처(50px 이내)인지 체크
+  function handleScroll() {
+    const container = messagesContainerRef.current
+    if (!container) return
+    const { scrollTop, scrollHeight, clientHeight } = container
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 50
+  }
+
   // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화
   useEffect(() => {
     if (currentRoom.type === 'dm' && myPeerId) {
@@ -36,10 +46,18 @@ export default function ChatWindow() {
     }
   }, [currentRoom, myPeerId])
 
-  // 새 메시지 오면 자동 스크롤
+  // 새 메시지 시 스크롤이 하단 근처에 있을 때만 자동 스크롤
   useEffect(() => {
-    scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [currentMessages, currentRoom])
+    if (isNearBottomRef.current) {
+      scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [currentMessages])
+
+  // 채팅방 변경 시 항상 하단으로 이동
+  useEffect(() => {
+    isNearBottomRef.current = true
+    scrollEndRef.current?.scrollIntoView({ behavior: 'auto' })
+  }, [currentRoom])
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -49,7 +67,7 @@ export default function ChatWindow() {
       </div>
 
       {/* 메시지 목록 */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-2">
         {currentMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>

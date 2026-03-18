@@ -24,6 +24,7 @@ export default function MessageInput() {
   const [isSending, setIsSending] = useState(false)
   // 붙여넣기 미리보기 상태: { file, previewUrl, fileName, fileSize } | null
   const [pastePreview, setPastePreview] = useState(null)
+  const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
   const lastTypingSentAtRef = useRef(0)
   const currentRoom = useChatStore(state => state.currentRoom)
@@ -48,6 +49,8 @@ export default function MessageInput() {
         addDMMessage(currentRoom.peerId, sentMessage)
       }
       setInputText('')
+      // 전송 후 textarea 높이 초기화
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
     } finally {
       setIsSending(false)
     }
@@ -135,9 +138,18 @@ export default function MessageInput() {
     setShowEmojiPicker(false)
   }
 
+  // textarea 높이 자동 조절 — 내용에 맞게 늘어나고 최대 높이 제한
+  function adjustTextareaHeight() {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`
+  }
+
   // 입력 시 타이핑 인디케이터 전송 (2초 쓰로틀)
   function handleInputChange(event) {
     setInputText(event.target.value)
+    adjustTextareaHeight()
     const now = Date.now()
     if (event.target.value.length > 0 && now - lastTypingSentAtRef.current > 2000) {
       lastTypingSentAtRef.current = now
@@ -209,12 +221,13 @@ export default function MessageInput() {
       <div className="flex items-end gap-2 bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors duration-150">
         {/* 텍스트 입력 */}
         <textarea
+          ref={textareaRef}
           value={inputText}
           onChange={handleInputChange}
           onKeyDown={handleEnterKey}
           onPaste={handlePaste}
           placeholder={`${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`}
-          className="flex-1 bg-transparent text-vsc-text text-sm px-3 py-2.5 resize-none outline-none placeholder-vsc-muted min-h-[40px] max-h-32"
+          className="flex-1 bg-transparent text-vsc-text text-sm px-3 py-2.5 resize-none outline-none placeholder-vsc-muted min-h-[40px] max-h-32 overflow-y-auto"
           rows={1}
         />
 

@@ -102,7 +102,7 @@ export default function Message({ message }) {
 
           {/* 메시지 내용 */}
           {(contentType === 'text' || !contentType) && (
-            <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed whitespace-pre-wrap">
+            <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed whitespace-pre-wrap break-words">
               {parseLinksInText(message.content || '')}
             </div>
           )}
