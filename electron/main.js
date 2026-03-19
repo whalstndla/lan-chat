@@ -805,8 +805,6 @@ async function createWindow() {
     ? path.join(__dirname, '../logo.png')
     : path.join(process.resourcesPath, 'logo.png')
   const trayIcon = nativeImage.createFromPath(trayIconPath).resize({ width: 16, height: 16 })
-  // macOS Template 이미지 설정 (메뉴바 테마에 맞게 자동 색상 변경)
-  trayIcon.setTemplateImage(true)
   tray = new Tray(trayIcon)
   tray.setToolTip('LAN Chat')
 
@@ -990,4 +988,12 @@ app.on('window-all-closed', () => {
   // 트레이 모드에서는 종료하지 않음 — Cmd+Q 또는 트레이 메뉴에서만 종료
   if (!isQuitting) return
   app.quit()
+})
+
+// macOS: Dock 클릭, Spotlight 재실행 등 표준 재활성화 시 숨긴 창 다시 표시
+app.on('activate', () => {
+  if (mainWindow) {
+    mainWindow.show()
+    if (process.platform === 'darwin') app.dock?.show()
+  }
 })
