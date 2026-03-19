@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.6.15",
+    "date": "2025-03-19",
+    "changes": [
+      { "type": "fix", "text": "트레이 최소화 안정성 개선 — Dock 숨김 제거, Cmd+W 숨김 정상 동작" }
+    ]
+  },
+  {
     "version": "0.6.14",
     "date": "2025-03-19",
     "changes": [
