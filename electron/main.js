@@ -137,6 +137,7 @@ async function flushPendingMessages(targetPeerId) {
         to: targetPeerId,
         content: null,
         contentType: messagePayload.contentType,
+        format: messagePayload.format || null,
         encryptedPayload,
         fileUrl: null,
         fileName: null,
@@ -579,7 +580,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       savePendingMessage(database, {
         id: messageId,
         targetPeerId: recipientPeerId,
-        messagePayload: { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
+        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
       })
       // messages 테이블에 평문으로 저장 (히스토리 표시용)
       saveMessage(database, {
@@ -616,7 +617,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       savePendingMessage(database, {
         id: messageId,
         targetPeerId: recipientPeerId,
-        messagePayload: { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
+        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
       })
     }
 
