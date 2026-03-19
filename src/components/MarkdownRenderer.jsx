@@ -24,23 +24,28 @@ const markdownComponents = {
   },
   // 이미지 — 마크다운 내 이미지 비활성화 (파일 첨부로만 전송)
   img: () => null,
-  // 인라인 코드
-  code: ({ inline, children, ...props }) => {
-    if (inline) {
+  // 코드 — pre > code = 코드블록, 단독 code = 인라인
+  // react-markdown v10+는 inline prop을 넘기지 않으므로 부모(pre) 유무로 판별
+  code: ({ children, className, node, ...props }) => {
+    // 부모가 pre이면 코드 블록 (MarkdownRenderer에서 pre를 커스텀하므로 여기서는 block 스타일)
+    const isBlock = node?.position && node?.parent?.tagName === 'pre'
+    // className에 language- 접두사가 있으면 코드 블록
+    const isCodeBlock = isBlock || (className && className.startsWith('language-'))
+    if (isCodeBlock) {
       return (
-        <code className="bg-vsc-bg text-vsc-accent px-1 py-0.5 rounded text-xs font-mono" {...props}>
+        <code className="block bg-vsc-bg rounded p-3 text-xs font-mono overflow-x-auto my-1 text-vsc-text" {...props}>
           {children}
         </code>
       )
     }
-    // 코드 블록
+    // 인라인 코드
     return (
-      <code className="block bg-vsc-bg rounded p-3 text-xs font-mono overflow-x-auto my-1 text-vsc-text" {...props}>
+      <code className="bg-vsc-bg text-vsc-accent px-1 py-0.5 rounded text-xs font-mono" {...props}>
         {children}
       </code>
     )
   },
-  // 코드 블록 래퍼
+  // 코드 블록 래퍼 — pre 안의 code는 블록 처리됨
   pre: ({ children }) => <pre className="my-1">{children}</pre>,
   // 불릿 리스트
   ul: ({ children }) => <ul className="list-disc list-inside my-1 space-y-0.5">{children}</ul>,

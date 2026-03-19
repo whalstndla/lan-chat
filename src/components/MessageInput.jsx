@@ -72,6 +72,8 @@ export default function MessageInput() {
       },
       // Enter 키 처리 — 코드블록/리스트 안에서는 줄바꿈, 밖에서는 전송
       handleKeyDown: (view, event) => {
+        // IME 조합 중(한국어 입력 등)에는 Enter를 전송으로 처리하지 않음
+        if (event.isComposing || event.keyCode === 229) return false
         if (event.key === 'Enter' && !event.shiftKey) {
           const { state } = view
           const { $from } = state.selection
