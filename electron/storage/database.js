@@ -19,7 +19,8 @@ function initDatabase(dbPath) {
       encrypted_payload TEXT,
       file_url          TEXT,
       file_name         TEXT,
-      timestamp         INTEGER NOT NULL
+      timestamp         INTEGER NOT NULL,
+      format            TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
     CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type, from_id, to_id);
@@ -55,6 +56,7 @@ function migrateDatabase(db) {
   // messages 테이블 신규 컬럼 추가
   const messagesMigrations = [
     'ALTER TABLE messages ADD COLUMN read INTEGER DEFAULT 0',
+    'ALTER TABLE messages ADD COLUMN format TEXT',
   ]
   for (const sql of messagesMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }

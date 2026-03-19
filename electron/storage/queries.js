@@ -2,9 +2,9 @@
 function saveMessage(db, message) {
   db.prepare(`
     INSERT OR IGNORE INTO messages
-    (id, type, from_id, from_name, to_id, content, content_type, encrypted_payload, file_url, file_name, timestamp)
-    VALUES (@id, @type, @from_id, @from_name, @to_id, @content, @content_type, @encrypted_payload, @file_url, @file_name, @timestamp)
-  `).run(message)
+    (id, type, from_id, from_name, to_id, content, content_type, encrypted_payload, file_url, file_name, timestamp, format)
+    VALUES (@id, @type, @from_id, @from_name, @to_id, @content, @content_type, @encrypted_payload, @file_url, @file_name, @timestamp, @format)
+  `).run({ ...message, format: message.format || null })
 }
 
 function getGlobalHistory(db, limit = 100) {
