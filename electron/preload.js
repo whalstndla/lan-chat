@@ -82,6 +82,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('pending-messages-flushed', (_, data) => callback(data))
   },
 
+  // 알림 클릭 시 채팅방 이동
+  onNavigateToRoom: (callback) => {
+    ipcRenderer.removeAllListeners('navigate-to-room')
+    ipcRenderer.on('navigate-to-room', (_, room) => callback(room))
+  },
+
   // 이벤트 구독 해제
   unsubscribeAll: () => {
     ipcRenderer.removeAllListeners('message-received')
@@ -92,6 +98,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-profile-updated')
     ipcRenderer.removeAllListeners('pending-messages-flushed')
     ipcRenderer.removeAllListeners('read-receipt')
+    ipcRenderer.removeAllListeners('navigate-to-room')
     ipcRenderer.removeAllListeners('play-notification-sound')
     ipcRenderer.removeAllListeners('update-available')
     ipcRenderer.removeAllListeners('update-download-progress')

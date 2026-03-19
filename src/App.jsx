@@ -222,6 +222,12 @@ export default function App() {
         playNotification()
       })
 
+      // 알림 클릭 시 해당 채팅방으로 이동
+      window.electronAPI.onNavigateToRoom((room) => {
+        const { setCurrentRoom } = useChatStore.getState()
+        setCurrentRoom(room)
+      })
+
       // 피어 발견 시작 — 구독 등록 후 시작해야 race condition 방지
       await window.electronAPI.startPeerDiscovery()
     }
