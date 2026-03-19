@@ -826,6 +826,18 @@ async function createWindow() {
   ])
   tray.setContextMenu(trayMenu)
 
+  // Windows/Linux: 트레이 아이콘 클릭으로 창 복원 (macOS는 컨텍스트 메뉴만 지원)
+  if (process.platform !== 'darwin') {
+    tray.on('click', () => {
+      if (mainWindow.isVisible()) {
+        mainWindow.focus()
+      } else {
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    })
+  }
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
   } else {
