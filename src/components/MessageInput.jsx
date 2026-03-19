@@ -6,7 +6,30 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
+import { Extension, InputRule } from '@tiptap/core'
 import useChatStore from '../store/useChatStore'
+
+// 텍스트 뒤에서도 ``` 입력 시 코드블록으로 변환하는 커스텀 Extension
+const CodeBlockShortcut = Extension.create({
+  name: 'codeBlockShortcut',
+  addInputRules() {
+    return [
+      // 줄 어디서든 ```를 입력하면 코드블록으로 변환
+      // 기존 내용이 있으면 위에 유지하고 새 코드블록 삽입
+      new InputRule({
+        find: /```$/,
+        handler: ({ state, range, chain }) => {
+          const { tr } = state
+          // ``` 텍스트 삭제
+          tr.delete(range.from, range.to)
+          // 현재 위치에 코드블록 삽입
+          const codeBlock = state.schema.nodes.codeBlock.create()
+          tr.replaceSelectionWith(codeBlock)
+        },
+      }),
+    ]
+  },
+})
 
 // 파일 MIME 타입 → contentType 변환
 function getFileContentType(file) {
@@ -36,11 +59,10 @@ export default function MessageInput() {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        // 헤딩은 채팅에서 불필요
         heading: false,
-        // 수평선 비활성화
         horizontalRule: false,
       }),
+      CodeBlockShortcut,
       Placeholder.configure({
         placeholder: `${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`,
       }),
