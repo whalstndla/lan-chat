@@ -52,12 +52,21 @@ export default function ChatWindow() {
     setNewMessageToast(null)
   }
 
-  // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화
+  // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화 + 읽음 확인 전송
   useEffect(() => {
     if (currentRoom.type === 'dm' && myPeerId) {
       resetUnread(currentRoom.peerId)
       window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId)
-        .then(history => setDMHistory(currentRoom.peerId, history))
+        .then(history => {
+          setDMHistory(currentRoom.peerId, history)
+          // 상대방이 보낸 안읽은 메시지에 대해 읽음 확인 전송
+          const unreadMessageIds = history
+            .filter(msg => (msg.fromId || msg.from_id) === currentRoom.peerId)
+            .map(msg => msg.id)
+          if (unreadMessageIds.length > 0) {
+            window.electronAPI.sendReadReceipt(currentRoom.peerId, unreadMessageIds).catch(() => {})
+          }
+        })
     }
   }, [currentRoom, myPeerId])
 

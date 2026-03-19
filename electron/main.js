@@ -197,6 +197,12 @@ async function initApp() {
       return
     }
 
+    // 읽음 확인 이벤트 — DB 저장 없이 렌더러로 전달
+    if (message.type === 'read-receipt') {
+      sendToRenderer('read-receipt', { fromId: message.fromId, messageIds: message.messageIds })
+      return
+    }
+
     // 닉네임 변경 이벤트
     if (message.type === 'nickname-changed') {
       sendToRenderer('peer-nickname-changed', { peerId: message.fromId, nickname: message.nickname })
@@ -623,6 +629,17 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     } else {
       broadcastMessage(typingMessage)
     }
+  })
+
+  // 읽음 확인 전송 — 상대방에게 내가 읽은 메시지 ID 목록 전달
+  ipcMain.handle('send-read-receipt', (_, { targetPeerId, messageIds }) => {
+    if (!targetPeerId || !messageIds?.length) return
+    sendMessage(targetPeerId, {
+      type: 'read-receipt',
+      fromId: currentPeerId,
+      messageIds,
+      timestamp: Date.now(),
+    })
   })
 
   // 메시지 삭제 (본인 메시지만)

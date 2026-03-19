@@ -1,6 +1,6 @@
 // src/components/Message.jsx
 import React, { useState, useEffect } from 'react'
-import { Paperclip, Trash2, X, Clock } from 'lucide-react'
+import { Paperclip, Trash2, X, Clock, Check, CheckCheck } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
@@ -87,6 +87,12 @@ export default function Message({ message }) {
             </span>
             {message.pending && (
               <Clock size={11} className="text-vsc-muted" title="전송 대기 중" />
+            )}
+            {/* DM 읽음/안읽음 표시 — 내 메시지에만 */}
+            {isMyMessage && !message.pending && message.type === 'dm' && (
+              message.read
+                ? <CheckCheck size={12} className="text-blue-400" title="읽음" />
+                : <Check size={12} className="text-vsc-muted" title="안읽음" />
             )}
             {isMyMessage && !message.pending && (
               <button
