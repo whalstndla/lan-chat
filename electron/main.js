@@ -805,11 +805,15 @@ ipcMain.handle('open-external', (_, url) => {
 // 패치노트 조회 — 전체 changelog 반환
 ipcMain.handle('get-changelog', () => loadChangelog())
 
-// 앱 버전 + 업데이트 여부 조회
-ipcMain.handle('get-app-version-info', () => ({
-  currentVersion: app.getVersion(),
-  updatedFromVersion,
-}))
+// 앱 버전 + 업데이트 여부 조회 — 일회성 소비 (재로그인 시 중복 표시 방지)
+ipcMain.handle('get-app-version-info', () => {
+  const result = {
+    currentVersion: app.getVersion(),
+    updatedFromVersion,
+  }
+  updatedFromVersion = null
+  return result
+})
 
 // 업데이트 확인 IPC 핸들러 — dev에서는 즉시 not-available 반환
 ipcMain.handle('check-for-updates', () => {
