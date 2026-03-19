@@ -6,30 +6,7 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
-import { Extension, InputRule } from '@tiptap/core'
 import useChatStore from '../store/useChatStore'
-
-// 텍스트 뒤에서도 ``` 입력 시 코드블록으로 변환하는 커스텀 Extension
-const CodeBlockShortcut = Extension.create({
-  name: 'codeBlockShortcut',
-  addInputRules() {
-    return [
-      // 줄 어디서든 ```를 입력하면 코드블록으로 변환
-      // 기존 내용이 있으면 위에 유지하고 새 코드블록 삽입
-      new InputRule({
-        find: /```$/,
-        handler: ({ state, range, chain }) => {
-          const { tr } = state
-          // ``` 텍스트 삭제
-          tr.delete(range.from, range.to)
-          // 현재 위치에 코드블록 삽입
-          const codeBlock = state.schema.nodes.codeBlock.create()
-          tr.replaceSelectionWith(codeBlock)
-        },
-      }),
-    ]
-  },
-})
 
 // 파일 MIME 타입 → contentType 변환
 function getFileContentType(file) {
@@ -62,7 +39,6 @@ export default function MessageInput() {
         heading: false,
         horizontalRule: false,
       }),
-      CodeBlockShortcut,
       Placeholder.configure({
         placeholder: `${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`,
       }),
@@ -91,6 +67,28 @@ export default function MessageInput() {
           }
         }
         return false
+      },
+      // 백틱 입력 감지 — 텍스트 뒤에서 ``` 완성 시 현재 줄을 분할하고 코드블록 삽입
+      handleTextInput: (view, from, to, text) => {
+        if (text !== '`') return false
+        const { state } = view
+        const { $from } = state.selection
+        // 현재 줄의 커서 앞 텍스트 확인
+        const textBefore = $from.parent.textContent.slice(0, $from.parentOffset)
+        // 이미 ``가 있고 지금 `를 추가하면 ```가 되는 경우
+        if (!textBefore.endsWith('``')) return false
+        // 줄 시작이 ```이면 기본 InputRule에 맡김
+        const lineText = textBefore + '`'
+        if (lineText.trimStart() === '```') return false
+        // 텍스트 뒤에서 ``` → 백틱 3개 삭제 후 코드블록 삽입
+        const { tr } = state
+        // `` 삭제 (현재 입력될 `는 아직 삽입 안 됨)
+        tr.delete(from - 2, from)
+        // 현재 위치에서 줄을 분할하고 코드블록 삽입
+        const codeBlock = state.schema.nodes.codeBlock.create()
+        tr.replaceSelectionWith(codeBlock)
+        view.dispatch(tr)
+        return true
       },
       // Enter 키 처리 — 코드블록/리스트 안에서는 줄바꿈, 밖에서는 전송
       handleKeyDown: (view, event) => {
