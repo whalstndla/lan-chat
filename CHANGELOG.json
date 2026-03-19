@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.0",
+    "date": "2025-03-19",
+    "changes": [
+      { "type": "feat", "text": "마크다운 WYSIWYG 지원 — 입력 시 즉시 서식 렌더링 (Tiptap 에디터)" },
+      { "type": "feat", "text": "말풍선 마크다운 렌더링 — **굵게**, *기울임*, ~~취소선~~, `코드`, 코드블록, 리스트, 인용" },
+      { "type": "feat", "text": "코드블록/리스트 안에서 Enter = 줄바꿈, 밖에서 Enter = 전송" },
+      { "type": "fix", "text": "한국어 IME 입력 중 Enter 오전송 방지" }
+    ]
+  },
+  {
     "version": "0.6.16",
     "date": "2025-03-19",
     "changes": [
