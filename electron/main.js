@@ -843,6 +843,53 @@ async function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/renderer/index.html'))
   }
 
+  // macOS 앱 메뉴 설정 — Cmd+W를 숨김으로 오버라이드 (기본 Close Window 방지)
+  if (process.platform === 'darwin') {
+    const appMenu = Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+      {
+        label: '편집',
+        submenu: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        ],
+      },
+      {
+        label: '창',
+        submenu: [
+          {
+            label: '창 닫기',
+            accelerator: 'CmdOrCtrl+W',
+            click: () => {
+              if (mainWindow && !isQuitting) {
+                mainWindow.hide()
+                app.dock?.hide()
+              }
+            },
+          },
+          { role: 'minimize' },
+        ],
+      },
+    ])
+    Menu.setApplicationMenu(appMenu)
+  }
+
   setupAutoUpdater()
 }
 
