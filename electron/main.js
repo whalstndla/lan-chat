@@ -50,9 +50,24 @@ function sendToRenderer(channel, data) {
   }
 }
 
-function showNotification(title, body) {
+// 알림 표시 — 클릭 시 창 복원 + 해당 채팅방으로 이동
+// navigateTo: { type: 'global' } 또는 { type: 'dm', peerId, nickname }
+function showNotification(title, body, navigateTo) {
   if (!Notification.isSupported()) return
-  new Notification({ title, body: body?.slice(0, 100) || '' }).show()
+  const iconPath = isDev
+    ? path.join(__dirname, '../logo.png')
+    : path.join(process.resourcesPath, 'logo.png')
+  const notification = new Notification({ title, body: body?.slice(0, 100) || '', icon: iconPath })
+  notification.on('click', () => {
+    if (mainWindow) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+    if (navigateTo) {
+      sendToRenderer('navigate-to-room', navigateTo)
+    }
+  })
+  notification.show()
 }
 
 // 창이 비활성화 상태일 때 렌더러에 소리 재생 요청
@@ -305,7 +320,8 @@ async function initApp() {
         if (mainWindow && !mainWindow.isFocused()) {
           showNotification(
             `${message.from || '알 수 없음'} (DM)`,
-            decryptedPayload.content || '파일을 보냈습니다.'
+            decryptedPayload.content || '파일을 보냈습니다.',
+            { type: 'dm', peerId: message.fromId, nickname: message.from || '알 수 없음' }
           )
           playNotificationSound()
         }
@@ -339,7 +355,8 @@ async function initApp() {
     if (mainWindow && !mainWindow.isFocused()) {
       showNotification(
         message.from || '알 수 없음',
-        message.content || '파일을 보냈습니다.'
+        message.content || '파일을 보냈습니다.',
+        { type: 'global' }
       )
       playNotificationSound()
     }
