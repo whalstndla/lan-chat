@@ -24,15 +24,15 @@ const markdownComponents = {
   },
   // 이미지 — 마크다운 내 이미지 비활성화 (파일 첨부로만 전송)
   img: () => null,
-  // 인라인 코드 — pre 래퍼가 없는 code 태그
+  // 인라인 코드 — pre > code에서도 호출되므로 인라인 스타일만 적용
   code: ({ children, ...props }) => (
     <code className="bg-vsc-bg text-vsc-accent px-1 py-0.5 rounded text-xs font-mono" {...props}>
       {children}
     </code>
   ),
-  // 코드 블록 — pre > code 구조. pre를 오버라이드하여 블록 스타일 적용
+  // 코드 블록 — pre > code 구조. 내부 code의 인라인 스타일을 리셋하고 블록 스타일 적용
   pre: ({ children }) => (
-    <pre className="bg-vsc-bg rounded p-3 text-xs font-mono overflow-x-auto my-1 text-vsc-text">
+    <pre className="bg-vsc-bg rounded p-3 text-xs font-mono overflow-x-auto my-1 text-vsc-text [&>code]:bg-transparent [&>code]:text-inherit [&>code]:p-0 [&>code]:rounded-none">
       {children}
     </pre>
   ),
