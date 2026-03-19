@@ -72,7 +72,7 @@ export default function App() {
   const { addPeer, removePeer, updatePeerNickname, updatePeer, setPastDMPeers, addPastDMPeer } = usePeerStore()
   const { setNotificationSettings } = useUserStore()
   const { play: playNotification } = useNotificationSound()
-  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread, setTyping, clearExpiredTyping, removeGlobalMessage, removeDMMessage, clearPendingMessages } = useChatStore()
+  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread, setTyping, clearExpiredTyping, removeGlobalMessage, removeDMMessage, clearPendingMessages, markMessagesAsRead } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
   // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
   const [updateState, setUpdateState] = useState('idle')
@@ -169,9 +169,11 @@ export default function App() {
           const senderPeer = usePeerStore.getState().onlinePeers.find(p => p.peerId === senderId)
           if (senderPeer) addPastDMPeer({ peerId: senderId, nickname: senderPeer.nickname })
 
-          // 현재 보고 있지 않은 DM방이면 안읽은 수 증가
+          // 현재 보고 있는 DM방이면 즉시 읽음 확인 전송, 아니면 안읽은 수 증가
           const { currentRoom } = useChatStore.getState()
-          if (!(currentRoom.type === 'dm' && currentRoom.peerId === senderId)) {
+          if (currentRoom.type === 'dm' && currentRoom.peerId === senderId) {
+            window.electronAPI.sendReadReceipt(senderId, [message.id]).catch(() => {})
+          } else {
             incrementUnread(senderId)
           }
         } else if (message.type === 'delete-message') {
@@ -206,6 +208,11 @@ export default function App() {
       // 오프라인 메시지 전송 완료 이벤트
       window.electronAPI.onPendingMessagesFlushed(({ targetPeerId, messageIds }) => {
         clearPendingMessages(targetPeerId, messageIds)
+      })
+
+      // 읽음 확인 수신 — 상대방이 내 메시지를 읽었을 때
+      window.electronAPI.onReadReceipt(({ fromId, messageIds }) => {
+        markMessagesAsRead(fromId, messageIds)
       })
 
       window.electronAPI.subscribeToPeerDiscovery(addPeer)

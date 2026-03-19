@@ -39,6 +39,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 타이핑 인디케이터 전송
   sendTyping: (targetPeerId) => ipcRenderer.invoke('send-typing', targetPeerId),
 
+  // 읽음 확인
+  getUnreadDMIds: (senderPeerId) => ipcRenderer.invoke('get-unread-dm-ids', senderPeerId),
+  sendReadReceipt: (targetPeerId, messageIds) => ipcRenderer.invoke('send-read-receipt', { targetPeerId, messageIds }),
+
+  // 읽음 확인 수신 이벤트
+  onReadReceipt: (callback) => {
+    ipcRenderer.removeAllListeners('read-receipt')
+    ipcRenderer.on('read-receipt', (_, data) => callback(data))
+  },
+
   // 메시지 삭제
   deleteMessage: (messageId, targetPeerId) => ipcRenderer.invoke('delete-message', { messageId, targetPeerId }),
 
@@ -81,6 +91,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-nickname-changed')
     ipcRenderer.removeAllListeners('peer-profile-updated')
     ipcRenderer.removeAllListeners('pending-messages-flushed')
+    ipcRenderer.removeAllListeners('read-receipt')
     ipcRenderer.removeAllListeners('play-notification-sound')
     ipcRenderer.removeAllListeners('update-available')
     ipcRenderer.removeAllListeners('update-download-progress')

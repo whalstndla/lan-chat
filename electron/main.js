@@ -4,7 +4,7 @@ const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
 const { initDatabase, migrateDatabase } = require('./storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs } = require('./storage/queries')
+const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead: markMessagesAsReadDB, getUnreadDMMessageIds } = require('./storage/queries')
 const {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
@@ -194,6 +194,13 @@ async function initApp() {
         fromId: message.fromId,
         to: message.to || null,
       })
+      return
+    }
+
+    // 읽음 확인 이벤트 — DB 업데이트 후 렌더러로 전달
+    if (message.type === 'read-receipt') {
+      try { markMessagesAsReadDB(database, message.messageIds) } catch { /* 무시 */ }
+      sendToRenderer('read-receipt', { fromId: message.fromId, messageIds: message.messageIds })
       return
     }
 
@@ -625,6 +632,26 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     }
   })
 
+  // 안읽은 DM 메시지 ID 조회 (제한 없음)
+  ipcMain.handle('get-unread-dm-ids', (_, senderPeerId) => {
+    return getUnreadDMMessageIds(database, currentPeerId, senderPeerId)
+  })
+
+  // 읽음 확인 전송 — 전송 성공 시에만 로컬 DB 업데이트 (실패 시 재진입 때 재전송 가능)
+  ipcMain.handle('send-read-receipt', (_, { targetPeerId, messageIds }) => {
+    if (!targetPeerId || !messageIds?.length) return
+    const sent = sendMessage(targetPeerId, {
+      type: 'read-receipt',
+      fromId: currentPeerId,
+      messageIds,
+      timestamp: Date.now(),
+    })
+    // 전송 성공 시에만 로컬 DB 읽음 처리 — 실패 시 재진입 때 재전송 가능
+    if (sent) {
+      try { markMessagesAsReadDB(database, messageIds) } catch { /* 무시 */ }
+    }
+  })
+
   // 메시지 삭제 (본인 메시지만)
   ipcMain.handle('delete-message', (_, { messageId, targetPeerId }) => {
     deleteMessage(database, messageId, currentPeerId)
@@ -652,12 +679,15 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     const otherPublicKey = peerPublicKeyMap.get(peerId2)
 
     return history.map(msg => {
+      // DB의 read (0/1) → boolean 변환
+      const readFlag = !!msg.read
       if (msg.encrypted_payload && otherPublicKey) {
         try {
           const sharedSecret = deriveSharedSecret(myPrivateKey, otherPublicKey)
           const decryptedPayload = decryptDM(msg.encrypted_payload, sharedSecret)
           return {
             ...msg,
+            read: readFlag,
             content: decryptedPayload.content,
             contentType: decryptedPayload.contentType || msg.content_type,
             fileUrl: decryptedPayload.fileUrl || msg.file_url,
@@ -667,7 +697,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           // 복호화 실패 시 원본 반환
         }
       }
-      return msg
+      return { ...msg, read: readFlag }
     })
   })
 

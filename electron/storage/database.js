@@ -52,6 +52,14 @@ function migrateDatabase(db) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
   }
 
+  // messages 테이블 신규 컬럼 추가
+  const messagesMigrations = [
+    'ALTER TABLE messages ADD COLUMN read INTEGER DEFAULT 0',
+  ]
+  for (const sql of messagesMigrations) {
+    try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
+  }
+
   // 오프라인 메시지 큐 테이블
   db.exec(`
     CREATE TABLE IF NOT EXISTS pending_messages (

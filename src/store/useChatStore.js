@@ -81,6 +81,17 @@ const useChatStore = create((set) => ({
       },
     })),
 
+  // DM 메시지 읽음 처리 — 상대방이 읽었을 때 read 플래그 설정
+  markMessagesAsRead: (peerId, messageIds) =>
+    set((state) => ({
+      dmMessages: {
+        ...state.dmMessages,
+        [peerId]: (state.dmMessages[peerId] || []).map(msg =>
+          messageIds.includes(msg.id) ? { ...msg, read: true } : msg
+        ),
+      },
+    })),
+
   // pending 플래그 제거 (오프라인 메시지 전송 완료 시)
   clearPendingMessages: (peerId, messageIds) =>
     set((state) => ({
