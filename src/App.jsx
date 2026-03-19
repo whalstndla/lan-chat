@@ -10,6 +10,7 @@ import SetupScreen from './components/SetupScreen'
 import LoginScreen from './components/LoginScreen'
 import Sidebar from './components/Sidebar'
 import ChatWindow from './components/ChatWindow'
+import PatchNotes from './components/PatchNotes'
 
 // macOS hiddenInset 타이틀바: 트래픽 라이트(80×38px) 안전 영역 + 드래그 핸들
 function TitleBar({ nickname, updateState, onCheckUpdate }) {
@@ -77,6 +78,8 @@ export default function App() {
   const [updateState, setUpdateState] = useState('idle')
   const [downloadPercent, setDownloadPercent] = useState(0)
   const updateDownloadedRef = useRef(false)
+  const [showPatchNotes, setShowPatchNotes] = useState(false)
+  const [patchNotesHighlight, setPatchNotesHighlight] = useState(null)
 
   // 업데이트 확인 완료 후 인증 화면으로 진행 (자동 로그인 체크 포함)
   const proceedToAuth = async () => {
@@ -142,6 +145,13 @@ export default function App() {
       // 과거 DM 상대 목록 불러오기 (오프라인이어도 사이드바에 표시)
       const dmPeers = await window.electronAPI.getDMPeers()
       setPastDMPeers(dmPeers)
+
+      // 업데이트 후 첫 실행 시 패치노트 자동 표시
+      const versionInfo = await window.electronAPI.getAppVersionInfo()
+      if (versionInfo.updatedFromVersion) {
+        setPatchNotesHighlight(versionInfo.currentVersion)
+        setShowPatchNotes(true)
+      }
 
       // 알림 설정 불러오기
       const notificationSettings = await window.electronAPI.getNotificationSettings()
@@ -294,9 +304,16 @@ export default function App() {
       <TitleBar nickname={authenticatedNickname} updateState={updateState} onCheckUpdate={handleCheckUpdate} />
       {/* 사이드바 + 채팅창 */}
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar onShowPatchNotes={() => setShowPatchNotes(true)} />
         <ChatWindow />
       </div>
+      {/* 패치노트 모달 */}
+      {showPatchNotes && (
+        <PatchNotes
+          onClose={() => setShowPatchNotes(false)}
+          highlightVersion={patchNotesHighlight}
+        />
+      )}
     </div>
   )
 }

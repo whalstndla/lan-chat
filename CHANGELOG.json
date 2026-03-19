@@ -1,0 +1,71 @@
+[
+  {
+    "version": "0.6.10",
+    "date": "2025-03-18",
+    "changes": [
+      { "type": "fix", "text": "내가 보낸 긴 링크가 줄바꿈되지 않는 문제 수정" }
+    ]
+  },
+  {
+    "version": "0.6.9",
+    "date": "2025-03-18",
+    "changes": [
+      { "type": "feat", "text": "스크롤 위에 있을 때 새 메시지 토스트 알림 추가" }
+    ]
+  },
+  {
+    "version": "0.6.8",
+    "date": "2025-03-18",
+    "changes": [
+      { "type": "feat", "text": "스크롤 하단 자동 고정 (위에서 읽는 중이면 방해 안 함)" },
+      { "type": "feat", "text": "긴 텍스트(링크 등) 말풍선 줄바꿈 처리" },
+      { "type": "feat", "text": "채팅 입력창 줄바꿈 시 높이 자동 증가" }
+    ]
+  },
+  {
+    "version": "0.6.7",
+    "date": "2025-03-16",
+    "changes": [
+      { "type": "fix", "text": "새로고침/재로그인 시 상대방과 연결 안 되는 문제 해결" },
+      { "type": "fix", "text": "mDNS 서비스 캐시 문제로 피어 재발견 실패하는 문제 해결" }
+    ]
+  },
+  {
+    "version": "0.6.5",
+    "date": "2025-03-16",
+    "changes": [
+      { "type": "feat", "text": "전체 채팅 기록 삭제 기능" },
+      { "type": "feat", "text": "DM 기록 삭제 기능" }
+    ]
+  },
+  {
+    "version": "0.6.3",
+    "date": "2025-03-12",
+    "changes": [
+      { "type": "fix", "text": "팀장 리뷰 반영 — wsServer 소켓 에러 핸들러, 연결 안정성 개선" }
+    ]
+  },
+  {
+    "version": "0.6.2",
+    "date": "2025-03-10",
+    "changes": [
+      { "type": "feat", "text": "알림 소리 변경 및 볼륨 조절 (4종 기본 + 커스텀 업로드)" },
+      { "type": "feat", "text": "채팅 메시지 텍스트 선택 허용" },
+      { "type": "feat", "text": "링크 외부 브라우저 오픈" },
+      { "type": "feat", "text": "재시작 후 오프라인 DM 상대 사이드바 표시" },
+      { "type": "fix", "text": "연결 안정성 개선 (race condition, mDNS goodbye 대기)" }
+    ]
+  },
+  {
+    "version": "0.6.0",
+    "date": "2025-03-06",
+    "changes": [
+      { "type": "feat", "text": "피어 ID 고정 (재시작해도 동일)" },
+      { "type": "feat", "text": "자동 로그인 (24시간)" },
+      { "type": "feat", "text": "로그아웃 기능" },
+      { "type": "feat", "text": "닉네임 수정" },
+      { "type": "feat", "text": "프로필 이미지 설정" },
+      { "type": "feat", "text": "오프라인 메시지 큐" }
+    ]
+  }
+]
