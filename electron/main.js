@@ -637,17 +637,19 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     return getUnreadDMMessageIds(database, currentPeerId, senderPeerId)
   })
 
-  // 읽음 확인 전송 — 로컬 DB 업데이트 + 상대방에게 전달
+  // 읽음 확인 전송 — 전송 성공 시에만 로컬 DB 업데이트 (실패 시 재진입 때 재전송 가능)
   ipcMain.handle('send-read-receipt', (_, { targetPeerId, messageIds }) => {
     if (!targetPeerId || !messageIds?.length) return
-    // 수신자 로컬 DB에도 읽음 상태 반영 (재진입 시 중복 전송 방지)
-    try { markMessagesAsReadDB(database, messageIds) } catch { /* 무시 */ }
-    sendMessage(targetPeerId, {
+    const sent = sendMessage(targetPeerId, {
       type: 'read-receipt',
       fromId: currentPeerId,
       messageIds,
       timestamp: Date.now(),
     })
+    // 전송 성공 시에만 로컬 DB 읽음 처리 — 실패 시 재진입 때 재전송 가능
+    if (sent) {
+      try { markMessagesAsReadDB(database, messageIds) } catch { /* 무시 */ }
+    }
   })
 
   // 메시지 삭제 (본인 메시지만)
