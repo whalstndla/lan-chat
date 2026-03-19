@@ -46,7 +46,8 @@
       "node_modules/better-sqlite3/build/Release/*.node"
     ],
     "extraResources": [
-      "CHANGELOG.json"
+      "CHANGELOG.json",
+      "logo.png"
     ],
     "mac": {
       "target": [
