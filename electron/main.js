@@ -791,12 +791,11 @@ async function createWindow() {
   })
 
   // 닫기 버튼 클릭 시 종료 대신 숨김 (트레이로 최소화)
+  // Dock 아이콘은 유지 — Discord/Slack 방식 (background agent 문제 방지)
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault()
       mainWindow.hide()
-      // macOS: Dock에서도 숨김
-      if (process.platform === 'darwin') app.dock?.hide()
     }
   })
 
@@ -813,7 +812,7 @@ async function createWindow() {
       label: 'LAN Chat 열기',
       click: () => {
         mainWindow.show()
-        if (process.platform === 'darwin') app.dock?.show()
+        mainWindow.focus()
       },
     },
     { type: 'separator' },
@@ -826,16 +825,6 @@ async function createWindow() {
     },
   ])
   tray.setContextMenu(trayMenu)
-
-  // 트레이 아이콘 클릭 시 창 표시
-  tray.on('click', () => {
-    if (mainWindow.isVisible()) {
-      mainWindow.focus()
-    } else {
-      mainWindow.show()
-      if (process.platform === 'darwin') app.dock?.show()
-    }
-  })
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
@@ -879,7 +868,6 @@ async function createWindow() {
             click: () => {
               if (mainWindow && !isQuitting) {
                 mainWindow.hide()
-                app.dock?.hide()
               }
             },
           },
@@ -1025,8 +1013,11 @@ async function performCleanup() {
 
 // before-quit: app.quit()가 어디서 호출되든 cleanup 실행 (async 처리로 goodbye 전파 보장)
 app.on('before-quit', (event) => {
-  isQuitting = true
-  if (hasCleanedUp) return
+  // cleanup 완료 후에만 isQuitting = true — 조기 설정 시 close 핸들러가 숨김 대신 종료를 허용하는 문제 방지
+  if (hasCleanedUp) {
+    isQuitting = true
+    return
+  }
   event.preventDefault()
   performCleanup().then(() => app.quit())
 })
@@ -1041,6 +1032,6 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (mainWindow) {
     mainWindow.show()
-    if (process.platform === 'darwin') app.dock?.show()
+    mainWindow.focus()
   }
 })
