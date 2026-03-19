@@ -72,4 +72,11 @@ function clearAllDMs(db) {
   })()
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs }
+// DM 메시지 읽음 상태 DB 업데이트
+function markMessagesAsRead(db, messageIds) {
+  if (!messageIds?.length) return
+  const placeholders = messageIds.map(() => '?').join(',')
+  db.prepare(`UPDATE messages SET read = 1 WHERE id IN (${placeholders})`).run(...messageIds)
+}
+
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead }
