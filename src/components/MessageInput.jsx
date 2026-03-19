@@ -36,9 +36,7 @@ export default function MessageInput() {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        // 헤딩은 채팅에서 불필요
         heading: false,
-        // 수평선 비활성화
         horizontalRule: false,
       }),
       Placeholder.configure({
@@ -69,6 +67,24 @@ export default function MessageInput() {
           }
         }
         return false
+      },
+      // 백틱 입력 감지 — ``` 완성 시 코드블록 삽입
+      handleTextInput: (view, from, to, text) => {
+        if (text !== '`') return false
+        const { state } = view
+        const { $from } = state.selection
+        // 코드블록 안에서는 일반 텍스트로 입력 (변환하지 않음)
+        if ($from.parent.type.name === 'codeBlock') return false
+        // 커서 앞 텍스트가 ``로 끝나는지 확인 (지금 `를 추가하면 ```가 됨)
+        const textBefore = $from.parent.textContent.slice(0, $from.parentOffset)
+        if (!textBefore.endsWith('``')) return false
+        // `` 삭제 + 코드블록 삽입
+        const { tr } = state
+        tr.delete(from - 2, from)
+        const codeBlock = state.schema.nodes.codeBlock.create()
+        tr.replaceSelectionWith(codeBlock)
+        view.dispatch(tr)
+        return true
       },
       // Enter 키 처리 — 코드블록/리스트 안에서는 줄바꿈, 밖에서는 전송
       handleKeyDown: (view, event) => {
