@@ -25,3 +25,58 @@ body {
 .select-text {
   user-select: text;
 }
+
+/* Tiptap 에디터 스타일 */
+.tiptap-editor .ProseMirror {
+  outline: none;
+  min-height: 40px;
+  max-height: 128px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #cccccc;
+  line-height: 1.5;
+}
+
+.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #858585;
+  pointer-events: none;
+  height: 0;
+}
+
+/* 에디터 내 마크다운 스타일 */
+.tiptap-editor .ProseMirror strong { font-weight: 700; }
+.tiptap-editor .ProseMirror em { font-style: italic; }
+.tiptap-editor .ProseMirror s { text-decoration: line-through; color: #858585; }
+.tiptap-editor .ProseMirror code {
+  background: #1e1e1e;
+  color: #4ec9b0;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+.tiptap-editor .ProseMirror pre {
+  background: #1e1e1e;
+  border-radius: 4px;
+  padding: 12px;
+  margin: 4px 0;
+  overflow-x: auto;
+}
+.tiptap-editor .ProseMirror pre code {
+  background: none;
+  padding: 0;
+  color: #cccccc;
+  display: block;
+}
+.tiptap-editor .ProseMirror ul { list-style: disc inside; margin: 4px 0; }
+.tiptap-editor .ProseMirror ol { list-style: decimal inside; margin: 4px 0; }
+.tiptap-editor .ProseMirror blockquote {
+  border-left: 2px solid rgba(78, 201, 176, 0.5);
+  padding-left: 8px;
+  margin: 4px 0;
+  color: #858585;
+  font-style: italic;
+}

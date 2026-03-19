@@ -536,7 +536,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   })
 
   // 전체채팅 메시지 전송
-  ipcMain.handle('send-global-message', (_, { content, contentType, fileUrl, fileName }) => {
+  ipcMain.handle('send-global-message', (_, { content, contentType, fileUrl, fileName, format }) => {
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     const message = {
       id: uuidv4(),
@@ -546,6 +546,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       to: null,
       content: content || null,
       contentType,
+      format: format || null,
       fileUrl: fileUrl || null,
       fileName: fileName || null,
       timestamp: Date.now(),
@@ -565,7 +566,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   })
 
   // DM 전송 (E2E 암호화, 오프라인이면 pending 큐에 저장)
-  ipcMain.handle('send-dm', (_, { recipientPeerId, content, contentType, fileUrl, fileName }) => {
+  ipcMain.handle('send-dm', (_, { recipientPeerId, content, contentType, fileUrl, fileName, format }) => {
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     const messageId = uuidv4()
     const timestamp = Date.now()
@@ -589,7 +590,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       })
       return {
         id: messageId, type: 'dm', from: currentNickname, fromId: currentPeerId,
-        to: recipientPeerId, content: content || null, contentType,
+        to: recipientPeerId, content: content || null, contentType, format: format || null,
         fileUrl: fileUrl || null, fileName: fileName || null, timestamp, pending: true,
       }
     }
@@ -602,7 +603,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
     const message = {
       id: messageId, type: 'dm', from: currentNickname, fromId: currentPeerId,
-      to: recipientPeerId, content: null, contentType, encryptedPayload,
+      to: recipientPeerId, content: null, contentType, format: format || null, encryptedPayload,
       fileUrl: null, fileName: null, timestamp,
     }
 
@@ -629,7 +630,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
     // 렌더러에는 복호화된 내용으로 반환
     return {
-      ...message, content: content || null, fileUrl: fileUrl || null, fileName: fileName || null,
+      ...message, content: content || null, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null,
       ...(sent ? {} : { pending: true }),
     }
   })

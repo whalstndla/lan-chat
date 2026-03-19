@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react'
 import { Paperclip, Trash2, X, Clock, Check, CheckCheck } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
+import MarkdownRenderer from './MarkdownRenderer'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
@@ -108,8 +109,12 @@ export default function Message({ message }) {
 
           {/* 메시지 내용 */}
           {(contentType === 'text' || !contentType) && (
-            <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed whitespace-pre-wrap break-words max-w-full">
-              {parseLinksInText(message.content || '')}
+            <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words max-w-full">
+              {message.format === 'markdown' ? (
+                <MarkdownRenderer content={message.content} />
+              ) : (
+                <span className="whitespace-pre-wrap">{parseLinksInText(message.content || '')}</span>
+              )}
             </div>
           )}
 
