@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, ipcMain, Notification, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, Notification, shell, Tray, Menu, nativeImage } = require('electron')
 const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
@@ -31,6 +31,8 @@ const profileFolderPath = path.join(appDataPath, 'profile')
 const dbPath = path.join(appDataPath, 'chat.db')
 
 let mainWindow = null
+let tray = null
+let isQuitting = false          // Cmd+Q 등 실제 종료 여부 플래그
 let database = null
 let wsServerInfo = null
 let peerId = null                       // 내 피어 ID (createWindow에서 초기화)
@@ -788,6 +790,53 @@ async function createWindow() {
     },
   })
 
+  // 닫기 버튼 클릭 시 종료 대신 숨김 (트레이로 최소화)
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault()
+      mainWindow.hide()
+      // macOS: Dock에서도 숨김
+      if (process.platform === 'darwin') app.dock?.hide()
+    }
+  })
+
+  // 시스템 트레이 설정
+  const trayIconPath = isDev
+    ? path.join(__dirname, '../logo.png')
+    : path.join(process.resourcesPath, 'logo.png')
+  const trayIcon = nativeImage.createFromPath(trayIconPath).resize({ width: 16, height: 16 })
+  tray = new Tray(trayIcon)
+  tray.setToolTip('LAN Chat')
+
+  const trayMenu = Menu.buildFromTemplate([
+    {
+      label: 'LAN Chat 열기',
+      click: () => {
+        mainWindow.show()
+        if (process.platform === 'darwin') app.dock?.show()
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '종료',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      },
+    },
+  ])
+  tray.setContextMenu(trayMenu)
+
+  // 트레이 아이콘 클릭 시 창 표시
+  tray.on('click', () => {
+    if (mainWindow.isVisible()) {
+      mainWindow.focus()
+    } else {
+      mainWindow.show()
+      if (process.platform === 'darwin') app.dock?.show()
+    }
+  })
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173')
   } else {
@@ -929,12 +978,22 @@ async function performCleanup() {
 
 // before-quit: app.quit()가 어디서 호출되든 cleanup 실행 (async 처리로 goodbye 전파 보장)
 app.on('before-quit', (event) => {
+  isQuitting = true
   if (hasCleanedUp) return
   event.preventDefault()
   performCleanup().then(() => app.quit())
 })
 
 app.on('window-all-closed', () => {
-  // macOS에서 창을 모두 닫아도 앱이 유지되는 기본 동작 방지
+  // 트레이 모드에서는 종료하지 않음 — Cmd+Q 또는 트레이 메뉴에서만 종료
+  if (!isQuitting) return
   app.quit()
+})
+
+// macOS: Dock 클릭, Spotlight 재실행 등 표준 재활성화 시 숨긴 창 다시 표시
+app.on('activate', () => {
+  if (mainWindow) {
+    mainWindow.show()
+    if (process.platform === 'darwin') app.dock?.show()
+  }
 })
