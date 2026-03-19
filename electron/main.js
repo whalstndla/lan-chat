@@ -4,7 +4,7 @@ const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
 const { initDatabase, migrateDatabase } = require('./storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead: markMessagesAsReadDB } = require('./storage/queries')
+const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead: markMessagesAsReadDB, getUnreadDMMessageIds } = require('./storage/queries')
 const {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
@@ -630,6 +630,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     } else {
       broadcastMessage(typingMessage)
     }
+  })
+
+  // 안읽은 DM 메시지 ID 조회 (제한 없음)
+  ipcMain.handle('get-unread-dm-ids', (_, senderPeerId) => {
+    return getUnreadDMMessageIds(database, currentPeerId, senderPeerId)
   })
 
   // 읽음 확인 전송 — 상대방에게 내가 읽은 메시지 ID 목록 전달

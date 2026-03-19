@@ -57,14 +57,12 @@ export default function ChatWindow() {
     if (currentRoom.type === 'dm' && myPeerId) {
       resetUnread(currentRoom.peerId)
       window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId)
-        .then(history => {
-          setDMHistory(currentRoom.peerId, history)
-          // 상대방이 보낸 안읽은 메시지에 대해 읽음 확인 전송
-          const unreadMessageIds = history
-            .filter(msg => (msg.fromId || msg.from_id) === currentRoom.peerId)
-            .map(msg => msg.id)
-          if (unreadMessageIds.length > 0) {
-            window.electronAPI.sendReadReceipt(currentRoom.peerId, unreadMessageIds).catch(() => {})
+        .then(history => setDMHistory(currentRoom.peerId, history))
+      // 안읽은 메시지 ID를 DB에서 직접 조회 (100개 제한 없음) 후 읽음 확인 전송
+      window.electronAPI.getUnreadDMIds(currentRoom.peerId)
+        .then(unreadIds => {
+          if (unreadIds.length > 0) {
+            window.electronAPI.sendReadReceipt(currentRoom.peerId, unreadIds).catch(() => {})
           }
         })
     }

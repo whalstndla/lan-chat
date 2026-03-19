@@ -72,6 +72,14 @@ function clearAllDMs(db) {
   })()
 }
 
+// 특정 상대가 보낸 안읽은 DM 메시지 ID 전체 조회 (제한 없음)
+function getUnreadDMMessageIds(db, myPeerId, senderPeerId) {
+  return db.prepare(`
+    SELECT id FROM messages
+    WHERE type = 'dm' AND from_id = ? AND to_id = ? AND read = 0
+  `).all(senderPeerId, myPeerId).map(row => row.id)
+}
+
 // DM 메시지 읽음 상태 DB 업데이트
 function markMessagesAsRead(db, messageIds) {
   if (!messageIds?.length) return
@@ -79,4 +87,4 @@ function markMessagesAsRead(db, messageIds) {
   db.prepare(`UPDATE messages SET read = 1 WHERE id IN (${placeholders})`).run(...messageIds)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead }
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds }

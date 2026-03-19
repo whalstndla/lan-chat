@@ -39,7 +39,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 타이핑 인디케이터 전송
   sendTyping: (targetPeerId) => ipcRenderer.invoke('send-typing', targetPeerId),
 
-  // 읽음 확인 전송
+  // 읽음 확인
+  getUnreadDMIds: (senderPeerId) => ipcRenderer.invoke('get-unread-dm-ids', senderPeerId),
   sendReadReceipt: (targetPeerId, messageIds) => ipcRenderer.invoke('send-read-receipt', { targetPeerId, messageIds }),
 
   // 읽음 확인 수신 이벤트
