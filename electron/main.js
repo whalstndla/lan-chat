@@ -61,6 +61,7 @@ function playNotificationSound() {
 }
 
 // 업데이트 후 첫 실행 감지 — 이전 버전과 현재 버전 비교
+let updatedFromVersion = null  // 업데이트 전 버전 (첫 실행 시 패치노트 표시용)
 function checkAndNotifyUpdated() {
   if (isDev) return
   const versionFilePath = path.join(appDataPath, 'last-version.json')
@@ -70,10 +71,21 @@ function checkAndNotifyUpdated() {
       ? JSON.parse(fs.readFileSync(versionFilePath, 'utf8'))
       : null
     if (stored && stored.version !== currentVersion) {
+      updatedFromVersion = stored.version
       showNotification('LAN Chat 업데이트 완료', `v${stored.version} → v${currentVersion}`)
     }
     fs.writeFileSync(versionFilePath, JSON.stringify({ version: currentVersion }))
   } catch { /* 무시 */ }
+}
+
+// CHANGELOG.json 로드
+function loadChangelog() {
+  try {
+    const changelogPath = isDev
+      ? path.join(__dirname, '../CHANGELOG.json')
+      : path.join(process.resourcesPath, 'CHANGELOG.json')
+    return JSON.parse(fs.readFileSync(changelogPath, 'utf8'))
+  } catch { return [] }
 }
 
 // 오프라인 메시지를 대상 피어에게 전송
@@ -788,6 +800,19 @@ ipcMain.handle('open-external', (_, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
     shell.openExternal(url)
   }
+})
+
+// 패치노트 조회 — 전체 changelog 반환
+ipcMain.handle('get-changelog', () => loadChangelog())
+
+// 앱 버전 + 업데이트 여부 조회 — 일회성 소비 (재로그인 시 중복 표시 방지)
+ipcMain.handle('get-app-version-info', () => {
+  const result = {
+    currentVersion: app.getVersion(),
+    updatedFromVersion,
+  }
+  updatedFromVersion = null
+  return result
 })
 
 // 업데이트 확인 IPC 핸들러 — dev에서는 즉시 not-available 반환

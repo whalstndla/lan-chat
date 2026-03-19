@@ -45,6 +45,9 @@
     "asarUnpack": [
       "node_modules/better-sqlite3/build/Release/*.node"
     ],
+    "extraResources": [
+      "CHANGELOG.json"
+    ],
     "mac": {
       "target": [
         {

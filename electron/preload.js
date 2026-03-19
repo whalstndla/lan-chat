@@ -92,6 +92,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 외부 링크 열기
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
+  // 패치노트
+  getChangelog: () => ipcRenderer.invoke('get-changelog'),
+  getAppVersionInfo: () => ipcRenderer.invoke('get-app-version-info'),
+
   // 알림 설정
   getNotificationSettings: () => ipcRenderer.invoke('get-notification-settings'),
   saveNotificationSettings: (settings) => ipcRenderer.invoke('save-notification-settings', settings),

@@ -1,6 +1,6 @@
 // src/components/Sidebar.jsx
 import React, { useState } from 'react'
-import { Hash, Wifi, ChevronLeft, ChevronRight, Settings } from 'lucide-react'
+import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import SettingsPanel from './SettingsPanel'
@@ -32,7 +32,7 @@ function PeerAvatar({ peer, isOnline }) {
   )
 }
 
-export default function Sidebar() {
+export default function Sidebar({ onShowPatchNotes }) {
   const [collapsed, setCollapsed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const onlinePeers = usePeerStore(state => state.onlinePeers)
@@ -166,7 +166,14 @@ export default function Sidebar() {
           </div>
 
           {/* 설정 버튼 */}
-          <div className="px-3 py-2 border-t border-vsc-border">
+          <div className="px-3 py-2 border-t border-vsc-border space-y-0.5">
+            <button
+              onClick={() => onShowPatchNotes?.()}
+              className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
+            >
+              <FileText size={13} />
+              <span className="text-xs">패치노트</span>
+            </button>
             <button
               onClick={() => setShowSettings(true)}
               className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
