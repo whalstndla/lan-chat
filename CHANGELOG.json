@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.7.3",
+    "date": "2025-03-20",
+    "changes": [
+      { "type": "feat", "text": "메시지 수신 시 Dock badge + 트레이 안읽은 수 표시, 포커스 시 초기화" }
+    ]
+  },
+  {
     "version": "0.7.2",
     "date": "2025-03-20",
     "changes": [
