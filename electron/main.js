@@ -33,6 +33,7 @@ const dbPath = path.join(appDataPath, 'chat.db')
 let mainWindow = null
 let tray = null
 let isQuitting = false          // Cmd+Q 등 실제 종료 여부 플래그
+let unreadBadgeCount = 0        // Dock/트레이 badge용 안읽은 메시지 수
 let database = null
 let wsServerInfo = null
 let peerId = null                       // 내 피어 ID (createWindow에서 초기화)
@@ -50,6 +51,30 @@ function sendToRenderer(channel, data) {
   }
 }
 
+// 안읽은 메시지 badge 증가 — Dock + 트레이
+function incrementBadge() {
+  unreadBadgeCount++
+  // macOS Dock badge
+  if (process.platform === 'darwin') {
+    app.dock?.setBadge(String(unreadBadgeCount))
+  }
+  // 트레이 tooltip에 안읽은 수 표시
+  if (tray) {
+    tray.setToolTip(`LAN Chat (${unreadBadgeCount}개 안읽음)`)
+  }
+}
+
+// badge 초기화 — 창 포커스 시 호출
+function clearBadge() {
+  unreadBadgeCount = 0
+  if (process.platform === 'darwin') {
+    app.dock?.setBadge('')
+  }
+  if (tray) {
+    tray.setToolTip('LAN Chat')
+  }
+}
+
 // 알림 표시 — 클릭 시 창 복원 + 해당 채팅방으로 이동
 // navigateTo: { type: 'global' } 또는 { type: 'dm', peerId, nickname }
 function showNotification(title, body, navigateTo) {
@@ -59,6 +84,7 @@ function showNotification(title, body, navigateTo) {
     : path.join(process.resourcesPath, 'logo.png')
   const notification = new Notification({ title, body: body?.slice(0, 100) || '', icon: iconPath })
   notification.on('click', () => {
+    clearBadge()
     if (mainWindow) {
       mainWindow.show()
       mainWindow.focus()
@@ -320,6 +346,7 @@ async function initApp() {
         })
 
         if (mainWindow && !mainWindow.isFocused()) {
+          incrementBadge()
           showNotification(
             `${message.from || '알 수 없음'} (DM)`,
             decryptedPayload.content || '파일을 보냈습니다.',
@@ -356,6 +383,7 @@ async function initApp() {
     })
 
     if (mainWindow && !mainWindow.isFocused()) {
+      incrementBadge()
       showNotification(
         message.from || '알 수 없음',
         message.content || '파일을 보냈습니다.',
@@ -818,6 +846,11 @@ async function createWindow() {
       event.preventDefault()
       mainWindow.hide()
     }
+  })
+
+  // 창 포커스 시 badge 초기화
+  mainWindow.on('focus', () => {
+    clearBadge()
   })
 
   // 시스템 트레이 설정
