@@ -86,23 +86,11 @@ export default function MessageInput() {
         view.dispatch(tr)
         return true
       },
-      // Enter 키 처리 — 코드블록/리스트 안에서는 줄바꿈, 밖에서는 전송
+      // Enter = 전송, Shift+Enter = 줄바꿈 (위치 무관)
       handleKeyDown: (view, event) => {
         // IME 조합 중(한국어 입력 등)에는 Enter를 전송으로 처리하지 않음
         if (event.isComposing || event.keyCode === 229) return false
         if (event.key === 'Enter' && !event.shiftKey) {
-          const { state } = view
-          const { $from } = state.selection
-          // 코드블록 안이면 기본 동작 (줄바꿈)
-          if ($from.parent.type.name === 'codeBlock') return false
-          // 리스트 아이템 안이면 기본 동작 (새 항목 / 리스트 탈출)
-          if ($from.parent.type.name === 'listItem') return false
-          // 불릿/순서 리스트 안이면 기본 동작
-          for (let depth = $from.depth; depth > 0; depth--) {
-            const nodeType = $from.node(depth).type.name
-            if (nodeType === 'bulletList' || nodeType === 'orderedList') return false
-          }
-          // 일반 텍스트 — 전송
           event.preventDefault()
           sendMessageRef.current?.()
           return true
