@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.4",
+    "date": "2025-03-20",
+    "changes": [
+      { "type": "feat", "text": "설정 패널 메뉴식 리팩토링 — 프로필/알림/데이터/앱 카테고리 분리" },
+      { "type": "feat", "text": "앱 정보 페이지에 업데이트 확인 버튼 추가" },
+      { "type": "feat", "text": "Dock badge + 트레이 안읽은 수 표시" },
+      { "type": "fix", "text": "Enter = 항상 전송으로 통일 (코드블록 내에서도)" }
+    ]
+  },
+  {
     "version": "0.7.3",
     "date": "2025-03-20",
     "changes": [
