@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.7.2",
+    "date": "2025-03-20",
+    "changes": [
+      { "type": "fix", "text": "Enter = 항상 전송, Shift+Enter = 줄바꿈으로 통일 (코드블록 내에서도 동일)" }
+    ]
+  },
+  {
     "version": "0.7.1",
     "date": "2025-03-19",
     "changes": [
