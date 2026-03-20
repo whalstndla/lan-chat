@@ -79,10 +79,8 @@ function clearBadge() {
 // navigateTo: { type: 'global' } 또는 { type: 'dm', peerId, nickname }
 function showNotification(title, body, navigateTo) {
   if (!Notification.isSupported()) return
-  const iconPath = isDev
-    ? path.join(__dirname, '../logo.png')
-    : path.join(process.resourcesPath, 'logo.png')
-  const notification = new Notification({ title, body: body?.slice(0, 100) || '', icon: iconPath })
+  // macOS: icon 생략 시 앱 아이콘만 오른쪽에 표시 (중복 방지)
+  const notification = new Notification({ title, body: body?.slice(0, 100) || '' })
   notification.on('click', () => {
     clearBadge()
     if (mainWindow) {
