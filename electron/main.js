@@ -188,6 +188,9 @@ function buildMyProfileImageUrl() {
 }
 
 async function initApp() {
+  // 앱 데이터 디렉토리 권한 제한 — 소유자만 접근 (민감 정보 보호)
+  try { fs.chmodSync(appDataPath, 0o700) } catch { /* 무시 */ }
+
   // 임시 파일 폴더 생성
   if (!fs.existsSync(tempFilePath)) fs.mkdirSync(tempFilePath, { recursive: true })
   // 프로필 이미지 폴더 생성
@@ -530,6 +533,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   // 닉네임 변경
   ipcMain.handle('update-nickname', (_, newNickname) => {
     if (!newNickname?.trim()) return { success: false, error: '닉네임을 입력해주세요.' }
+    if (newNickname.trim().length > 30) return { success: false, error: '닉네임은 30자 이하여야 합니다.' }
     try {
       updateNickname(database, newNickname.trim())
       republishService({
@@ -564,8 +568,17 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     }
   })
 
+  // 허용 contentType/format 화이트리스트
+  const ALLOWED_CONTENT_TYPES = ['text', 'image', 'video', 'file']
+  const ALLOWED_FORMATS = [null, undefined, 'markdown']
+  const MAX_CONTENT_LENGTH = 10000
+
   // 전체채팅 메시지 전송
   ipcMain.handle('send-global-message', (_, { content, contentType, fileUrl, fileName, format }) => {
+    // 입력 검증
+    if (content && content.length > MAX_CONTENT_LENGTH) return null
+    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return null
+    if (!ALLOWED_FORMATS.includes(format)) format = null
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     const message = {
       id: uuidv4(),
@@ -596,6 +609,10 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
   // DM 전송 (E2E 암호화, 오프라인이면 pending 큐에 저장)
   ipcMain.handle('send-dm', (_, { recipientPeerId, content, contentType, fileUrl, fileName, format }) => {
+    // 입력 검증
+    if (content && content.length > MAX_CONTENT_LENGTH) return null
+    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return null
+    if (!ALLOWED_FORMATS.includes(format)) format = null
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     const messageId = uuidv4()
     const timestamp = Date.now()
@@ -689,6 +706,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   // 읽음 확인 전송 — 전송 성공 시에만 로컬 DB 업데이트 (실패 시 재진입 때 재전송 가능)
   ipcMain.handle('send-read-receipt', (_, { targetPeerId, messageIds }) => {
     if (!targetPeerId || !messageIds?.length) return
+    // 배열 크기 제한 — SQL 쿼리 부하 방지
+    if (messageIds.length > 500) return
     const sent = sendMessage(targetPeerId, {
       type: 'read-receipt',
       fromId: currentPeerId,
@@ -786,7 +805,10 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   ipcMain.handle('update-password', (_, { currentPassword, newPassword }) => {
     const profile = getProfile(database)
     if (!profile) return { success: false, error: '프로필이 없습니다.' }
-    return updatePassword(database, profile.username, currentPassword, newPassword)
+    const result = updatePassword(database, profile.username, currentPassword, newPassword)
+    // 비밀번호 변경 성공 시 자동 로그인 세션 무효화
+    if (result.success) clearLastLogin(database)
+    return result
   })
 
   // 파일 임시 저장 후 URL 반환
@@ -1012,8 +1034,10 @@ ipcMain.handle('install-update', () => {
       : null
 
     if (appBundlePath) {
-      const tempDir = path.join(os.tmpdir(), `lan-chat-update-${Date.now()}`)
-      const scriptPath = path.join(os.tmpdir(), 'lan-chat-update.sh')
+      // UUID로 고유 경로 생성 — symlink 공격 방지
+      const updateId = uuidv4()
+      const tempDir = path.join(os.tmpdir(), `lan-chat-update-${updateId}`)
+      const scriptPath = path.join(os.tmpdir(), `lan-chat-update-${updateId}.sh`)
 
       const script = [
         '#!/bin/bash',
@@ -1023,10 +1047,20 @@ ipcMain.handle('install-update', () => {
         `unzip -o "${downloadedUpdateFile}" -d "$TEMP_DIR"`,
         `APP=$(find "$TEMP_DIR" -name "*.app" | head -1)`,
         `if [ -n "$APP" ]; then`,
+        // 기존 앱 백업 — 실패 시 롤백용
+        `  BACKUP="${appBundlePath}.backup"`,
+        `  cp -R "${appBundlePath}" "$BACKUP" 2>/dev/null`,
         `  rm -rf "${appBundlePath}"`,
-        `  ditto "$APP" "${appBundlePath}"`,
-        `  rm -f "${downloadedUpdateFile}"`,
-        `  open "${appBundlePath}"`,
+        `  if ditto "$APP" "${appBundlePath}"; then`,
+        `    rm -rf "$BACKUP"`,
+        `    rm -f "${downloadedUpdateFile}"`,
+        `    open "${appBundlePath}"`,
+        `  else`,
+        // 업데이트 실패 시 백업 복원
+        `    rm -rf "${appBundlePath}"`,
+        `    mv "$BACKUP" "${appBundlePath}" 2>/dev/null`,
+        `    open "${appBundlePath}"`,
+        `  fi`,
         `fi`,
         `rm -rf "$TEMP_DIR"`,
         `rm -f "${scriptPath}"`,
