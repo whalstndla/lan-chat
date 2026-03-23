@@ -1,8 +1,12 @@
 // electron/storage/database.js
 const Database = require('better-sqlite3')
+const fs = require('fs')
 
 function initDatabase(dbPath) {
   const db = new Database(dbPath)
+
+  // DB 파일 권한 제한 — 소유자만 읽기/쓰기 (민감 정보 보호)
+  try { fs.chmodSync(dbPath, 0o600) } catch { /* 인메모리 DB 등에서는 무시 */ }
 
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
