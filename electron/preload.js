@@ -39,6 +39,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 타이핑 인디케이터 전송
   sendTyping: (targetPeerId) => ipcRenderer.invoke('send-typing', targetPeerId),
 
+  // 상태 변경
+  updateStatus: (data) => ipcRenderer.invoke('update-status', data),
+  onPeerStatusChanged: (callback) => {
+    ipcRenderer.removeAllListeners('peer-status-changed')
+    ipcRenderer.on('peer-status-changed', (_, data) => callback(data))
+  },
+
   // 읽음 확인
   getUnreadDMIds: (senderPeerId) => ipcRenderer.invoke('get-unread-dm-ids', senderPeerId),
   sendReadReceipt: (targetPeerId, messageIds) => ipcRenderer.invoke('send-read-receipt', { targetPeerId, messageIds }),
@@ -51,6 +58,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 메시지 삭제
   deleteMessage: (messageId, targetPeerId) => ipcRenderer.invoke('delete-message', { messageId, targetPeerId }),
+
+  // 메시지 수정
+  editMessage: (data) => ipcRenderer.invoke('edit-message', data),
+  onMessageEdited: (callback) => {
+    ipcRenderer.removeAllListeners('message-edited')
+    ipcRenderer.on('message-edited', (_, data) => callback(data))
+  },
+
+  // 메시지 전문 검색
+  searchMessages: (params) => ipcRenderer.invoke('search-messages', params),
+
+  // 파일 영구 캐시 URL 조회 — 원본 URL이 만료된 경우 로컬 캐시로 폴백
+  getCachedFileUrl: (messageId) => ipcRenderer.invoke('get-cached-file-url', messageId),
 
   // 이벤트 구독 — 중복 등록 방지를 위해 기존 리스너 제거 후 재등록
   subscribeToMessages: (callback) => {
@@ -88,6 +108,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('navigate-to-room', (_, room) => callback(room))
   },
 
+  // 이모지 리액션
+  toggleReaction: (data) => ipcRenderer.invoke('toggle-reaction', data),
+  getReactions: (messageIds) => ipcRenderer.invoke('get-reactions', messageIds),
+  onReactionUpdated: (callback) => {
+    ipcRenderer.removeAllListeners('reaction-updated')
+    ipcRenderer.on('reaction-updated', (_, data) => callback(data))
+  },
+
   // 이벤트 구독 해제
   unsubscribeAll: () => {
     ipcRenderer.removeAllListeners('message-received')
@@ -99,6 +127,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('pending-messages-flushed')
     ipcRenderer.removeAllListeners('read-receipt')
     ipcRenderer.removeAllListeners('navigate-to-room')
+    ipcRenderer.removeAllListeners('reaction-updated')
+    ipcRenderer.removeAllListeners('message-edited')
+    ipcRenderer.removeAllListeners('peer-status-changed')
     ipcRenderer.removeAllListeners('play-notification-sound')
     ipcRenderer.removeAllListeners('update-available')
     ipcRenderer.removeAllListeners('update-download-progress')

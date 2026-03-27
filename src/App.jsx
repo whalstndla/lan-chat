@@ -205,6 +205,11 @@ export default function App() {
         updatePeer(updatedPeerId, { profileImageUrl: updatedImageUrl })
       })
 
+      // 피어 상태 변경 이벤트
+      window.electronAPI.onPeerStatusChanged(({ peerId: statusPeerId, statusType, statusMessage }) => {
+        usePeerStore.getState().updatePeer(statusPeerId, { statusType, statusMessage })
+      })
+
       // 오프라인 메시지 전송 완료 이벤트
       window.electronAPI.onPendingMessagesFlushed(({ targetPeerId, messageIds }) => {
         clearPendingMessages(targetPeerId, messageIds)
@@ -226,6 +231,18 @@ export default function App() {
       window.electronAPI.onNavigateToRoom((room) => {
         const { setCurrentRoom } = useChatStore.getState()
         setCurrentRoom(room)
+      })
+
+      // 이모지 리액션 실시간 수신 — 상대방이 리액션 추가/제거 시 스토어 업데이트
+      window.electronAPI.onReactionUpdated(({ messageId, peerId, emoji, action }) => {
+        useChatStore.getState().updateReaction(messageId, peerId, emoji, action)
+      })
+
+      // 메시지 수정 수신 — 상대방이 수정한 메시지를 스토어에 반영
+      window.electronAPI.onMessageEdited(({ messageId, fromId, newContent, editedAt, to }) => {
+        const { editGlobalMessage, editDMMessage } = useChatStore.getState()
+        if (to) editDMMessage(fromId, messageId, newContent, editedAt)
+        else editGlobalMessage(messageId, newContent, editedAt)
       })
 
       // 피어 발견 시작 — 구독 등록 후 시작해야 race condition 방지

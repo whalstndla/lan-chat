@@ -5,6 +5,14 @@ function saveMessage(db, message) {
     (id, type, from_id, from_name, to_id, content, content_type, encrypted_payload, file_url, file_name, timestamp, format)
     VALUES (@id, @type, @from_id, @from_name, @to_id, @content, @content_type, @encrypted_payload, @file_url, @file_name, @timestamp, @format)
   `).run({ ...message, format: message.format || null })
+
+  // 글로벌 메시지만 FTS 인덱스에 동기화 (DM은 암호화되어 인덱싱 불가)
+  if (message.type === 'message' && message.content) {
+    try {
+      db.prepare('INSERT OR IGNORE INTO messages_fts(id, content, from_name) VALUES (?, ?, ?)')
+        .run(message.id, message.content, message.from_name)
+    } catch { /* FTS 테이블 없으면 무시 */ }
+  }
 }
 
 function getGlobalHistory(db, limit = 100) {
@@ -87,4 +95,73 @@ function markMessagesAsRead(db, messageIds) {
   db.prepare(`UPDATE messages SET read = 1 WHERE id IN (${placeholders})`).run(...messageIds)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds }
+// 리액션 추가 — 동일 (message_id, peer_id, emoji) 조합은 무시
+function addReaction(db, { messageId, peerId, emoji }) {
+  db.prepare('INSERT OR IGNORE INTO reactions (message_id, peer_id, emoji, created_at) VALUES (?, ?, ?, ?)')
+    .run(messageId, peerId, emoji, Date.now())
+}
+
+// 리액션 제거
+function removeReaction(db, { messageId, peerId, emoji }) {
+  db.prepare('DELETE FROM reactions WHERE message_id = ? AND peer_id = ? AND emoji = ?')
+    .run(messageId, peerId, emoji)
+}
+
+// 특정 메시지의 리액션 전체 조회
+function getReactions(db, messageId) {
+  return db.prepare('SELECT * FROM reactions WHERE message_id = ?').all(messageId)
+}
+
+// 여러 메시지 ID의 리액션을 한 번에 조회 — { messageId: [row, ...] } 형태로 반환
+function getReactionsByMessageIds(db, messageIds) {
+  if (!messageIds?.length) return {}
+  const placeholders = messageIds.map(() => '?').join(',')
+  const rows = db.prepare(`SELECT * FROM reactions WHERE message_id IN (${placeholders})`).all(...messageIds)
+  const grouped = {}
+  for (const row of rows) {
+    if (!grouped[row.message_id]) grouped[row.message_id] = []
+    grouped[row.message_id].push(row)
+  }
+  return grouped
+}
+
+// 메시지 내용 수정 — 본인이 보낸 메시지만 수정 가능 (from_id 검증)
+function editMessage(db, { messageId, fromId, newContent }) {
+  return db.prepare('UPDATE messages SET content = ?, edited_at = ? WHERE id = ? AND from_id = ?')
+    .run(newContent, Date.now(), messageId, fromId)
+}
+
+// 메시지 전문 검색 — FTS5 지원 시 사용, 미지원 시 LIKE 폴백
+function searchMessages(db, { query, type, limit = 50 }) {
+  if (!query?.trim()) return []
+  try {
+    // FTS5 MATCH로 전문 검색 (접두사 검색 지원)
+    let sql = `SELECT m.* FROM messages m INNER JOIN messages_fts fts ON m.id = fts.id WHERE messages_fts MATCH ?`
+    const params = [query + '*']
+    if (type) { sql += ' AND m.type = ?'; params.push(type) }
+    sql += ' ORDER BY m.timestamp DESC LIMIT ?'
+    params.push(limit)
+    return db.prepare(sql).all(...params)
+  } catch {
+    // FTS5 미지원 시 LIKE 폴백
+    let sql = 'SELECT * FROM messages WHERE content LIKE ?'
+    const params = [`%${query}%`]
+    if (type) { sql += ' AND type = ?'; params.push(type) }
+    sql += ' ORDER BY timestamp DESC LIMIT ?'
+    params.push(limit)
+    return db.prepare(sql).all(...params)
+  }
+}
+
+// 파일 캐시 경로 저장 — 수신된 파일을 로컬에 캐시한 경로를 메시지에 연결
+function saveFileCache(db, { messageId, cachedPath }) {
+  db.prepare('UPDATE messages SET cached_file_path = ? WHERE id = ?').run(cachedPath, messageId)
+}
+
+// 파일 캐시 경로 조회 — 없으면 null 반환
+function getFileCache(db, messageId) {
+  const row = db.prepare('SELECT cached_file_path FROM messages WHERE id = ?').get(messageId)
+  return row?.cached_file_path || null
+}
+
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache }
