@@ -5,6 +5,8 @@ const useUserStore = create((set) => ({
   myPeerId: null,
   myNickname: null,
   myProfileImageUrl: null,
+  myStatusType: 'online',
+  myStatusMessage: '',
 
   initialize: (peerId, nickname, profileImageUrl) => set({
     myPeerId: peerId,
@@ -16,7 +18,11 @@ const useUserStore = create((set) => ({
 
   updateMyProfileImageUrl: (url) => set({ myProfileImageUrl: url }),
 
-  reset: () => set({ myPeerId: null, myNickname: null, myProfileImageUrl: null }),
+  // 내 상태 타입 및 상태 메시지 변경
+  setMyStatus: (statusType, statusMessage) =>
+    set({ myStatusType: statusType, myStatusMessage: statusMessage || '' }),
+
+  reset: () => set({ myPeerId: null, myNickname: null, myProfileImageUrl: null, myStatusType: 'online', myStatusMessage: '' }),
 
   notificationSound: 'notification1',  // 'notification1'~'notification4' | 'custom'
   notificationVolume: 0.7,
