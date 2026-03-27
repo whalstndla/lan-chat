@@ -4,12 +4,12 @@ const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
 const { initDatabase, migrateDatabase } = require('./storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead: markMessagesAsReadDB, getUnreadDMMessageIds } = require('./storage/queries')
+const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead: markMessagesAsReadDB, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache } = require('./storage/queries')
 const {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
   getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound,
-  updatePassword,
+  updatePassword, updateStatus,
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
@@ -151,7 +151,9 @@ async function flushPendingMessages(targetPeerId) {
           fileUrl: messagePayload.fileUrl,
           fileName: messagePayload.fileName,
         },
-        sharedSecret
+        sharedSecret,
+        peerId,
+        targetPeerId
       )
       const message = {
         id: pending.id,
@@ -185,6 +187,28 @@ function buildMyProfileImageUrl() {
   const profile = getProfile(database)
   if (!profile?.profile_image) return null
   return `http://${localIP}:${getFilePort()}/profile/${profile.profile_image}`
+}
+
+// 수신된 파일을 로컬 캐시 디렉토리에 저장하고 DB에 경로 기록
+function cacheReceivedFile(messageId, fileUrl, fileName) {
+  if (!fileUrl || !fileName) return
+  const cacheDir = path.join(appDataPath, 'file_cache')
+  if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+  const ext = path.extname(fileName)
+  const cachedFileName = `${messageId}${ext}`
+  const cachedPath = path.join(cacheDir, cachedFileName)
+
+  const http = require('http')
+  const file = fs.createWriteStream(cachedPath)
+  http.get(fileUrl, (response) => {
+    response.pipe(file)
+    file.on('finish', () => {
+      file.close()
+      try { saveFileCache(database, { messageId, cachedPath }) } catch { /* DB 저장 실패 시 무시 */ }
+    })
+  }).on('error', () => {
+    try { fs.unlinkSync(cachedPath) } catch { /* 파일 삭제 실패 시 무시 */ }
+  })
 }
 
 async function initApp() {
@@ -230,6 +254,16 @@ async function initApp() {
       return
     }
 
+    // 상태 변경 이벤트 — DB 저장 없이 렌더러로 전달
+    if (message.type === 'status-changed') {
+      sendToRenderer('peer-status-changed', {
+        peerId: message.fromId,
+        statusType: message.statusType,
+        statusMessage: message.statusMessage,
+      })
+      return
+    }
+
     // 메시지 삭제 이벤트 — DB 삭제 후 렌더러로 전달
     if (message.type === 'delete-message') {
       try { deleteMessage(database, message.messageId, message.fromId) } catch { /* 무시 */ }
@@ -239,6 +273,18 @@ async function initApp() {
         fromId: message.fromId,
         to: message.to || null,
       })
+      return
+    }
+
+    // 메시지 수정 이벤트 — DB 업데이트 후 렌더러로 전달
+    if (message.type === 'edit-message') {
+      try {
+        editMessage(database, { messageId: message.messageId, fromId: message.fromId, newContent: message.newContent })
+        sendToRenderer('message-edited', {
+          messageId: message.messageId, fromId: message.fromId,
+          newContent: message.newContent, editedAt: message.editedAt, to: message.to || null,
+        })
+      } catch { /* 무시 */ }
       return
     }
 
@@ -252,6 +298,22 @@ async function initApp() {
     // 닉네임 변경 이벤트
     if (message.type === 'nickname-changed') {
       sendToRenderer('peer-nickname-changed', { peerId: message.fromId, nickname: message.nickname })
+      return
+    }
+
+    // 이모지 리액션 처리 — DB 저장 후 렌더러로 전달
+    if (message.type === 'reaction') {
+      try {
+        if (message.action === 'add') {
+          addReaction(database, { messageId: message.messageId, peerId: message.fromId, emoji: message.emoji })
+        } else if (message.action === 'remove') {
+          removeReaction(database, { messageId: message.messageId, peerId: message.fromId, emoji: message.emoji })
+        }
+        sendToRenderer('reaction-updated', {
+          messageId: message.messageId, peerId: message.fromId,
+          emoji: message.emoji, action: message.action,
+        })
+      } catch { /* 무시 */ }
       return
     }
 
@@ -329,7 +391,8 @@ async function initApp() {
 
       try {
         const sharedSecret = deriveSharedSecret(myPrivateKey, senderPublicKey)
-        const decryptedPayload = decryptDM(message.encryptedPayload, sharedSecret)
+        // message.fromId = 송신자, peerId = 나(수신자)
+        const decryptedPayload = decryptDM(message.encryptedPayload, sharedSecret, message.fromId, peerId)
 
         saveMessage(database, {
           id: message.id,
@@ -363,6 +426,8 @@ async function initApp() {
           fileUrl: decryptedPayload.fileUrl,
           fileName: decryptedPayload.fileName,
         })
+        // DM 파일 메시지면 로컬 캐시에 저장
+        if (decryptedPayload.fileUrl) cacheReceivedFile(message.id, decryptedPayload.fileUrl, decryptedPayload.fileName)
       } catch { /* 복호화 실패 무시 */ }
       return
     }
@@ -394,6 +459,8 @@ async function initApp() {
     }
 
     sendToRenderer('message-received', message)
+    // 파일 메시지면 로컬 캐시에 저장
+    if (message.fileUrl) cacheReceivedFile(message.id, message.fileUrl, message.fileName)
   }
 
   // WebSocket 서버 시작 (공용 핸들러 사용)
@@ -642,9 +709,12 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     }
 
     const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
+    // currentPeerId = 나(송신자), recipientPeerId = 수신자
     const encryptedPayload = encryptDM(
       { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
-      sharedSecret
+      sharedSecret,
+      currentPeerId,
+      recipientPeerId
     )
 
     const message = {
@@ -739,6 +809,33 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     }
   })
 
+
+  // 메시지 수정 — 본인 메시지만 수정 가능, 내용 길이 검증 후 브로드캐스트
+  ipcMain.handle('edit-message', (_, { messageId, newContent, targetPeerId }) => {
+    if (!newContent?.trim() || newContent.length > MAX_CONTENT_LENGTH) return null
+    const editedAt = Date.now()
+    editMessage(database, { messageId, fromId: currentPeerId, newContent })
+    const currentNickname = getProfile(database)?.nickname || defaultNickname
+    const editPayload = {
+      type: 'edit-message', messageId, fromId: currentPeerId, from: currentNickname,
+      newContent, editedAt, to: targetPeerId || null, timestamp: Date.now(),
+    }
+    if (targetPeerId) sendMessage(targetPeerId, editPayload)
+    else broadcastMessage(editPayload)
+    return { editedAt }
+  })
+
+  // 상태 변경 — 허용된 타입만 저장 후 브로드캐스트
+  ipcMain.handle('update-status', (_, { statusType, statusMessage }) => {
+    const allowedTypes = ['online', 'away', 'busy', 'dnd']
+    if (!allowedTypes.includes(statusType)) return
+    updateStatus(database, { statusType, statusMessage: (statusMessage || '').slice(0, 100) })
+    broadcastMessage({
+      type: 'status-changed', fromId: currentPeerId,
+      statusType, statusMessage: statusMessage || '', timestamp: Date.now(),
+    })
+  })
+
   // 채팅 기록 조회
   ipcMain.handle('get-global-history', () => getGlobalHistory(database))
   ipcMain.handle('get-dm-history', (_, { peerId1, peerId2 }) => {
@@ -752,7 +849,19 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       if (msg.encrypted_payload && otherPublicKey) {
         try {
           const sharedSecret = deriveSharedSecret(myPrivateKey, otherPublicKey)
-          const decryptedPayload = decryptDM(msg.encrypted_payload, sharedSecret)
+          let decryptedPayload
+
+          // 신규 방식(peerId 포함 HKDF) 우선 시도
+          // 메시지 송신자 기준: from_id가 나이면 나→상대, 아니면 상대→나
+          const senderIdForDecrypt = msg.from_id
+          const recipientIdForDecrypt = msg.from_id === peerId1 ? peerId2 : peerId1
+          try {
+            decryptedPayload = decryptDM(msg.encrypted_payload, sharedSecret, senderIdForDecrypt, recipientIdForDecrypt)
+          } catch {
+            // 신규 방식 실패 → 레거시(peerId 없는) 방식으로 재시도 (업데이트 전 메시지 호환)
+            decryptedPayload = decryptDM(msg.encrypted_payload, sharedSecret)
+          }
+
           return {
             ...msg,
             read: readFlag,
@@ -762,7 +871,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             fileName: decryptedPayload.fileName || msg.file_name,
           }
         } catch {
-          // 복호화 실패 시 원본 반환
+          // 복호화 완전 실패 시 원본 반환
         }
       }
       return { ...msg, read: readFlag }
@@ -780,6 +889,18 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   // DM 기록만 삭제
   ipcMain.handle('clear-all-dms', () => {
     clearAllDMs(database)
+  })
+
+  // 메시지 전문 검색 (FTS5)
+  ipcMain.handle('search-messages', (_, { query, type }) => {
+    return searchMessages(database, { query, type })
+  })
+
+  // 캐시된 파일 URL 반환 — 캐시 파일이 존재하면 file:// URL, 없으면 null
+  ipcMain.handle('get-cached-file-url', (_, messageId) => {
+    const cachedPath = getFileCache(database, messageId)
+    if (cachedPath && fs.existsSync(cachedPath)) return `file://${cachedPath}`
+    return null
   })
 
   // 알림 설정 조회
@@ -819,6 +940,27 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     const savePath = path.join(tempFilePath, savedFileName)
     fs.writeFileSync(savePath, Buffer.from(new Uint8Array(fileBuffer)))
     return `http://${localIP}:${getFilePort()}/files/${savedFileName}`
+  })
+
+  // 이모지 리액션 토글 — 이미 존재하면 제거, 없으면 추가
+  ipcMain.handle('toggle-reaction', (_, { messageId, emoji, targetPeerId }) => {
+    const existing = getReactions(database, messageId)
+      .find(r => r.peer_id === currentPeerId && r.emoji === emoji)
+    const action = existing ? 'remove' : 'add'
+    if (action === 'add') addReaction(database, { messageId, peerId: currentPeerId, emoji })
+    else removeReaction(database, { messageId, peerId: currentPeerId, emoji })
+
+    const reactionMessage = {
+      type: 'reaction', messageId, fromId: currentPeerId, emoji, action, timestamp: Date.now(),
+    }
+    if (targetPeerId) sendMessage(targetPeerId, reactionMessage)
+    else broadcastMessage(reactionMessage)
+    return { action }
+  })
+
+  // 여러 메시지의 리액션 일괄 조회 — { messageId: [row, ...] } 형태 반환
+  ipcMain.handle('get-reactions', (_, messageIds) => {
+    return getReactionsByMessageIds(database, messageIds)
   })
 }
 

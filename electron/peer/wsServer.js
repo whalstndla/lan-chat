@@ -15,9 +15,15 @@ const MAX_MESSAGES_PER_SECOND = 20
 // 기본 heartbeat 주기 (ms)
 const DEFAULT_HEARTBEAT_INTERVAL = 30000
 
+// 중복 메시지 ID 허용 최대 크기
+const MAX_RECENT_MESSAGE_IDS = 1000
+
 function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL }) {
   // 최대 페이로드 10MB 제한 — 대용량 메시지로 인한 메모리 소진 방지
   const server = new WebSocketServer({ port: 0, maxPayload: 10 * 1024 * 1024 })
+
+  // Replay Attack 방어: 최근 수신된 메시지 ID 집합 (서버 인스턴스당 유지)
+  const recentMessageIds = new Set()
 
   server.on('connection', (socket, req) => {
     // IP별 연결 수 제한
@@ -58,6 +64,18 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
         const message = JSON.parse(data.toString())
         // 알 수 없는 메시지 타입은 무시 (fallthrough 방지)
         if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) return
+
+        // Replay Attack 방어: 동일 ID 메시지 재수신 시 무시
+        if (message.id) {
+          if (recentMessageIds.has(message.id)) return
+          // Set 크기 초과 시 가장 오래된 항목(첫 번째 값) 삭제
+          if (recentMessageIds.size >= MAX_RECENT_MESSAGE_IDS) {
+            const oldestId = recentMessageIds.values().next().value
+            recentMessageIds.delete(oldestId)
+          }
+          recentMessageIds.add(message.id)
+        }
+
         const reply = (response) => {
           if (socket.readyState === socket.OPEN) {
             socket.send(JSON.stringify(response))
