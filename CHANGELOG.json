@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.7.7",
+    "date": "2026-03-27",
+    "changes": [
+      { "type": "feat", "text": "WebSocket heartbeat + 자동 재연결 (지수 백오프)" },
+      { "type": "feat", "text": "드래그 앤 드롭 파일 전송" },
+      { "type": "feat", "text": "메시지 이모지 리액션 (👍❤️😂🎉😮😢)" },
+      { "type": "feat", "text": "메시지 수정 기능 + (수정됨) 표시" },
+      { "type": "feat", "text": "메시지 검색 (SQLite FTS5 전문 검색)" },
+      { "type": "feat", "text": "읽지 않은 메시지 구분선" },
+      { "type": "feat", "text": "상태 메시지 (온라인/자리비움/바쁨/방해금지)" },
+      { "type": "feat", "text": "파일 영구 캐시 (오프라인 후에도 파일 열람)" },
+      { "type": "fix", "text": "Replay Attack 방어 (메시지 ID 중복 차단)" },
+      { "type": "fix", "text": "HKDF 솔트/컨텍스트 강화 (암호학적 견고성 개선)" }
+    ]
+  },
+  {
     "version": "0.7.6",
     "date": "2025-03-23",
     "changes": [
