@@ -4,7 +4,7 @@ const { WebSocketServer } = require('ws')
 // 허용되는 메시지 타입 화이트리스트
 const ALLOWED_MESSAGE_TYPES = [
   'key-exchange', 'typing', 'delete-message', 'nickname-changed',
-  'read-receipt', 'message', 'dm',
+  'read-receipt', 'message', 'dm', 'reaction', 'edit-message', 'status-changed',
 ]
 
 // IP별 연결 수 추적 (DoS 방지)
@@ -12,7 +12,10 @@ const connectionCountByIP = new Map()
 const MAX_CONNECTIONS_PER_IP = 5
 const MAX_MESSAGES_PER_SECOND = 20
 
-function startWsServer({ onMessage }) {
+// 기본 heartbeat 주기 (ms)
+const DEFAULT_HEARTBEAT_INTERVAL = 30000
+
+function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL }) {
   // 최대 페이로드 10MB 제한 — 대용량 메시지로 인한 메모리 소진 방지
   const server = new WebSocketServer({ port: 0, maxPayload: 10 * 1024 * 1024 })
 
@@ -29,6 +32,12 @@ function startWsServer({ onMessage }) {
       const count = connectionCountByIP.get(clientIP) || 1
       if (count <= 1) connectionCountByIP.delete(clientIP)
       else connectionCountByIP.set(clientIP, count - 1)
+    })
+
+    // heartbeat 생존 여부 플래그 — pong 수신 시 true로 갱신
+    socket.isAlive = true
+    socket.on('pong', () => {
+      socket.isAlive = true
     })
 
     // 메시지 빈도 제한 (초당 MAX_MESSAGES_PER_SECOND개)
@@ -59,6 +68,28 @@ function startWsServer({ onMessage }) {
         // 잘못된 JSON 무시
       }
     })
+  })
+
+  // heartbeat 인터벌 — 응답 없는 클라이언트 감지 후 종료
+  const heartbeatTimer = setInterval(() => {
+    server.clients.forEach((socket) => {
+      if (socket.isAlive === false) {
+        // 이전 ping에 pong 응답 없음 → 좀비 연결 강제 종료
+        socket.terminate()
+        return
+      }
+      // 다음 interval까지 응답 대기 상태로 설정 후 ping 전송
+      socket.isAlive = false
+      socket.ping()
+    })
+  }, heartbeatInterval)
+
+  // Jest가 타이머를 잡아두지 않도록 unref 처리
+  if (heartbeatTimer.unref) heartbeatTimer.unref()
+
+  // 서버 종료 시 heartbeat 인터벌 정리
+  server.on('close', () => {
+    clearInterval(heartbeatTimer)
   })
 
   const port = server.address().port
