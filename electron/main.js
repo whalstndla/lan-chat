@@ -1060,6 +1060,7 @@ async function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/renderer/index.html'))
   }
 
+
   // macOS 앱 메뉴 설정 — Cmd+W를 숨김으로 오버라이드 (기본 Close Window 방지)
   if (process.platform === 'darwin') {
     const appMenu = Menu.buildFromTemplate([
@@ -1158,12 +1159,17 @@ ipcMain.handle('get-app-version-info', () => {
 })
 
 // 업데이트 확인 IPC 핸들러 — dev에서는 즉시 not-available 반환
-ipcMain.handle('check-for-updates', () => {
+ipcMain.handle('check-for-updates', async () => {
   if (isDev) {
     sendToRenderer('update-not-available')
     return
   }
-  autoUpdater.checkForUpdates()
+  try {
+    await autoUpdater.checkForUpdates()
+  } catch {
+    // app-update.yml 누락 등 업데이트 확인 실패 시 에러 이벤트 전달
+    sendToRenderer('update-error', '업데이트 확인 실패')
+  }
 })
 
 // 업데이트 설치 IPC 핸들러
