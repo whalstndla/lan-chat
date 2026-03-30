@@ -248,6 +248,9 @@ async function initApp() {
   // wsServer/wsClient 공용 메시지 핸들러
   // reply: wsServer에서 온 경우 상대 소켓으로 응답, wsClient에서 온 경우 no-op
   handleIncomingMessage = (message, reply) => {
+    // DB가 초기화되지 않은 경우 메시지 수신 불가
+    if (!database) return
+
     // 타이핑 이벤트 — DB 저장 없이 렌더러로 전달만
     if (message.type === 'typing') {
       sendToRenderer('typing-event', { fromId: message.fromId, from: message.from, to: message.to || null })
@@ -329,7 +332,7 @@ async function initApp() {
           publicKey: myPublicKeyBase64,
           nickname: currentNicknameForReply,
           host: localIP,
-          wsPort: wsServerInfo.port,
+          wsPort: wsServerInfo?.port ?? 0,
           filePort: getFilePort(),
           profileImageUrl: buildMyProfileImageUrl(),
         })
@@ -432,21 +435,23 @@ async function initApp() {
       return
     }
 
-    // 전체채팅 메시지 (평문 저장)
-    saveMessage(database, {
-      id: message.id,
-      type: message.type,
-      from_id: message.fromId,
-      from_name: message.from,
-      to_id: null,
-      content: message.content || null,
-      content_type: message.contentType,
-      format: message.format || null,
-      encrypted_payload: null,
-      file_url: message.fileUrl || null,
-      file_name: message.fileName || null,
-      timestamp: message.timestamp,
-    })
+    // 전체채팅 메시지 (평문 저장) — DB 저장 실패 시에도 렌더러 전달은 계속
+    try {
+      saveMessage(database, {
+        id: message.id,
+        type: message.type,
+        from_id: message.fromId,
+        from_name: message.from,
+        to_id: null,
+        content: message.content || null,
+        content_type: message.contentType,
+        format: message.format || null,
+        encrypted_payload: null,
+        file_url: message.fileUrl || null,
+        file_name: message.fileName || null,
+        timestamp: message.timestamp,
+      })
+    } catch { /* DB 저장 실패 시 무시 — 렌더러 전달은 계속 */ }
 
     if (mainWindow && !mainWindow.isFocused()) {
       incrementBadge()
@@ -471,6 +476,7 @@ async function initApp() {
 function registerIpcHandlers(currentPeerId, defaultNickname) {
   // 프로필 존재 여부 확인 (앱 시작 시 첫 화면 결정용)
   ipcMain.handle('check-profile-exists', () => {
+    if (!database) return false
     return getProfile(database) !== null
   })
 
@@ -535,6 +541,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
   // 피어 발견 시작 — 기존 인스턴스 정리 후 재시작 (Cmd+R 등 재호출 시 Bonjour 좀비 방지)
   ipcMain.handle('start-peer-discovery', async (_event, _params) => {
+    // wsServerInfo가 null이면 서버 초기화 실패 — 피어 탐색 불가
+    if (!wsServerInfo) return
     await stopPeerDiscovery()
     disconnectAll()
     // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
@@ -606,7 +614,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       republishService({
         nickname: newNickname.trim(),
         peerId: currentPeerId,
-        wsPort: wsServerInfo.port,
+        wsPort: wsServerInfo?.port ?? 0,
         filePort: getFilePort(),
       })
       broadcastMessage({
@@ -661,16 +669,18 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       timestamp: Date.now(),
     }
     broadcastMessage(message)
-    // 내 메시지도 로컬 저장
-    saveMessage(database, {
-      id: message.id, type: message.type,
-      from_id: message.fromId, from_name: message.from,
-      to_id: null, content: message.content,
-      content_type: message.contentType, format: message.format,
-      encrypted_payload: null,
-      file_url: message.fileUrl, file_name: message.fileName,
-      timestamp: message.timestamp,
-    })
+    // 내 메시지도 로컬 저장 — 저장 실패 시에도 메시지 반환은 계속
+    try {
+      saveMessage(database, {
+        id: message.id, type: message.type,
+        from_id: message.fromId, from_name: message.from,
+        to_id: null, content: message.content,
+        content_type: message.contentType, format: message.format,
+        encrypted_payload: null,
+        file_url: message.fileUrl, file_name: message.fileName,
+        timestamp: message.timestamp,
+      })
+    } catch { /* DB 저장 실패 시 무시 */ }
     return message
   })
 
@@ -708,14 +718,37 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       }
     }
 
-    const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
-    // currentPeerId = 나(송신자), recipientPeerId = 수신자
-    const encryptedPayload = encryptDM(
-      { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
-      sharedSecret,
-      currentPeerId,
-      recipientPeerId
-    )
+    let encryptedPayload
+    try {
+      const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
+      // currentPeerId = 나(송신자), recipientPeerId = 수신자
+      encryptedPayload = encryptDM(
+        { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
+        sharedSecret,
+        currentPeerId,
+        recipientPeerId
+      )
+    } catch {
+      // 암호화 실패 시 pending 큐에 저장 후 반환
+      savePendingMessage(database, {
+        id: messageId,
+        targetPeerId: recipientPeerId,
+        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
+      })
+      saveMessage(database, {
+        id: messageId, type: 'dm',
+        from_id: currentPeerId, from_name: currentNickname,
+        to_id: recipientPeerId, content: content || null,
+        content_type: contentType, format: format || null, encrypted_payload: null,
+        file_url: fileUrl || null, file_name: fileName || null,
+        timestamp,
+      })
+      return {
+        id: messageId, type: 'dm', from: currentNickname, fromId: currentPeerId,
+        to: recipientPeerId, content: content || null, contentType, format: format || null,
+        fileUrl: fileUrl || null, fileName: fileName || null, timestamp, pending: true,
+      }
+    }
 
     const message = {
       id: messageId, type: 'dm', from: currentNickname, fromId: currentPeerId,
@@ -735,14 +768,16 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     }
 
     // 내 DB에는 암호문 저장
-    saveMessage(database, {
-      id: message.id, type: message.type,
-      from_id: message.fromId, from_name: message.from,
-      to_id: message.to, content: null,
-      content_type: contentType, format: format || null, encrypted_payload: encryptedPayload,
-      file_url: fileUrl || null, file_name: fileName || null,
-      timestamp: message.timestamp,
-    })
+    try {
+      saveMessage(database, {
+        id: message.id, type: message.type,
+        from_id: message.fromId, from_name: message.from,
+        to_id: message.to, content: null,
+        content_type: contentType, format: format || null, encrypted_payload: encryptedPayload,
+        file_url: fileUrl || null, file_name: fileName || null,
+        timestamp: message.timestamp,
+      })
+    } catch { /* DB 저장 실패 시 무시 */ }
 
     // 렌더러에는 복호화된 내용으로 반환
     return {
@@ -935,11 +970,15 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   // 파일 임시 저장 후 URL 반환
   // 주의: Electron IPC에서 ArrayBuffer는 Uint8Array로 전달해야 안전하게 직렬화됨
   ipcMain.handle('save-file', (_, { fileBuffer, fileName }) => {
-    const ext = path.extname(fileName)
-    const savedFileName = `${uuidv4()}${ext}`
-    const savePath = path.join(tempFilePath, savedFileName)
-    fs.writeFileSync(savePath, Buffer.from(new Uint8Array(fileBuffer)))
-    return `http://${localIP}:${getFilePort()}/files/${savedFileName}`
+    try {
+      const ext = path.extname(fileName)
+      const savedFileName = `${uuidv4()}${ext}`
+      const savePath = path.join(tempFilePath, savedFileName)
+      fs.writeFileSync(savePath, Buffer.from(new Uint8Array(fileBuffer)))
+      return `http://${localIP}:${getFilePort()}/files/${savedFileName}`
+    } catch {
+      return null
+    }
   })
 
   // 이모지 리액션 토글 — 이미 존재하면 제거, 없으면 추가
@@ -967,7 +1006,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 async function createWindow() {
   // DB 먼저 초기화 (peerId 복원을 위해)
   database = initDatabase(dbPath)
-  migrateDatabase(database)
+  try { migrateDatabase(database) } catch { /* 마이그레이션 부분 실패는 무시 — DB 자체는 유효 */ }
 
   // peerId 복원 또는 신규 생성
   const existingProfile = getProfile(database)
@@ -998,6 +1037,9 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // preload에서 require('electron')을 사용하므로 sandbox를 명시적으로 비활성화
+      // Electron 20+ 에서 기본값이 false이지만 명시적으로 선언해 패키징 환경에서의 불일치 방지
+      sandbox: false,
     },
   })
 
@@ -1059,6 +1101,10 @@ async function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/renderer/index.html'))
   }
+
+
+
+
 
 
   // macOS 앱 메뉴 설정 — Cmd+W를 숨김으로 오버라이드 (기본 Close Window 방지)

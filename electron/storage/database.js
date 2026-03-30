@@ -101,10 +101,13 @@ function migrateDatabase(db) {
         content='messages', content_rowid='rowid'
       );
     `)
-    // 기존 메시지 FTS 인덱싱
+    // content='messages' 모드에서는 FTS rowid가 messages 테이블 rowid와 반드시 일치해야 함.
+    // rowid를 명시하지 않으면 FTS rowid가 자동 할당되어 실제 messages rowid와 어긋나고,
+    // 엉뚱한 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생함.
+    // 따라서 rowid를 SELECT rowid FROM messages 로 명시적으로 지정함.
     db.exec(`
-      INSERT OR IGNORE INTO messages_fts(id, content, from_name)
-      SELECT id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
+      INSERT INTO messages_fts(rowid, id, content, from_name)
+      SELECT rowid, id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
     `)
   } catch { /* FTS5 미지원 환경 무시 */ }
 }

@@ -1,5 +1,4 @@
 // electron/preload.js
-// sandbox: false 환경에서만 동작 (main.js webPreferences에 sandbox: false 필수)
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {

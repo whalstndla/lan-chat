@@ -54,7 +54,7 @@ export default function Sidebar({ onShowPatchNotes }) {
   // 온라인 피어 + 오프라인 과거 DM 상대 병합 (온라인 우선)
   const onlinePeerIds = new Set(onlinePeers.map(p => p.peerId))
   const offlinePastPeers = pastDMPeers.filter(p => !onlinePeerIds.has(p.peerId))
-  const { currentRoom, setCurrentRoom } = useChatStore()
+  const currentRoom = useChatStore(state => state.currentRoom)
   const unreadCounts = useChatStore(state => state.unreadCounts)
 
   const isGlobalSelected = currentRoom.type === 'global'
@@ -71,7 +71,7 @@ export default function Sidebar({ onShowPatchNotes }) {
         </button>
 
         <button
-          onClick={() => setCurrentRoom({ type: 'global' })}
+          onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
           title="전체 채팅"
           className={`cursor-pointer p-1.5 rounded transition-colors ${
             isGlobalSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
@@ -87,7 +87,7 @@ export default function Sidebar({ onShowPatchNotes }) {
           return (
             <button
               key={peer.peerId}
-              onClick={() => setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
+              onClick={() => useChatStore.getState().setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
               title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}`}
               className={`cursor-pointer relative p-1.5 rounded transition-colors ${
                 isSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
@@ -130,7 +130,7 @@ export default function Sidebar({ onShowPatchNotes }) {
               </button>
             </div>
             <button
-              onClick={() => setCurrentRoom({ type: 'global' })}
+              onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
               className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${
                 isGlobalSelected
                   ? 'bg-vsc-selected text-vsc-text'
@@ -158,7 +158,7 @@ export default function Sidebar({ onShowPatchNotes }) {
                 return (
                   <button
                     key={peer.peerId}
-                    onClick={() => setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
+                    onClick={() => useChatStore.getState().setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
                     className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${
                       isSelected
                         ? 'bg-vsc-selected text-vsc-text'

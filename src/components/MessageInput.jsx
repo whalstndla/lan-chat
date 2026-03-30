@@ -32,7 +32,6 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
   const currentRoom = useChatStore(state => state.currentRoom)
-  const { addGlobalMessage, addDMMessage } = useChatStore()
 
   // Tiptap 에디터 설정
   const editor = useEditor({
@@ -173,7 +172,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           contentType: 'text',
           format: 'markdown',
         })
-        addGlobalMessage(sentMessage)
+        useChatStore.getState().addGlobalMessage(sentMessage)
       } else {
         sentMessage = await window.electronAPI.sendDM({
           recipientPeerId: currentRoom.peerId,
@@ -181,13 +180,13 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           contentType: 'text',
           format: 'markdown',
         })
-        addDMMessage(currentRoom.peerId, sentMessage)
+        useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
       editor.commands.clearContent()
     } finally {
       setIsSending(false)
     }
-  }, [editor, isSending, currentRoom])
+  }, [editor, isSending, currentRoom, editingMessage])
 
   // sendMessage를 ref에 저장 (handleKeyDown에서 참조)
   useEffect(() => {
@@ -204,10 +203,10 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       let sentMessage
       if (currentRoom.type === 'global') {
         sentMessage = await window.electronAPI.sendGlobalMessage(payload)
-        addGlobalMessage(sentMessage)
+        useChatStore.getState().addGlobalMessage(sentMessage)
       } else {
         sentMessage = await window.electronAPI.sendDM({ recipientPeerId: currentRoom.peerId, ...payload })
-        addDMMessage(currentRoom.peerId, sentMessage)
+        useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
     } finally {
       setIsSending(false)

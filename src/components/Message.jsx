@@ -21,8 +21,8 @@ const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 export default function Message({ message, onStartEdit, isHighlighted = false }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
-  const { removeGlobalMessage, removeDMMessage, updateReaction } = useChatStore()
-  const reactions = useChatStore(state => state.reactions[message.id] || {})
+  // 리액션 로컬 상태 — 스토어 구독 없이 관리
+  const [reactions, setReactions] = useState({})
   const onlinePeers = usePeerStore(state => state.onlinePeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
   const [lightboxUrl, setLightboxUrl] = useState(null)
@@ -66,9 +66,9 @@ export default function Message({ message, onStartEdit, isHighlighted = false })
 
     // 로컬 스토어에서 즉시 제거
     if (targetPeerId) {
-      removeDMMessage(targetPeerId, message.id)
+      useChatStore.getState().removeDMMessage(targetPeerId, message.id)
     } else {
-      removeGlobalMessage(message.id)
+      useChatStore.getState().removeGlobalMessage(message.id)
     }
   }
 
@@ -77,7 +77,19 @@ export default function Message({ message, onStartEdit, isHighlighted = false })
     const targetPeerId = (message.type === 'dm')
       ? (isMyMessage ? (message.to || message.to_id) : senderId) : null
     const result = await window.electronAPI.toggleReaction({ messageId: message.id, emoji, targetPeerId })
-    updateReaction(message.id, myPeerId, emoji, result.action)
+    // 로컬 리액션 상태 업데이트
+    setReactions(prev => {
+      const updated = { ...prev }
+      const reactors = [...(updated[emoji] || [])]
+      if (result.action === 'add' && !reactors.includes(myPeerId)) reactors.push(myPeerId)
+      else if (result.action === 'remove') {
+        const idx = reactors.indexOf(myPeerId)
+        if (idx !== -1) reactors.splice(idx, 1)
+      }
+      if (reactors.length === 0) delete updated[emoji]
+      else updated[emoji] = reactors
+      return updated
+    })
   }
 
   return (

@@ -7,10 +7,16 @@ function saveMessage(db, message) {
   `).run({ ...message, format: message.format || null })
 
   // 글로벌 메시지만 FTS 인덱스에 동기화 (DM은 암호화되어 인덱싱 불가)
+  // content='messages' 모드에서 FTS rowid는 반드시 messages 테이블의 rowid와 일치해야 함.
+  // rowid 미지정 시 FTS rowid가 자동 증가하여 messages rowid와 어긋나고
+  // 다른 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생하므로 rowid를 명시적으로 지정함.
   if (message.type === 'message' && message.content) {
     try {
-      db.prepare('INSERT OR IGNORE INTO messages_fts(id, content, from_name) VALUES (?, ?, ?)')
-        .run(message.id, message.content, message.from_name)
+      const savedRow = db.prepare('SELECT rowid FROM messages WHERE id = ?').get(message.id)
+      if (savedRow) {
+        db.prepare('INSERT INTO messages_fts(rowid, id, content, from_name) VALUES (?, ?, ?, ?)')
+          .run(savedRow.rowid, message.id, message.content, message.from_name)
+      }
     } catch { /* FTS 테이블 없으면 무시 */ }
   }
 }
