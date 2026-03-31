@@ -30,44 +30,40 @@ function getGlobalHistory(db, limit = 100) {
   `).all(limit).reverse()
 }
 
-function getDMHistory(db, peerId1, peerId2, limit = 100) {
+function getDMHistory(db, peerId1, peerId2, limit = 100, offset = 0) {
   return db.prepare(`
     SELECT * FROM messages
     WHERE type = 'dm'
       AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
     ORDER BY timestamp DESC
-    LIMIT ?
-  `).all(peerId1, peerId2, peerId2, peerId1, limit).reverse()
+    LIMIT ? OFFSET ?
+  `).all(peerId1, peerId2, peerId2, peerId1, limit, offset).reverse()
 }
 
 function deleteMessage(db, messageId, fromId) {
   return db.prepare('DELETE FROM messages WHERE id = ? AND from_id = ?').run(messageId, fromId)
 }
 
-// 나와 DM을 나눈 고유 상대 목록 (최신 메시지 순)
+// 나와 DM을 나눈 고유 상대 목록 (최신 메시지 순) — 단일 쿼리로 닉네임까지 조회
 function getDMPeers(db, myPeerId) {
-  const rows = db.prepare(`
+  return db.prepare(`
     SELECT
       CASE WHEN from_id = ? THEN to_id ELSE from_id END AS peer_id,
-      MAX(timestamp) AS last_timestamp
+      MAX(timestamp) AS last_timestamp,
+      (
+        SELECT m2.from_name FROM messages m2
+        WHERE m2.type = 'dm'
+          AND m2.from_id = CASE WHEN messages.from_id = ? THEN messages.to_id ELSE messages.from_id END
+        ORDER BY m2.timestamp DESC LIMIT 1
+      ) AS nickname
     FROM messages
     WHERE type = 'dm' AND (from_id = ? OR to_id = ?)
-    GROUP BY CASE WHEN from_id = ? THEN to_id ELSE from_id END
+    GROUP BY peer_id
     ORDER BY last_timestamp DESC
-  `).all(myPeerId, myPeerId, myPeerId, myPeerId)
-
-  return rows.map(row => {
-    // 상대방이 보낸 가장 최근 메시지에서 닉네임 추출
-    const lastFromPeer = db.prepare(`
-      SELECT from_name FROM messages
-      WHERE type = 'dm' AND from_id = ?
-      ORDER BY timestamp DESC LIMIT 1
-    `).get(row.peer_id)
-    return {
-      peerId: row.peer_id,
-      nickname: lastFromPeer?.from_name || '알 수 없음',
-    }
-  })
+  `).all(myPeerId, myPeerId, myPeerId, myPeerId).map(row => ({
+    peerId: row.peer_id,
+    nickname: row.nickname || '알 수 없음',
+  }))
 }
 
 // 전체 채팅 기록 삭제 (global + DM + pending 모두) — 트랜잭션으로 원자적 실행

@@ -153,12 +153,19 @@ export default function App() {
       const notificationSettings = await window.electronAPI.getNotificationSettings()
       useUserStore.getState().setNotificationSettings(notificationSettings)
 
+      // StrictMode 중복 방지 — 기존 리스너 정리 후 새로 등록
+      window.electronAPI.unsubscribeAll()
+
       // 이벤트 구독 — 피어 발견 시작 전에 등록해야 race condition 방지
       window.electronAPI.subscribeToMessages((message) => {
         if (message.type === 'message') {
           useChatStore.getState().addGlobalMessage(message)
         } else if (message.type === 'dm') {
-          const senderId = message.fromId === peerId ? message.to : message.fromId
+          // senderId 계산 — message.to 또는 fromId가 null일 수 있으므로 안전하게 처리
+          const senderId = message.fromId === peerId
+            ? (message.to || message.to_id)
+            : (message.fromId || message.from_id)
+          if (!senderId) return
           useChatStore.getState().addDMMessage(senderId, message)
 
           // 처음 DM을 나누는 상대면 과거 목록에 추가
@@ -216,7 +223,15 @@ export default function App() {
       })
 
       window.electronAPI.subscribeToPeerDiscovery(usePeerStore.getState().addPeer)
-      window.electronAPI.subscribeToPeerLeft(usePeerStore.getState().removePeer)
+
+      // 피어 퇴장 시 pastDMPeers에 추가하여 사이드바에서 사라지지 않도록 처리
+      window.electronAPI.subscribeToPeerLeft((leftPeerId) => {
+        const peer = usePeerStore.getState().onlinePeers.find(p => p.peerId === leftPeerId)
+        if (peer) {
+          usePeerStore.getState().addPastDMPeer({ peerId: peer.peerId, nickname: peer.nickname })
+        }
+        usePeerStore.getState().removePeer(leftPeerId)
+      })
 
       window.electronAPI.onPlayNotificationSound(() => {
         playNotification()

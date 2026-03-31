@@ -10,6 +10,9 @@ const reconnectTimerMap = new Map()
 // 피어 ID → 재연결 옵션 매핑 (autoReconnect 시 원본 옵션 보존)
 const reconnectOptionsMap = new Map()
 
+// 현재 연결 시도 중인 피어 ID 집합 (동시 connectToPeer race condition 방지)
+const connectingSet = new Set()
+
 // 지수 백오프 기반 재연결 지연 시간 계산
 // 시도 횟수에 따라 delay = base * 2^attempt 로 증가, max 이하로 제한
 function calculateReconnectDelay(attempt, baseDelay, maxDelay) {
@@ -18,10 +21,18 @@ function calculateReconnectDelay(attempt, baseDelay, maxDelay) {
 
 function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoReconnect = false, reconnectBaseDelay = 1000, reconnectMaxDelay = 30000, reconnectMaxAttempts = 10, onReconnect }) {
   return new Promise((resolve, reject) => {
+    // 동일 피어에 대한 동시 연결 시도 방지 (force가 아닌 경우)
+    if (connectingSet.has(peerId) && !force) {
+      resolve()
+      return
+    }
+    connectingSet.add(peerId)
+
     const existingSocket = connectionMap.get(peerId)
     if (existingSocket) {
       if (existingSocket.readyState === WebSocket.OPEN && !force) {
         // 정상 연결 중이면 재연결 불필요 (force 시 강제 교체)
+        connectingSet.delete(peerId)
         resolve()
         return
       }
@@ -35,6 +46,7 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
     let connected = false
 
     socket.on('open', () => {
+      connectingSet.delete(peerId)
       connected = true
       connectionMap.set(peerId, socket)
 
@@ -62,6 +74,7 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
     // onClose: 연결 성공 후 소켓 종료 시에만 호출 (강제 종료 감지용)
     // identity 체크: force 교체된 old 소켓의 close가 새 매핑 삭제 및 false peer-left 방지
     socket.on('close', () => {
+      connectingSet.delete(peerId)
       const isCurrent = connectionMap.get(peerId) === socket
       if (isCurrent) {
         connectionMap.delete(peerId)
@@ -77,7 +90,10 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
       if (isCurrent && connected && onClose) onClose()
     })
 
-    socket.on('error', reject)
+    socket.on('error', (error) => {
+      connectingSet.delete(peerId)
+      reject(error)
+    })
   })
 }
 
@@ -85,8 +101,10 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
 function scheduleReconnect(options, attempt) {
   const { peerId, reconnectBaseDelay, reconnectMaxDelay, reconnectMaxAttempts, onReconnect } = options
 
-  // 최대 시도 횟수 초과 시 재연결 중단
+  // 최대 시도 횟수 초과 시 재연결 중단 — 호출자에게 영구 실패 알림
   if (attempt >= reconnectMaxAttempts) {
+    if (options.onClose) options.onClose()
+    connectionMap.delete(peerId)
     reconnectOptionsMap.delete(peerId)
     return
   }

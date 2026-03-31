@@ -9,11 +9,11 @@ const ALLOWED_MESSAGE_TYPES = [
 
 // IP별 연결 수 추적 (DoS 방지)
 const connectionCountByIP = new Map()
-const MAX_CONNECTIONS_PER_IP = 5
-const MAX_MESSAGES_PER_SECOND = 20
+const MAX_CONNECTIONS_PER_IP = 20
+const MAX_MESSAGES_PER_SECOND = 50
 
 // 기본 heartbeat 주기 (ms)
-const DEFAULT_HEARTBEAT_INTERVAL = 30000
+const DEFAULT_HEARTBEAT_INTERVAL = 10000
 
 // 중복 메시지 ID 허용 최대 크기
 const MAX_RECENT_MESSAGE_IDS = 1000
@@ -79,7 +79,9 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
         const reply = (response) => {
           if (socket.readyState === socket.OPEN) {
             socket.send(JSON.stringify(response))
+            return true
           }
+          return false
         }
         onMessage(message, reply)
       } catch {

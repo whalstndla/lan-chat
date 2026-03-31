@@ -11,7 +11,7 @@ const {
   getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound,
   updatePassword, updateStatus,
 } = require('./storage/profile')
-const { savePendingMessage, getPendingMessages, deletePendingMessage } = require('./storage/pendingMessages')
+const { savePendingMessage, getPendingMessages, deletePendingMessage, deleteExpiredPendingMessages } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
 const { startWsServer, stopWsServer, closeAllServerClients } = require('./peer/wsServer')
 const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
@@ -44,6 +44,7 @@ let localIP = 'localhost'              // 내 LAN IP (key-exchange 및 파일 �
 let handleIncomingMessage = null       // wsServer/wsClient 공용 메시지 핸들러
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
 let discoveryEpoch = 0                  // 글로벌 세대 번호 — start-peer-discovery마다 증가
+const flushingPeers = new Set()         // flushPendingMessages 동시 호출 방지용 락
 
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
@@ -129,56 +130,66 @@ function loadChangelog() {
   } catch { return [] }
 }
 
-// 오프라인 메시지를 대상 피어에게 전송
+// 오프라인 메시지를 대상 피어에게 전송 (동시 호출 방지 락 적용)
 async function flushPendingMessages(targetPeerId) {
-  const pendingList = getPendingMessages(database, targetPeerId)
-  if (pendingList.length === 0) return
+  // 동일 피어에 대한 동시 flush 방지
+  if (flushingPeers.has(targetPeerId)) return
+  flushingPeers.add(targetPeerId)
 
-  const recipientPublicKey = peerPublicKeyMap.get(targetPeerId)
-  if (!recipientPublicKey) return
+  try {
+    const pendingList = getPendingMessages(database, targetPeerId)
+    if (pendingList.length === 0) return
 
-  const currentNickname = getProfile(database)?.nickname || ''
-  const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
-  const flushedMessageIds = []
+    const recipientPublicKey = peerPublicKeyMap.get(targetPeerId)
+    if (!recipientPublicKey) return
 
-  for (const pending of pendingList) {
-    const { messagePayload } = pending
-    try {
-      const encryptedPayload = encryptDM(
-        {
-          content: messagePayload.content,
+    const currentNickname = getProfile(database)?.nickname || ''
+    const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
+    const flushedMessageIds = []
+
+    for (const pending of pendingList) {
+      const { messagePayload } = pending
+      try {
+        const encryptedPayload = encryptDM(
+          {
+            content: messagePayload.content,
+            contentType: messagePayload.contentType,
+            fileUrl: messagePayload.fileUrl,
+            fileName: messagePayload.fileName,
+          },
+          sharedSecret,
+          peerId,
+          targetPeerId
+        )
+        const message = {
+          id: pending.id,
+          type: 'dm',
+          from: currentNickname,
+          fromId: peerId,
+          to: targetPeerId,
+          content: null,
           contentType: messagePayload.contentType,
-          fileUrl: messagePayload.fileUrl,
-          fileName: messagePayload.fileName,
-        },
-        sharedSecret,
-        peerId,
-        targetPeerId
-      )
-      const message = {
-        id: pending.id,
-        type: 'dm',
-        from: currentNickname,
-        fromId: peerId,
-        to: targetPeerId,
-        content: null,
-        contentType: messagePayload.contentType,
-        format: messagePayload.format || null,
-        encryptedPayload,
-        fileUrl: null,
-        fileName: null,
-        timestamp: pending.created_at,
+          format: messagePayload.format || null,
+          encryptedPayload,
+          fileUrl: null,
+          fileName: null,
+          timestamp: pending.created_at,
+        }
+        const sent = sendMessage(targetPeerId, message)
+        if (sent) {
+          try { deletePendingMessage(database, pending.id) } catch { /* DB 삭제 실패 시 무시 */ }
+          flushedMessageIds.push(pending.id)
+        }
+      } catch (err) {
+        console.warn(`[flushPending] 메시지 전송 실패: ${pending.id}`, err.message)
       }
-      const sent = sendMessage(targetPeerId, message)
-      if (sent) {
-        deletePendingMessage(database, pending.id)
-        flushedMessageIds.push(pending.id)
-      }
-    } catch { /* 암호화 또는 전송 실패 시 무시 */ }
-  }
+    }
 
-  if (flushedMessageIds.length > 0) {
-    sendToRenderer('pending-messages-flushed', { targetPeerId, messageIds: flushedMessageIds })
+    if (flushedMessageIds.length > 0) {
+      sendToRenderer('pending-messages-flushed', { targetPeerId, messageIds: flushedMessageIds })
+    }
+  } finally {
+    flushingPeers.delete(targetPeerId)
   }
 }
 
@@ -228,6 +239,9 @@ async function initApp() {
       if (fs.statSync(filePath).mtimeMs < sevenDaysAgo) fs.unlinkSync(filePath)
     })
   } catch { /* 정리 실패 시 무시 */ }
+
+  // 만료된 pending 메시지 자동 정리 (7일 이상)
+  try { deleteExpiredPendingMessages(database) } catch { /* 정리 실패 시 무시 */ }
 
   // 업데이트 후 첫 실행 감지
   checkAndNotifyUpdated()
@@ -324,9 +338,9 @@ async function initApp() {
     if (message.type === 'key-exchange') {
       try {
         const publicKeyObj = importPublicKey(message.publicKey)
-        peerPublicKeyMap.set(message.fromId, publicKeyObj)
         const currentNicknameForReply = getProfile(database)?.nickname || ''
-        reply({
+        // reply를 먼저 시도 — 실패하면 비대칭 상태 방지를 위해 공개키 저장 건너뜀
+        const replySuccess = reply({
           type: 'key-exchange',
           fromId: peerId,
           publicKey: myPublicKeyBase64,
@@ -336,6 +350,13 @@ async function initApp() {
           filePort: getFilePort(),
           profileImageUrl: buildMyProfileImageUrl(),
         })
+        // reply 성공 후에만 상대 공개키 저장 (비대칭 상태 방지)
+        if (replySuccess !== false) {
+          peerPublicKeyMap.set(message.fromId, publicKeyObj)
+        } else {
+          console.warn(`[key-exchange] reply 실패 — ${message.fromId} 공개키 저장 건너뜀`)
+          return
+        }
 
         // 상대방 프로필 이미지 URL 업데이트
         if (message.profileImageUrl !== undefined) {
@@ -390,27 +411,46 @@ async function initApp() {
     // DM: 암호문 복호화 후 렌더러 전달
     if (message.type === 'dm' && message.encryptedPayload) {
       const senderPublicKey = peerPublicKeyMap.get(message.fromId)
-      if (!senderPublicKey) return
+      if (!senderPublicKey) {
+        // 공개키 없으면 암호문이라도 DB에 저장 (나중에 복호화 가능)
+        console.warn(`[DM 수신] 공개키 없음 — fromId=${message.fromId}, 암호문 DB 저장`)
+        try {
+          saveMessage(database, {
+            id: message.id, type: message.type,
+            from_id: message.fromId, from_name: message.from || '알 수 없음',
+            to_id: message.to, content: null,
+            content_type: 'text', format: message.format || null,
+            encrypted_payload: message.encryptedPayload,
+            file_url: null, file_name: null,
+            timestamp: message.timestamp,
+          })
+        } catch { /* DB 저장 실패 */ }
+        return
+      }
 
       try {
         const sharedSecret = deriveSharedSecret(myPrivateKey, senderPublicKey)
         // message.fromId = 송신자, peerId = 나(수신자)
         const decryptedPayload = decryptDM(message.encryptedPayload, sharedSecret, message.fromId, peerId)
 
-        saveMessage(database, {
-          id: message.id,
-          type: message.type,
-          from_id: message.fromId,
-          from_name: message.from,
-          to_id: message.to,
-          content: null,
-          content_type: decryptedPayload.contentType,
-          format: message.format || null,
-          encrypted_payload: message.encryptedPayload,
-          file_url: decryptedPayload.fileUrl || null,
-          file_name: decryptedPayload.fileName || null,
-          timestamp: message.timestamp,
-        })
+        try {
+          saveMessage(database, {
+            id: message.id,
+            type: message.type,
+            from_id: message.fromId,
+            from_name: message.from,
+            to_id: message.to,
+            content: null,
+            content_type: decryptedPayload.contentType,
+            format: message.format || null,
+            encrypted_payload: message.encryptedPayload,
+            file_url: decryptedPayload.fileUrl || null,
+            file_name: decryptedPayload.fileName || null,
+            timestamp: message.timestamp,
+          })
+        } catch (err) {
+          console.error(`[DM 수신] DB 저장 실패: ${message.id}`, err.message)
+        }
 
         if (mainWindow && !mainWindow.isFocused()) {
           incrementBadge()
@@ -431,7 +471,21 @@ async function initApp() {
         })
         // DM 파일 메시지면 로컬 캐시에 저장
         if (decryptedPayload.fileUrl) cacheReceivedFile(message.id, decryptedPayload.fileUrl, decryptedPayload.fileName)
-      } catch { /* 복호화 실패 무시 */ }
+      } catch (err) {
+        console.error(`[DM 수신] 복호화 실패: msgId=${message.id}, fromId=${message.fromId}`, err.message)
+        // 복호화 실패해도 암호문은 DB에 저장 (나중에 재복호화 가능)
+        try {
+          saveMessage(database, {
+            id: message.id, type: message.type,
+            from_id: message.fromId, from_name: message.from || '알 수 없음',
+            to_id: message.to, content: null,
+            content_type: 'text', format: message.format || null,
+            encrypted_payload: message.encryptedPayload,
+            file_url: null, file_name: null,
+            timestamp: message.timestamp,
+          })
+        } catch { /* DB 저장도 실패 */ }
+      }
       return
     }
 
@@ -526,7 +580,9 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     clearLastLogin(database)
     await stopPeerDiscovery()
     disconnectAll()
+    if (wsServerInfo) closeAllServerClients(wsServerInfo)
     peerPublicKeyMap.clear()
+    discoveryEpoch++
   })
 
   // 내 정보 조회 (프로필 닉네임 우선)
@@ -701,6 +757,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         id: messageId,
         targetPeerId: recipientPeerId,
         messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
+        originalTimestamp: timestamp,
       })
       // messages 테이블에 평문으로 저장 (히스토리 표시용)
       saveMessage(database, {
@@ -734,6 +791,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         id: messageId,
         targetPeerId: recipientPeerId,
         messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
+        originalTimestamp: timestamp,
       })
       saveMessage(database, {
         id: messageId, type: 'dm',
@@ -764,6 +822,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         id: messageId,
         targetPeerId: recipientPeerId,
         messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
+        originalTimestamp: timestamp,
       })
     }
 
@@ -886,15 +945,19 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           const sharedSecret = deriveSharedSecret(myPrivateKey, otherPublicKey)
           let decryptedPayload
 
-          // 신규 방식(peerId 포함 HKDF) 우선 시도
-          // 메시지 송신자 기준: from_id가 나이면 나→상대, 아니면 상대→나
+          // 송신자/수신자 peerId를 정확하게 전달 (HKDF 키 도출에 사용)
           const senderIdForDecrypt = msg.from_id
           const recipientIdForDecrypt = msg.from_id === peerId1 ? peerId2 : peerId1
           try {
             decryptedPayload = decryptDM(msg.encrypted_payload, sharedSecret, senderIdForDecrypt, recipientIdForDecrypt)
           } catch {
             // 신규 방식 실패 → 레거시(peerId 없는) 방식으로 재시도 (업데이트 전 메시지 호환)
-            decryptedPayload = decryptDM(msg.encrypted_payload, sharedSecret)
+            try {
+              decryptedPayload = decryptDM(msg.encrypted_payload, sharedSecret)
+            } catch (err) {
+              console.warn(`[히스토리] 복호화 실패: msgId=${msg.id}`, err.message)
+              return { ...msg, read: readFlag, content: null, decryptionFailed: true }
+            }
           }
 
           return {
@@ -905,8 +968,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             fileUrl: decryptedPayload.fileUrl || msg.file_url,
             fileName: decryptedPayload.fileName || msg.file_name,
           }
-        } catch {
-          // 복호화 완전 실패 시 원본 반환
+        } catch (err) {
+          console.warn(`[히스토리] sharedSecret 도출 실패: msgId=${msg.id}`, err.message)
         }
       }
       return { ...msg, read: readFlag }
