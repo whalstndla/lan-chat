@@ -61,8 +61,11 @@ const useChatStore = create((set) => ({
   clearExpiredTyping: () =>
     set((state) => {
       const now = Date.now()
+      const entries = Object.entries(state.typingUsers)
+      // 만료된 항목 없으면 상태 변경하지 않음
+      if (entries.every(([, v]) => now - v.timestamp < 3000)) return state
       const filtered = {}
-      for (const [key, value] of Object.entries(state.typingUsers)) {
+      for (const [key, value] of entries) {
         if (now - value.timestamp < 3000) filtered[key] = value
       }
       return { typingUsers: filtered }
@@ -99,6 +102,25 @@ const useChatStore = create((set) => ({
         ...state.dmMessages,
         [peerId]: (state.dmMessages[peerId] || []).map(msg =>
           messageIds.includes(msg.id) ? { ...msg, pending: false } : msg
+        ),
+      },
+    })),
+
+  // 글로벌 메시지 내용 수정
+  editGlobalMessage: (messageId, newContent, editedAt) =>
+    set((state) => ({
+      globalMessages: state.globalMessages.map(msg =>
+        msg.id === messageId ? { ...msg, content: newContent, edited_at: editedAt } : msg
+      ),
+    })),
+
+  // DM 메시지 내용 수정
+  editDMMessage: (peerId, messageId, newContent, editedAt) =>
+    set((state) => ({
+      dmMessages: {
+        ...state.dmMessages,
+        [peerId]: (state.dmMessages[peerId] || []).map(msg =>
+          msg.id === messageId ? { ...msg, content: newContent, edited_at: editedAt } : msg
         ),
       },
     })),

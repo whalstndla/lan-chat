@@ -3,10 +3,24 @@ import React, { useState } from 'react'
 import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
+import useUserStore from '../store/useUserStore'
 import SettingsPanel from './SettingsPanel'
 
-// 피어 아바타: 이미지 로드 성공 시 이미지, 실패 시 이니셜 표시 + 온라인 상태 dot
+// 상태 타입 → dot 색상 클래스 매핑
+const statusColors = {
+  online: 'bg-green-400',
+  away: 'bg-yellow-400',
+  busy: 'bg-red-400',
+  dnd: 'bg-red-600',
+}
+
+// 피어 아바타: 이미지 로드 성공 시 이미지, 실패 시 이니셜 표시 + 상태 dot
 function PeerAvatar({ peer, isOnline }) {
+  // 온라인이면 피어의 statusType 색상, 오프라인이면 회색
+  const dotColor = isOnline
+    ? (statusColors[peer.statusType] || statusColors.online)
+    : 'bg-vsc-muted'
+
   return (
     <div className="relative w-5 h-5 shrink-0">
       {/* 이니셜 배경 */}
@@ -22,11 +36,9 @@ function PeerAvatar({ peer, isOnline }) {
           onError={(e) => { e.target.style.display = 'none' }}
         />
       )}
-      {/* 온라인 상태 dot */}
+      {/* 상태 dot */}
       <span
-        className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-vsc-sidebar ${
-          isOnline ? 'bg-green-400' : 'bg-vsc-muted'
-        }`}
+        className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-vsc-sidebar ${dotColor}`}
       />
     </div>
   )
@@ -37,11 +49,12 @@ export default function Sidebar({ onShowPatchNotes }) {
   const [showSettings, setShowSettings] = useState(false)
   const onlinePeers = usePeerStore(state => state.onlinePeers)
   const pastDMPeers = usePeerStore(state => state.pastDMPeers)
+  const myStatusType = useUserStore(state => state.myStatusType)
 
   // 온라인 피어 + 오프라인 과거 DM 상대 병합 (온라인 우선)
   const onlinePeerIds = new Set(onlinePeers.map(p => p.peerId))
   const offlinePastPeers = pastDMPeers.filter(p => !onlinePeerIds.has(p.peerId))
-  const { currentRoom, setCurrentRoom } = useChatStore()
+  const currentRoom = useChatStore(state => state.currentRoom)
   const unreadCounts = useChatStore(state => state.unreadCounts)
 
   const isGlobalSelected = currentRoom.type === 'global'
@@ -58,7 +71,7 @@ export default function Sidebar({ onShowPatchNotes }) {
         </button>
 
         <button
-          onClick={() => setCurrentRoom({ type: 'global' })}
+          onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
           title="전체 채팅"
           className={`cursor-pointer p-1.5 rounded transition-colors ${
             isGlobalSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
@@ -74,7 +87,7 @@ export default function Sidebar({ onShowPatchNotes }) {
           return (
             <button
               key={peer.peerId}
-              onClick={() => setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
+              onClick={() => useChatStore.getState().setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
               title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}`}
               className={`cursor-pointer relative p-1.5 rounded transition-colors ${
                 isSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
@@ -117,7 +130,7 @@ export default function Sidebar({ onShowPatchNotes }) {
               </button>
             </div>
             <button
-              onClick={() => setCurrentRoom({ type: 'global' })}
+              onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
               className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${
                 isGlobalSelected
                   ? 'bg-vsc-selected text-vsc-text'
@@ -145,7 +158,7 @@ export default function Sidebar({ onShowPatchNotes }) {
                 return (
                   <button
                     key={peer.peerId}
-                    onClick={() => setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
+                    onClick={() => useChatStore.getState().setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
                     className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${
                       isSelected
                         ? 'bg-vsc-selected text-vsc-text'
@@ -165,22 +178,42 @@ export default function Sidebar({ onShowPatchNotes }) {
             )}
           </div>
 
-          {/* 설정 버튼 */}
-          <div className="px-3 py-2 border-t border-vsc-border space-y-0.5">
-            <button
-              onClick={() => onShowPatchNotes?.()}
-              className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
-            >
-              <FileText size={13} />
-              <span className="text-xs">패치노트</span>
-            </button>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
-            >
-              <Settings size={13} />
-              <span className="text-xs">설정</span>
-            </button>
+          {/* 하단 영역: 상태 선택 + 설정 버튼 */}
+          <div className="px-3 py-2 border-t border-vsc-border space-y-1.5">
+            {/* 내 상태 선택 */}
+            <div className="flex items-center gap-1.5 px-1">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${statusColors[myStatusType] || statusColors.online}`} />
+              <select
+                value={myStatusType}
+                onChange={(e) => {
+                  const newStatus = e.target.value
+                  useUserStore.getState().setMyStatus(newStatus, '')
+                  window.electronAPI.updateStatus({ statusType: newStatus, statusMessage: '' })
+                }}
+                className="bg-vsc-bg border border-vsc-border rounded px-1 py-0.5 text-xs text-vsc-text cursor-pointer flex-1 min-w-0"
+              >
+                <option value="online">온라인</option>
+                <option value="away">자리비움</option>
+                <option value="busy">바쁨</option>
+                <option value="dnd">방해 금지</option>
+              </select>
+            </div>
+            <div className="space-y-0.5">
+              <button
+                onClick={() => onShowPatchNotes?.()}
+                className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
+              >
+                <FileText size={13} />
+                <span className="text-xs">패치노트</span>
+              </button>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
+              >
+                <Settings size={13} />
+                <span className="text-xs">설정</span>
+              </button>
+            </div>
           </div>
         </>
       )}

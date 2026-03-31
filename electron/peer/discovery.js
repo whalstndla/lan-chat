@@ -6,6 +6,8 @@ const SERVICE_TYPE = 'lan-chat'
 let bonjourInstance = null
 let publishedService = null
 let browseInstance = null
+// 중복 발견 필터링용 Set — 이미 발견한 peerId를 기록
+const discoveredPeerIds = new Set()
 
 function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, onPeerLeft }) {
   bonjourInstance = new Bonjour()
@@ -27,6 +29,9 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
   browseInstance = bonjourInstance.find({ type: SERVICE_TYPE }, (service) => {
     const discoveredPeerId = service.txt?.peerId
     if (discoveredPeerId === peerId) return
+    // 이미 발견한 피어는 중복 콜백 방지
+    if (discoveredPeerIds.has(discoveredPeerId)) return
+    discoveredPeerIds.add(discoveredPeerId)
 
     onPeerFound({
       peerId: discoveredPeerId,
@@ -44,6 +49,8 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
 }
 
 async function stopPeerDiscovery() {
+  // 발견된 피어 목록 초기화
+  discoveredPeerIds.clear()
   if (publishedService) {
     publishedService.stop()
     publishedService = null
@@ -61,9 +68,13 @@ async function stopPeerDiscovery() {
 }
 
 // browse는 유지하고 서비스 공고만 재등록 (닉네임 변경 시 사용)
-function republishService({ nickname, peerId, wsPort, filePort }) {
+async function republishService({ nickname, peerId, wsPort, filePort }) {
   if (!bonjourInstance) return
-  if (publishedService) publishedService.stop()
+  if (publishedService) {
+    publishedService.stop()
+    // mDNS goodbye 패킷이 네트워크에 전파될 때까지 대기
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
   const sessionId = Date.now().toString(36)
   publishedService = bonjourInstance.publish({
     name: `${nickname}__${peerId}__${sessionId}`,

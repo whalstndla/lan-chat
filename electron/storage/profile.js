@@ -95,6 +95,12 @@ function saveCustomNotificationSound(db, appDataPath, buffer, extension) {
   return filename
 }
 
+// 상태 타입 및 상태 메시지 저장
+function updateStatus(db, { statusType, statusMessage }) {
+  db.prepare('UPDATE profile SET status_type = ?, status_message = ? WHERE id = 1')
+    .run(statusType, statusMessage || '')
+}
+
 // 비밀번호 변경 — 기존 비밀번호 검증 후 새 비밀번호로 교체
 function updatePassword(db, username, oldPassword, newPassword) {
   const isValid = verifyPassword(db, username, oldPassword)
@@ -110,5 +116,5 @@ module.exports = {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
   getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound,
-  updatePassword,
+  updatePassword, updateStatus,
 }

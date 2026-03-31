@@ -52,6 +52,8 @@ function migrateDatabase(db) {
     "ALTER TABLE profile ADD COLUMN notification_sound TEXT DEFAULT 'notification1'",
     'ALTER TABLE profile ADD COLUMN notification_volume REAL DEFAULT 0.7',
     'ALTER TABLE profile ADD COLUMN notification_custom_sound TEXT',
+    "ALTER TABLE profile ADD COLUMN status_type TEXT DEFAULT 'online'",
+    "ALTER TABLE profile ADD COLUMN status_message TEXT DEFAULT ''",
   ]
   for (const sql of profileMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
@@ -61,6 +63,8 @@ function migrateDatabase(db) {
   const messagesMigrations = [
     'ALTER TABLE messages ADD COLUMN read INTEGER DEFAULT 0',
     'ALTER TABLE messages ADD COLUMN format TEXT',
+    'ALTER TABLE messages ADD COLUMN edited_at INTEGER',
+    'ALTER TABLE messages ADD COLUMN cached_file_path TEXT',
   ]
   for (const sql of messagesMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
@@ -76,6 +80,36 @@ function migrateDatabase(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_pending_target ON pending_messages(target_peer_id);
   `)
+
+  // 이모지 리액션 테이블
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reactions (
+      message_id TEXT NOT NULL,
+      peer_id    TEXT NOT NULL,
+      emoji      TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),
+      PRIMARY KEY (message_id, peer_id, emoji)
+    );
+    CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
+  `)
+
+  // FTS5 전문 검색 (글로벌 메시지만 — DM은 암호화되어 인덱싱 불가)
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        id UNINDEXED, content, from_name,
+        content='messages', content_rowid='rowid'
+      );
+    `)
+    // content='messages' 모드에서는 FTS rowid가 messages 테이블 rowid와 반드시 일치해야 함.
+    // rowid를 명시하지 않으면 FTS rowid가 자동 할당되어 실제 messages rowid와 어긋나고,
+    // 엉뚱한 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생함.
+    // 따라서 rowid를 SELECT rowid FROM messages 로 명시적으로 지정함.
+    db.exec(`
+      INSERT INTO messages_fts(rowid, id, content, from_name)
+      SELECT rowid, id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
+    `)
+  } catch { /* FTS5 미지원 환경 무시 */ }
 }
 
 function closeDatabase(db) {

@@ -1,7 +1,7 @@
 // src/components/MessageInput.jsx
-import React, { useState, useRef, useEffect, Suspense, lazy, useCallback } from 'react'
+import React, { useState, useRef, useEffect, Suspense, lazy, useCallback, forwardRef, useImperativeHandle } from 'react'
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
-import { Paperclip, Smile, Send, Loader2, X } from 'lucide-react'
+import { Paperclip, Smile, Send, Loader2, X, Pencil } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -22,15 +22,16 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function MessageInput() {
+const MessageInput = forwardRef(function MessageInput(props, ref) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [isSending, setIsSending] = useState(false)
   const [pastePreview, setPastePreview] = useState(null)
+  // 수정 모드: 현재 수정 중인 메시지 객체 (null이면 일반 전송 모드)
+  const [editingMessage, setEditingMessage] = useState(null)
   const fileInputRef = useRef(null)
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
   const currentRoom = useChatStore(state => state.currentRoom)
-  const { addGlobalMessage, addDMMessage } = useChatStore()
 
   // Tiptap 에디터 설정
   const editor = useEditor({
@@ -121,7 +122,40 @@ export default function MessageInput() {
       })
   }, [currentRoom, editor])
 
+  // 수정 모드 시작 — 선택한 메시지를 에디터에 로드
+  function startEdit(message) {
+    setEditingMessage(message)
+    editor?.commands.setContent(message.content || '')
+    editor?.commands.focus()
+  }
+
+  // 수정 내용 제출 — IPC 호출 후 스토어 업데이트
+  async function submitEdit() {
+    if (!editingMessage || !editor) return
+    const newContent = editor.storage.markdown.getMarkdown().trim()
+    if (!newContent) return
+    const targetPeerId = editingMessage.type === 'dm'
+      ? (editingMessage.to || editingMessage.to_id) : null
+    const result = await window.electronAPI.editMessage({ messageId: editingMessage.id, newContent, targetPeerId })
+    if (result) {
+      const { editGlobalMessage, editDMMessage } = useChatStore.getState()
+      if (targetPeerId) editDMMessage(targetPeerId, editingMessage.id, newContent, result.editedAt)
+      else editGlobalMessage(editingMessage.id, newContent, result.editedAt)
+    }
+    setEditingMessage(null)
+    editor.commands.clearContent()
+  }
+
+  // 수정 모드 취소 — 에디터 초기화
+  function cancelEdit() {
+    setEditingMessage(null)
+    editor?.commands.clearContent()
+  }
+
   const sendMessage = useCallback(async () => {
+    // 수정 모드일 때는 메시지 전송 대신 수정 제출
+    if (editingMessage) { submitEdit(); return }
+
     if (!editor || editor.isEmpty || isSending) return
 
     // Tiptap → 마크다운 텍스트 변환
@@ -138,7 +172,7 @@ export default function MessageInput() {
           contentType: 'text',
           format: 'markdown',
         })
-        addGlobalMessage(sentMessage)
+        useChatStore.getState().addGlobalMessage(sentMessage)
       } else {
         sentMessage = await window.electronAPI.sendDM({
           recipientPeerId: currentRoom.peerId,
@@ -146,13 +180,13 @@ export default function MessageInput() {
           contentType: 'text',
           format: 'markdown',
         })
-        addDMMessage(currentRoom.peerId, sentMessage)
+        useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
       editor.commands.clearContent()
     } finally {
       setIsSending(false)
     }
-  }, [editor, isSending, currentRoom])
+  }, [editor, isSending, currentRoom, editingMessage])
 
   // sendMessage를 ref에 저장 (handleKeyDown에서 참조)
   useEffect(() => {
@@ -169,15 +203,28 @@ export default function MessageInput() {
       let sentMessage
       if (currentRoom.type === 'global') {
         sentMessage = await window.electronAPI.sendGlobalMessage(payload)
-        addGlobalMessage(sentMessage)
+        useChatStore.getState().addGlobalMessage(sentMessage)
       } else {
         sentMessage = await window.electronAPI.sendDM({ recipientPeerId: currentRoom.peerId, ...payload })
-        addDMMessage(currentRoom.peerId, sentMessage)
+        useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
     } finally {
       setIsSending(false)
     }
   }
+
+  // 드래그 앤 드롭으로 전달된 파일 처리 (첫 번째 파일만 전송)
+  function handleDroppedFiles(fileList) {
+    const file = fileList[0]
+    if (!file) return
+    sendFile(file)
+  }
+
+  // 부모 컴포넌트에서 ref를 통해 handleDroppedFiles, startEdit 호출 가능하도록 노출
+  useImperativeHandle(ref, () => ({
+    handleDroppedFiles,
+    startEdit,
+  }))
 
   function confirmPasteSend() {
     if (!pastePreview) return
@@ -247,7 +294,19 @@ export default function MessageInput() {
         </div>
       )}
 
-      <div className="flex items-end gap-2 bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors duration-150">
+      <div className="flex flex-col bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors duration-150">
+        {/* 수정 모드 배너 — 수정 중일 때만 표시 */}
+        {editingMessage && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-vsc-panel border-b border-vsc-border text-xs text-vsc-muted">
+            <Pencil size={12} />
+            <span>메시지 수정 중</span>
+            <button onClick={cancelEdit} className="ml-auto text-vsc-muted hover:text-red-400 cursor-pointer">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-end gap-2">
         {/* Tiptap 에디터 */}
         <div className="flex-1 tiptap-editor">
           <EditorContent editor={editor} />
@@ -270,8 +329,11 @@ export default function MessageInput() {
             {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           </button>
         </div>
+        </div>
       </div>
       <p className="text-vsc-muted text-xs mt-1 ml-1 select-none">Enter 전송 · Shift+Enter 줄바꿈 · **굵게** *기울임* `코드`</p>
     </div>
   )
-}
+})
+
+export default MessageInput

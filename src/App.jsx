@@ -68,11 +68,7 @@ function TitleBar({ nickname, updateState, onCheckUpdate }) {
 
 export default function App() {
   const { authStatus, authenticatedNickname, setAuthStatus } = useAuthStore()
-  const { initialize } = useUserStore()
-  const { addPeer, removePeer, updatePeerNickname, updatePeer, setPastDMPeers, addPastDMPeer } = usePeerStore()
-  const { setNotificationSettings } = useUserStore()
   const { play: playNotification } = useNotificationSound()
-  const { setGlobalHistory, addGlobalMessage, addDMMessage, incrementUnread, setTyping, clearExpiredTyping, removeGlobalMessage, removeDMMessage, clearPendingMessages, markMessagesAsRead } = useChatStore()
   const myPeerId = useUserStore(state => state.myPeerId)
   // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
   const [updateState, setUpdateState] = useState('idle')
@@ -136,15 +132,15 @@ export default function App() {
 
     const initChat = async () => {
       const { peerId, nickname, profileImageUrl } = await window.electronAPI.getMyInfo()
-      initialize(peerId, nickname, profileImageUrl)
+      useUserStore.getState().initialize(peerId, nickname, profileImageUrl)
 
       // 이전 채팅 기록 불러오기
       const history = await window.electronAPI.getGlobalHistory()
-      setGlobalHistory(history)
+      useChatStore.getState().setGlobalHistory(history)
 
       // 과거 DM 상대 목록 불러오기 (오프라인이어도 사이드바에 표시)
       const dmPeers = await window.electronAPI.getDMPeers()
-      setPastDMPeers(dmPeers)
+      usePeerStore.getState().setPastDMPeers(dmPeers)
 
       // 업데이트 후 첫 실행 시 패치노트 자동 표시
       const versionInfo = await window.electronAPI.getAppVersionInfo()
@@ -155,45 +151,51 @@ export default function App() {
 
       // 알림 설정 불러오기
       const notificationSettings = await window.electronAPI.getNotificationSettings()
-      setNotificationSettings(notificationSettings)
+      useUserStore.getState().setNotificationSettings(notificationSettings)
+
+      // StrictMode 중복 방지 — 기존 리스너 정리 후 새로 등록
+      window.electronAPI.unsubscribeAll()
 
       // 이벤트 구독 — 피어 발견 시작 전에 등록해야 race condition 방지
       window.electronAPI.subscribeToMessages((message) => {
         if (message.type === 'message') {
-          addGlobalMessage(message)
+          useChatStore.getState().addGlobalMessage(message)
         } else if (message.type === 'dm') {
-          const senderId = message.fromId === peerId ? message.to : message.fromId
-          addDMMessage(senderId, message)
+          // senderId 계산 — message.to 또는 fromId가 null일 수 있으므로 안전하게 처리
+          const senderId = message.fromId === peerId
+            ? (message.to || message.to_id)
+            : (message.fromId || message.from_id)
+          if (!senderId) return
+          useChatStore.getState().addDMMessage(senderId, message)
 
           // 처음 DM을 나누는 상대면 과거 목록에 추가
           const senderPeer = usePeerStore.getState().onlinePeers.find(p => p.peerId === senderId)
-          if (senderPeer) addPastDMPeer({ peerId: senderId, nickname: senderPeer.nickname })
+          if (senderPeer) usePeerStore.getState().addPastDMPeer({ peerId: senderId, nickname: senderPeer.nickname })
 
           // 현재 보고 있는 DM방이면 즉시 읽음 확인 전송, 아니면 안읽은 수 증가
           const { currentRoom } = useChatStore.getState()
           if (currentRoom.type === 'dm' && currentRoom.peerId === senderId) {
             window.electronAPI.sendReadReceipt(senderId, [message.id]).catch(() => {})
           } else {
-            incrementUnread(senderId)
+            useChatStore.getState().incrementUnread(senderId)
           }
         } else if (message.type === 'delete-message') {
           if (message.to) {
-            // DM 메시지 삭제 — 대화 상대방의 peerId 추출
             const dmPeerId = message.fromId === peerId ? message.to : message.fromId
-            removeDMMessage(dmPeerId, message.messageId)
+            useChatStore.getState().removeDMMessage(dmPeerId, message.messageId)
           } else {
-            removeGlobalMessage(message.messageId)
+            useChatStore.getState().removeGlobalMessage(message.messageId)
           }
         }
       })
 
       window.electronAPI.onTypingEvent((data) => {
-        setTyping(data.fromId, data.from)
+        useChatStore.getState().setTyping(data.fromId, data.from)
       })
 
       // 피어 닉네임 변경 이벤트
       window.electronAPI.onPeerNicknameChanged(({ peerId: changedPeerId, nickname: newNickname }) => {
-        updatePeerNickname(changedPeerId, newNickname)
+        usePeerStore.getState().updatePeerNickname(changedPeerId, newNickname)
         const { currentRoom, setCurrentRoom } = useChatStore.getState()
         if (currentRoom.type === 'dm' && currentRoom.peerId === changedPeerId) {
           setCurrentRoom({ ...currentRoom, nickname: newNickname })
@@ -202,21 +204,34 @@ export default function App() {
 
       // 피어 프로필 이미지 업데이트 이벤트
       window.electronAPI.onPeerProfileUpdated(({ peerId: updatedPeerId, profileImageUrl: updatedImageUrl }) => {
-        updatePeer(updatedPeerId, { profileImageUrl: updatedImageUrl })
+        usePeerStore.getState().updatePeer(updatedPeerId, { profileImageUrl: updatedImageUrl })
+      })
+
+      // 피어 상태 변경 이벤트
+      window.electronAPI.onPeerStatusChanged(({ peerId: statusPeerId, statusType, statusMessage }) => {
+        usePeerStore.getState().updatePeer(statusPeerId, { statusType, statusMessage })
       })
 
       // 오프라인 메시지 전송 완료 이벤트
       window.electronAPI.onPendingMessagesFlushed(({ targetPeerId, messageIds }) => {
-        clearPendingMessages(targetPeerId, messageIds)
+        useChatStore.getState().clearPendingMessages(targetPeerId, messageIds)
       })
 
       // 읽음 확인 수신 — 상대방이 내 메시지를 읽었을 때
       window.electronAPI.onReadReceipt(({ fromId, messageIds }) => {
-        markMessagesAsRead(fromId, messageIds)
+        useChatStore.getState().markMessagesAsRead(fromId, messageIds)
       })
 
-      window.electronAPI.subscribeToPeerDiscovery(addPeer)
-      window.electronAPI.subscribeToPeerLeft(removePeer)
+      window.electronAPI.subscribeToPeerDiscovery(usePeerStore.getState().addPeer)
+
+      // 피어 퇴장 시 pastDMPeers에 추가하여 사이드바에서 사라지지 않도록 처리
+      window.electronAPI.subscribeToPeerLeft((leftPeerId) => {
+        const peer = usePeerStore.getState().onlinePeers.find(p => p.peerId === leftPeerId)
+        if (peer) {
+          usePeerStore.getState().addPastDMPeer({ peerId: peer.peerId, nickname: peer.nickname })
+        }
+        usePeerStore.getState().removePeer(leftPeerId)
+      })
 
       window.electronAPI.onPlayNotificationSound(() => {
         playNotification()
@@ -224,8 +239,18 @@ export default function App() {
 
       // 알림 클릭 시 해당 채팅방으로 이동
       window.electronAPI.onNavigateToRoom((room) => {
-        const { setCurrentRoom } = useChatStore.getState()
-        setCurrentRoom(room)
+        useChatStore.getState().setCurrentRoom(room)
+      })
+
+      // 이모지 리액션 실시간 수신 — 리액션은 Message 컴포넌트의 로컬 상태로 관리
+      // (피어에서 수신한 리액션은 DB에 저장되므로 다음 로드 시 반영됨)
+      window.electronAPI.onReactionUpdated(() => {})
+
+      // 메시지 수정 수신
+      window.electronAPI.onMessageEdited(({ messageId, fromId, newContent, editedAt, to }) => {
+        const { editGlobalMessage, editDMMessage } = useChatStore.getState()
+        if (to) editDMMessage(fromId, messageId, newContent, editedAt)
+        else editGlobalMessage(messageId, newContent, editedAt)
       })
 
       // 피어 발견 시작 — 구독 등록 후 시작해야 race condition 방지
@@ -234,7 +259,7 @@ export default function App() {
 
     initChat()
 
-    const typingCleanupInterval = setInterval(clearExpiredTyping, 1000)
+    const typingCleanupInterval = setInterval(() => useChatStore.getState().clearExpiredTyping(), 1000)
 
     return () => {
       window.electronAPI.unsubscribeAll()
