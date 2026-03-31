@@ -286,6 +286,7 @@ export default function ChatWindow() {
                     message={message}
                     onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
                     isHighlighted={!!searchQuery.trim() && searchResults.some(r => r.id === message.id)}
+                    isGrouped={prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === (message.fromId || message.from_id)}
                   />
                 </React.Fragment>
               )

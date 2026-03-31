@@ -18,7 +18,7 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
-export default function Message({ message, onStartEdit, isHighlighted = false }) {
+export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   // 리액션 로컬 상태 — 스토어 구독 없이 관리
@@ -57,6 +57,8 @@ export default function Message({ message, onStartEdit, isHighlighted = false })
   }, [lightboxUrl])
 
   async function handleDelete() {
+    if (!window.confirm('이 메시지를 삭제하시겠습니까?')) return
+
     // DM 메시지이면 대화 상대 peerId, 전체 채팅이면 null
     const targetPeerId = (message.type === 'dm')
       ? (message.to || message.to_id)
@@ -94,25 +96,30 @@ export default function Message({ message, onStartEdit, isHighlighted = false })
 
   return (
     <>
-      <div className={`flex gap-3 px-4 py-1.5 hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${isHighlighted ? 'bg-yellow-500/10 border-l-2 border-yellow-400' : ''}`}>
+      <div className={`flex gap-3 px-4 ${isGrouped ? 'py-0.5' : 'py-1.5'} hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${isHighlighted ? 'bg-yellow-500/10 border-l-2 border-yellow-400' : ''}`}>
         {/* 아바타 */}
-        <div className="relative w-8 h-8 shrink-0 mt-0.5">
-          <div className="w-8 h-8 rounded bg-vsc-border flex items-center justify-center text-xs text-vsc-accent font-bold">
-            {sender?.[0]?.toUpperCase() || '?'}
+        {isGrouped ? (
+          <div className="w-8 shrink-0" />
+        ) : (
+          <div className="relative w-8 h-8 shrink-0 mt-0.5">
+            <div className="w-8 h-8 rounded bg-vsc-border flex items-center justify-center text-xs text-vsc-accent font-bold">
+              {sender?.[0]?.toUpperCase() || '?'}
+            </div>
+            {avatarUrl && (
+              <img
+                src={avatarUrl}
+                alt={sender}
+                className="absolute inset-0 w-8 h-8 rounded object-cover"
+                onError={(e) => { e.target.style.display = 'none' }}
+              />
+            )}
           </div>
-          {avatarUrl && (
-            <img
-              src={avatarUrl}
-              alt={sender}
-              className="absolute inset-0 w-8 h-8 rounded object-cover"
-              onError={(e) => { e.target.style.display = 'none' }}
-            />
-          )}
-        </div>
+        )}
 
         <div className={`flex flex-col max-w-[70%] ${isMyMessage ? 'items-end' : ''}`}>
-          {/* 닉네임 + 시간 + pending 아이콘 + 삭제 버튼 */}
-          <div className="flex items-baseline gap-2 mb-0.5">
+          {/* 닉네임 + 시간 + pending 아이콘 + 수정/삭제 버튼 */}
+          {!isGrouped && (
+          <div className={`flex items-baseline gap-2 mb-0.5 ${isMyMessage ? 'flex-row-reverse' : ''}`}>
             <span className={`text-xs font-semibold ${isMyMessage ? 'text-vsc-accent' : 'text-vsc-text'}`}>
               {isMyMessage ? '나' : sender}
             </span>
@@ -132,104 +139,124 @@ export default function Message({ message, onStartEdit, isHighlighted = false })
                 ? <CheckCheck size={12} className="text-blue-400" title="읽음" />
                 : <Check size={12} className="text-vsc-muted" title="안읽음" />
             )}
-            {/* 수정 버튼 — 내 텍스트 메시지에만 표시 */}
-            {isMyMessage && !message.pending && (contentType === 'text' || !contentType) && (
-              <button
-                onClick={() => onStartEdit?.(message)}
-                aria-label="메시지 수정"
-                title="메시지 수정"
-                className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
-              >
-                <Pencil size={12} />
-              </button>
-            )}
-            {isMyMessage && !message.pending && (
-              <button
-                onClick={handleDelete}
-                aria-label="메시지 삭제"
-                title="메시지 삭제"
-                className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-red-400 hover:bg-vsc-hover"
-              >
-                <Trash2 size={12} />
-              </button>
-            )}
           </div>
+          )}
 
-          {/* 메시지 내용 */}
-          {(contentType === 'text' || !contentType) && (
-            <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words max-w-full">
-              {message.format === 'markdown' ? (
-                <MarkdownRenderer content={message.content} />
-              ) : (
-                <span className="whitespace-pre-wrap">{parseLinksInText(message.content || '')}</span>
+          {/* 메시지 내용 + 리액션 버튼 (말풍선 옆) */}
+          <div className={`flex items-center gap-1 ${isMyMessage ? 'flex-row-reverse' : ''}`}>
+            {(contentType === 'text' || !contentType) && (
+              <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words min-w-0">
+                {message.format === 'markdown' ? (
+                  <MarkdownRenderer content={message.content} />
+                ) : (
+                  <span className="whitespace-pre-wrap">{parseLinksInText(message.content || '')}</span>
+                )}
+              </div>
+            )}
+
+            {contentType === 'image' && resolvedFileUrl && (
+              <div
+                className="rounded overflow-hidden border border-vsc-border cursor-pointer"
+                onClick={() => setLightboxUrl(resolvedFileUrl)}
+              >
+                <img
+                  src={resolvedFileUrl}
+                  alt={fileName || '이미지'}
+                  className="max-w-xs max-h-64 object-contain bg-vsc-bg"
+                  onError={(event) => {
+                    if (resolvedFileUrl === fileUrl) handleFileError()
+                    else event.target.style.display = 'none'
+                  }}
+                />
+              </div>
+            )}
+
+            {contentType === 'video' && resolvedFileUrl && (
+              <div className="rounded overflow-hidden border border-vsc-border">
+                <video
+                  src={resolvedFileUrl}
+                  controls
+                  className="max-w-xs max-h-64"
+                  onError={() => {
+                    if (resolvedFileUrl === fileUrl) handleFileError()
+                  }}
+                />
+              </div>
+            )}
+
+            {contentType === 'file' && resolvedFileUrl && (
+              <a
+                href={resolvedFileUrl}
+                download={fileName}
+                className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
+              >
+                <Paperclip size={14} className="shrink-0" />
+                {fileName || '파일'}
+              </a>
+            )}
+
+            {/* 액션 버튼 (말풍선 옆) */}
+            <div className="flex items-center gap-0.5 shrink-0">
+              {/* 수정 버튼 */}
+              {isMyMessage && !message.pending && (contentType === 'text' || !contentType) && (
+                <button
+                  onClick={() => onStartEdit?.(message)}
+                  aria-label="메시지 수정"
+                  title="메시지 수정"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                >
+                  <Pencil size={12} />
+                </button>
               )}
-            </div>
-          )}
-
-          {contentType === 'image' && resolvedFileUrl && (
-            <div
-              className="rounded overflow-hidden border border-vsc-border cursor-pointer"
-              onClick={() => setLightboxUrl(resolvedFileUrl)}
-            >
-              <img
-                src={resolvedFileUrl}
-                alt={fileName || '이미지'}
-                className="max-w-xs max-h-64 object-contain bg-vsc-bg"
-                onError={(event) => {
-                  if (resolvedFileUrl === fileUrl) handleFileError()
-                  else event.target.style.display = 'none'
-                }}
-              />
-            </div>
-          )}
-
-          {contentType === 'video' && resolvedFileUrl && (
-            <div className="rounded overflow-hidden border border-vsc-border">
-              <video
-                src={resolvedFileUrl}
-                controls
-                className="max-w-xs max-h-64"
-                onError={() => {
-                  if (resolvedFileUrl === fileUrl) handleFileError()
-                }}
-              />
-            </div>
-          )}
-
-          {contentType === 'file' && resolvedFileUrl && (
-            <a
-              href={resolvedFileUrl}
-              download={fileName}
-              className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
-            >
-              <Paperclip size={14} className="shrink-0" />
-              {fileName || '파일'}
-            </a>
-          )}
-
-          {/* 리액션 표시 + 추가 버튼 */}
-          <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-            {Object.entries(reactions).map(([emoji, peerIds]) => (
-              <button key={emoji} onClick={() => handleReaction(emoji)}
-                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border cursor-pointer transition-colors ${
-                  peerIds.includes(myPeerId)
-                    ? 'bg-vsc-accent/20 border-vsc-accent text-vsc-accent'
-                    : 'bg-vsc-panel border-vsc-border text-vsc-muted hover:border-vsc-accent'
-                }`}>
-                <span>{emoji}</span><span>{peerIds.length}</span>
-              </button>
-            ))}
-            <div className="relative group/reaction">
-              <button className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-vsc-muted hover:text-vsc-accent cursor-pointer" aria-label="리액션 추가">
-                <SmilePlus size={14} />
-              </button>
-              <div className="hidden group-hover/reaction:flex absolute bottom-full left-0 mb-1 bg-vsc-sidebar border border-vsc-border rounded-lg shadow-lg p-1 gap-0.5 z-10">
-                {quickEmojis.map(e => (
-                  <button key={e} onClick={() => handleReaction(e)} className="p-1 hover:bg-vsc-hover rounded cursor-pointer text-sm">{e}</button>
-                ))}
+              {/* 삭제 버튼 */}
+              {isMyMessage && !message.pending && (
+                <button
+                  onClick={handleDelete}
+                  aria-label="메시지 삭제"
+                  title="메시지 삭제"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-red-400 hover:bg-vsc-hover"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+              {/* 리액션 추가 버튼 */}
+              <div className="relative group/reaction">
+                <button className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-vsc-muted hover:text-vsc-accent cursor-pointer" aria-label="리액션 추가">
+                  <SmilePlus size={14} />
+                </button>
+                <div className={`hidden group-hover/reaction:flex absolute bottom-full pb-2 z-10 ${isMyMessage ? 'right-0' : 'left-0'}`}>
+                  <div className="flex bg-vsc-sidebar border border-vsc-border rounded-lg shadow-lg p-1 gap-0.5">
+                    {quickEmojis.map(e => (
+                      <button key={e} onClick={() => handleReaction(e)} className="p-1 hover:bg-vsc-hover rounded cursor-pointer text-sm">{e}</button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
+
+            {/* 그룹된 메시지 시간 (액션버튼 반대쪽) */}
+            {isGrouped && (
+              <span className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                {formatTime(message.timestamp)}
+              </span>
+            )}
           </div>
+
+          {/* 리액션 배지 표시 */}
+          {Object.keys(reactions).length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              {Object.entries(reactions).map(([emoji, peerIds]) => (
+                <button key={emoji} onClick={() => handleReaction(emoji)}
+                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border cursor-pointer transition-colors ${
+                    peerIds.includes(myPeerId)
+                      ? 'bg-vsc-accent/20 border-vsc-accent text-vsc-accent'
+                      : 'bg-vsc-panel border-vsc-border text-vsc-muted hover:border-vsc-accent'
+                  }`}>
+                  <span>{emoji}</span><span>{peerIds.length}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
