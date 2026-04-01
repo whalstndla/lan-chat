@@ -1,6 +1,6 @@
 // src/components/ChatWindow.jsx
 import React, { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Search, X } from 'lucide-react'
+import { Bell, BellOff, ChevronDown, Search, X } from 'lucide-react'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import Message from './Message'
@@ -29,12 +29,19 @@ export default function ChatWindow() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
+  // 무한 스크롤 상태
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+
+  const mutedRooms = useChatStore(state => state.mutedRooms)
+  const toggleRoomMute = useChatStore(state => state.toggleRoomMute)
 
   const currentMessages = currentRoom.type === 'global'
     ? globalMessages
     : (dmMessages[currentRoom.peerId] || [])
 
   const roomKey = currentRoom.type === 'global' ? 'global' : currentRoom.peerId
+  const isMuted = !!mutedRooms[roomKey]
   const lastReadTimestamp = lastReadTimestampsRef.current[roomKey]
 
   const chatTitle = currentRoom.type === 'global'
@@ -52,6 +59,44 @@ export default function ChatWindow() {
     const nearBottom = scrollHeight - scrollTop - clientHeight <= 50
     isNearBottomRef.current = nearBottom
     if (nearBottom) setNewMessageToast(null)
+
+    // 무한 스크롤 — 상단 도달 시 이전 메시지 로드
+    if (scrollTop < 50 && !loadingMore && hasMore) {
+      loadOlderMessages()
+    }
+  }
+
+  async function loadOlderMessages() {
+    setLoadingMore(true)
+    const container = messagesContainerRef.current
+    const prevScrollHeight = container?.scrollHeight || 0
+
+    try {
+      const PAGE_SIZE = 50
+      let older = []
+      if (currentRoom.type === 'global') {
+        older = await window.electronAPI.getGlobalHistory({ limit: PAGE_SIZE, offset: currentMessages.length })
+      } else {
+        older = await window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId, PAGE_SIZE, currentMessages.length)
+      }
+
+      if (older.length < PAGE_SIZE) setHasMore(false)
+      if (older.length > 0) {
+        const { prependGlobalMessages, prependDMMessages } = useChatStore.getState()
+        if (currentRoom.type === 'global') {
+          prependGlobalMessages(older)
+        } else {
+          prependDMMessages(currentRoom.peerId, older)
+        }
+        // 스크롤 위치 복원
+        requestAnimationFrame(() => {
+          if (container) {
+            container.scrollTop = container.scrollHeight - prevScrollHeight
+          }
+        })
+      }
+    } catch { /* 로드 실패 시 무시 */ }
+    setLoadingMore(false)
   }
 
   function scrollToBottom() {
@@ -181,10 +226,12 @@ export default function ChatWindow() {
     }
   }, [currentMessages, currentRoom])
 
-  // 채팅방 변경 시 하단으로 이동
+  // 채팅방 변경 시 하단으로 이동 + 무한 스크롤 초기화
   useEffect(() => {
     isNearBottomRef.current = true
     setNewMessageToast(null)
+    setHasMore(true)
+    setLoadingMore(false)
     scrollEndRef.current?.scrollIntoView({ behavior: 'auto' })
   }, [currentRoom])
 
@@ -194,13 +241,24 @@ export default function ChatWindow() {
       <div className="border-b border-vsc-border shrink-0">
         <div className="px-4 py-2.5 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-vsc-text">{chatTitle}</h2>
-          <button
-            onClick={handleToggleSearch}
-            className={`p-1 rounded hover:bg-vsc-hover transition-colors cursor-pointer ${showSearch ? 'text-vsc-accent' : 'text-vsc-muted'}`}
-            title="메시지 검색"
-          >
-            <Search size={15} />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* 알림 뮤트 토글 버튼 */}
+            <button
+              onClick={() => toggleRoomMute(roomKey)}
+              className={`p-1 rounded hover:bg-vsc-hover transition-colors cursor-pointer ${isMuted ? 'text-vsc-muted' : 'text-vsc-muted'}`}
+              title={isMuted ? '알림 켜기' : '알림 끄기'}
+            >
+              {isMuted ? <BellOff size={15} /> : <Bell size={15} />}
+            </button>
+            {/* 메시지 검색 버튼 */}
+            <button
+              onClick={handleToggleSearch}
+              className={`p-1 rounded hover:bg-vsc-hover transition-colors cursor-pointer ${showSearch ? 'text-vsc-accent' : 'text-vsc-muted'}`}
+              title="메시지 검색"
+            >
+              <Search size={15} />
+            </button>
+          </div>
         </div>
 
         {showSearch && (
@@ -263,7 +321,13 @@ export default function ChatWindow() {
               <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>
             </div>
           ) : (
-            currentMessages.map((message, index) => {
+            <>
+            {loadingMore && (
+              <div className="flex justify-center py-2">
+                <span className="text-xs text-vsc-muted">이전 메시지 불러오는 중...</span>
+              </div>
+            )}
+            {currentMessages.map((message, index) => {
               const prevMessage = index > 0 ? currentMessages[index - 1] : null
               const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
 
@@ -290,7 +354,8 @@ export default function ChatWindow() {
                   />
                 </React.Fragment>
               )
-            })
+            })}
+            </>
           )}
 
           {typingUserList.length > 0 && (

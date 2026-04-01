@@ -931,9 +931,13 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   })
 
   // 채팅 기록 조회
-  ipcMain.handle('get-global-history', () => getGlobalHistory(database))
-  ipcMain.handle('get-dm-history', (_, { peerId1, peerId2 }) => {
-    const history = getDMHistory(database, peerId1, peerId2)
+  ipcMain.handle('get-global-history', (_, params) => {
+    const limit = params?.limit || 100
+    const offset = params?.offset || 0
+    return getGlobalHistory(database, limit, offset)
+  })
+  ipcMain.handle('get-dm-history', (_, { peerId1, peerId2, limit, offset }) => {
+    const history = getDMHistory(database, peerId1, peerId2, limit || 100, offset || 0)
     // peerId1 = 나, peerId2 = 상대방
     const otherPublicKey = peerPublicKeyMap.get(peerId2)
 
@@ -1246,6 +1250,36 @@ function setupAutoUpdater() {
     sendToRenderer('update-error', error.message)
   })
 }
+
+// 링크 프리뷰 OG 메타데이터 추출 — 메인 프로세스에서 fetch (CORS 제한 없음)
+ipcMain.handle('fetch-link-preview', async (_, url) => {
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      signal: AbortSignal.timeout(5000),
+    })
+    const html = await response.text()
+    // og 태그에서 content 속성이 property 앞/뒤 어디에 있든 매칭
+    const getOgContent = (property) => {
+      const regex = new RegExp(
+        `<meta[^>]*(?:property=["']og:${property}["'][^>]*content=["']([^"']*)["']|content=["']([^"']*)["'][^>]*property=["']og:${property}["'])`,
+        'i'
+      )
+      const match = html.match(regex)
+      return match?.[1] || match?.[2] || null
+    }
+    const title = getOgContent('title')
+      || html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]
+      || null
+    const description = getOgContent('description')
+    const image = getOgContent('image')
+    // 제목조차 없으면 프리뷰 불가
+    if (!title) return null
+    return { title, description, image, url }
+  } catch {
+    return null
+  }
+})
 
 // 외부 링크 IPC 핸들러 — http/https URL만 OS 기본 브라우저로 열기
 ipcMain.handle('open-external', (_, url) => {

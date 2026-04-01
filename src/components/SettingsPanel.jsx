@@ -142,10 +142,12 @@ export default function SettingsPanel({ onClose }) {
   function handleCheckUpdate() {
     setUpdateState('checking')
     window.electronAPI.checkForUpdates()
-    // 업데이트 이벤트는 App.jsx에서 처리되지만, 상태 표시를 위해 타이머 설정
-    setTimeout(() => {
-      if (updateState === 'checking') setUpdateState('not-available')
-    }, 10000)
+
+    // 업데이트 이벤트 리스너 등록
+    window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
+    window.electronAPI.onUpdateNotAvailable(() => setUpdateState('not-available'))
+    window.electronAPI.onUpdateError(() => setUpdateState('error'))
+    window.electronAPI.onUpdateDownloaded?.(() => setUpdateState('downloaded'))
   }
 
   // 서브 페이지 헤더

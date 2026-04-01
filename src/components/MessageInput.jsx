@@ -1,7 +1,7 @@
 // src/components/MessageInput.jsx
 import React, { useState, useRef, useEffect, Suspense, lazy, useCallback, forwardRef, useImperativeHandle } from 'react'
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
-import { Paperclip, Smile, Send, Loader2, X, Pencil } from 'lucide-react'
+import { Paperclip, Smile, Send, Loader2, X, Pencil, Bold, Italic, Strikethrough, Code, FileCode } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -193,31 +193,39 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     sendMessageRef.current = sendMessage
   }, [sendMessage])
 
+  // 단일 파일 전송 (isSending 상태는 호출부에서 관리)
   async function sendFile(file) {
+    const arrayBuffer = await file.arrayBuffer()
+    const fileUrl = await window.electronAPI.saveFile(arrayBuffer, file.name)
+    const contentType = getFileContentType(file)
+    const payload = { content: null, contentType, fileUrl, fileName: file.name }
+    let sentMessage
+    if (currentRoom.type === 'global') {
+      sentMessage = await window.electronAPI.sendGlobalMessage(payload)
+      useChatStore.getState().addGlobalMessage(sentMessage)
+    } else {
+      sentMessage = await window.electronAPI.sendDM({ recipientPeerId: currentRoom.peerId, ...payload })
+      useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
+    }
+  }
+
+  // 여러 파일을 순차적으로 전송
+  async function sendFiles(fileList) {
+    if (!fileList || fileList.length === 0) return
     setIsSending(true)
     try {
-      const arrayBuffer = await file.arrayBuffer()
-      const fileUrl = await window.electronAPI.saveFile(arrayBuffer, file.name)
-      const contentType = getFileContentType(file)
-      const payload = { content: null, contentType, fileUrl, fileName: file.name }
-      let sentMessage
-      if (currentRoom.type === 'global') {
-        sentMessage = await window.electronAPI.sendGlobalMessage(payload)
-        useChatStore.getState().addGlobalMessage(sentMessage)
-      } else {
-        sentMessage = await window.electronAPI.sendDM({ recipientPeerId: currentRoom.peerId, ...payload })
-        useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
+      for (const file of fileList) {
+        await sendFile(file)
       }
     } finally {
       setIsSending(false)
     }
   }
 
-  // 드래그 앤 드롭으로 전달된 파일 처리 (첫 번째 파일만 전송)
+  // 드래그 앤 드롭으로 전달된 파일 처리 (모든 파일 순차 전송)
   function handleDroppedFiles(fileList) {
-    const file = fileList[0]
-    if (!file) return
-    sendFile(file)
+    if (!fileList || fileList.length === 0) return
+    sendFiles(fileList)
   }
 
   // 부모 컴포넌트에서 ref를 통해 handleDroppedFiles, startEdit 호출 가능하도록 노출
@@ -231,7 +239,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     const { file, previewUrl } = pastePreview
     URL.revokeObjectURL(previewUrl)
     setPastePreview(null)
-    sendFile(file)
+    sendFiles([file])
   }
 
   function cancelPaste() {
@@ -306,6 +314,77 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           </div>
         )}
 
+        {/* 마크다운 포맷팅 툴바 */}
+        {editor && (
+          <div className="flex items-center gap-0.5 px-2 py-1 border-b border-vsc-border">
+            {/* 굵게 */}
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleBold().run()}
+              title="굵게 (Ctrl+B)"
+              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
+                editor.isActive('bold')
+                  ? 'text-vsc-accent bg-vsc-hover'
+                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+              }`}
+            >
+              <Bold size={14} />
+            </button>
+            {/* 기울임 */}
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleItalic().run()}
+              title="기울임 (Ctrl+I)"
+              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
+                editor.isActive('italic')
+                  ? 'text-vsc-accent bg-vsc-hover'
+                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+              }`}
+            >
+              <Italic size={14} />
+            </button>
+            {/* 취소선 */}
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleStrike().run()}
+              title="취소선 (Ctrl+Shift+S)"
+              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
+                editor.isActive('strike')
+                  ? 'text-vsc-accent bg-vsc-hover'
+                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+              }`}
+            >
+              <Strikethrough size={14} />
+            </button>
+            {/* 인라인 코드 */}
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleCode().run()}
+              title="인라인 코드 (Ctrl+E)"
+              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
+                editor.isActive('code')
+                  ? 'text-vsc-accent bg-vsc-hover'
+                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+              }`}
+            >
+              <Code size={14} />
+            </button>
+            {/* 코드블록 */}
+            <button
+              type="button"
+              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
+              title="코드블록"
+              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
+                editor.isActive('codeBlock')
+                  ? 'text-vsc-accent bg-vsc-hover'
+                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+              }`}
+            >
+              <FileCode size={14} />
+            </button>
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
         {/* Tiptap 에디터 */}
         <div className="flex-1 tiptap-editor">
@@ -314,8 +393,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
 
         {/* 버튼 영역 */}
         <div className="flex items-center gap-0.5 pr-2 pb-1.5">
-          <input ref={fileInputRef} type="file" accept="image/*,video/*,*" className="hidden"
-            onChange={(event) => { const file = event.target.files?.[0]; if (file) sendFile(file); event.target.value = '' }} />
+          <input ref={fileInputRef} type="file" accept="image/*,video/*,*" multiple className="hidden"
+            onChange={(event) => { const files = event.target.files; if (files && files.length > 0) sendFiles(Array.from(files)); event.target.value = '' }} />
           <button onClick={() => fileInputRef.current?.click()} disabled={isSending} aria-label="파일 첨부" title="파일 첨부"
             className="cursor-pointer p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150">
             <Paperclip size={16} />

@@ -21,13 +21,13 @@ function saveMessage(db, message) {
   }
 }
 
-function getGlobalHistory(db, limit = 100) {
+function getGlobalHistory(db, limit = 100, offset = 0) {
   return db.prepare(`
     SELECT * FROM messages
     WHERE type = 'message'
     ORDER BY timestamp DESC
-    LIMIT ?
-  `).all(limit).reverse()
+    LIMIT ? OFFSET ?
+  `).all(limit, offset).reverse()
 }
 
 function getDMHistory(db, peerId1, peerId2, limit = 100, offset = 0) {

@@ -177,7 +177,11 @@ export default function App() {
           if (currentRoom.type === 'dm' && currentRoom.peerId === senderId) {
             window.electronAPI.sendReadReceipt(senderId, [message.id]).catch(() => {})
           } else {
-            useChatStore.getState().incrementUnread(senderId)
+            // 해당 채팅방이 뮤트 상태가 아닌 경우에만 안읽은 수 증가
+            const isMuted = !!useChatStore.getState().mutedRooms[senderId]
+            if (!isMuted) {
+              useChatStore.getState().incrementUnread(senderId)
+            }
           }
         } else if (message.type === 'delete-message') {
           if (message.to) {

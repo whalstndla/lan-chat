@@ -12,7 +12,7 @@ const markdownComponents = {
     return (
       <a
         href={href}
-        className="text-vsc-accent underline hover:opacity-80"
+        className="text-vsc-accent underline hover:opacity-80 break-all"
         onClick={(event) => {
           event.preventDefault()
           window.electronAPI.openExternal(href)
