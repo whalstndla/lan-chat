@@ -1,18 +1,67 @@
 // src/store/useChatStore.js
 import { create } from 'zustand'
 
+// localStorage에서 뮤트 상태 복원
+function loadMutedRooms() {
+  try {
+    const saved = localStorage.getItem('mutedRooms')
+    return saved ? JSON.parse(saved) : {}
+  } catch {
+    return {}
+  }
+}
+
+// localStorage에 뮤트 상태 저장
+function saveMutedRooms(mutedRooms) {
+  try {
+    localStorage.setItem('mutedRooms', JSON.stringify(mutedRooms))
+  } catch {
+    // localStorage 접근 실패 시 무시
+  }
+}
+
 // 현재 보고 있는 채팅방 타입
 // { type: 'global' } 또는 { type: 'dm', peerId: 'xxx', nickname: '홍길동' }
-const useChatStore = create((set) => ({
+const useChatStore = create((set, get) => ({
   currentRoom: { type: 'global' },
   globalMessages: [],
   dmMessages: {}, // { peerId: [메시지...] }
   unreadCounts: {}, // { peerId: 숫자 }
   typingUsers: {}, // { peerId: { nickname, timestamp } }
+  mutedRooms: loadMutedRooms(), // { roomKey: boolean } — 채팅방별 알림 뮤트 상태
+
+  // 채팅방 뮤트 토글 (roomKey: 'global' 또는 peerId)
+  toggleRoomMute: (roomKey) =>
+    set((state) => {
+      const updated = { ...state.mutedRooms, [roomKey]: !state.mutedRooms[roomKey] }
+      saveMutedRooms(updated)
+      return { mutedRooms: updated }
+    }),
+
+  // 채팅방 뮤트 여부 확인 (액션이 아닌 셀렉터로 사용)
+  isRoomMuted: (roomKey) => !!get().mutedRooms[roomKey],
 
   setCurrentRoom: (room) => set({ currentRoom: room }),
 
   setGlobalHistory: (messages) => set({ globalMessages: messages }),
+
+  // 이전 메시지를 앞에 추가 (무한 스크롤)
+  prependGlobalMessages: (older) =>
+    set((state) => {
+      const existingIds = new Set(state.globalMessages.map(m => m.id))
+      const unique = older.filter(m => !existingIds.has(m.id))
+      return { globalMessages: [...unique, ...state.globalMessages] }
+    }),
+
+  prependDMMessages: (peerId, older) =>
+    set((state) => {
+      const existing = state.dmMessages[peerId] || []
+      const existingIds = new Set(existing.map(m => m.id))
+      const unique = older.filter(m => !existingIds.has(m.id))
+      return {
+        dmMessages: { ...state.dmMessages, [peerId]: [...unique, ...existing] },
+      }
+    }),
 
   addGlobalMessage: (message) =>
     set((state) => {

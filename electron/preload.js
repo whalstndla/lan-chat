@@ -26,8 +26,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendDM: (payload) => ipcRenderer.invoke('send-dm', payload),
 
   // 기록 조회
-  getGlobalHistory: () => ipcRenderer.invoke('get-global-history'),
-  getDMHistory: (peerId1, peerId2) => ipcRenderer.invoke('get-dm-history', { peerId1, peerId2 }),
+  getGlobalHistory: (params) => ipcRenderer.invoke('get-global-history', params),
+  getDMHistory: (peerId1, peerId2, limit, offset) => ipcRenderer.invoke('get-dm-history', { peerId1, peerId2, limit, offset }),
   getDMPeers: () => ipcRenderer.invoke('get-dm-peers'),
 
   // 데이터 관리
@@ -141,6 +141,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 외부 링크 열기
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
+  // 링크 프리뷰 OG 메타데이터 가져오기
+  fetchLinkPreview: (url) => ipcRenderer.invoke('fetch-link-preview', url),
 
   // 패치노트
   getChangelog: () => ipcRenderer.invoke('get-changelog'),

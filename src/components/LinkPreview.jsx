@@ -15,7 +15,7 @@ export function parseLinksInText(text) {
           href={part}
           target="_blank"
           rel="noreferrer"
-          className="text-vsc-accent underline hover:opacity-80"
+          className="text-vsc-accent underline hover:opacity-80 break-all"
           onClick={(event) => {
             event.preventDefault()
             window.electronAPI.openExternal(part)

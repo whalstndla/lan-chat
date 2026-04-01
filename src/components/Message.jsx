@@ -1,7 +1,8 @@
 // src/components/Message.jsx
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Paperclip, Trash2, X, Clock, Check, CheckCheck, SmilePlus, Pencil } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
+import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
@@ -18,6 +19,14 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
+// 텍스트에서 첫 번째 URL 추출
+const URL_EXTRACT_PATTERN = /https?:\/\/[^\s]+/
+function extractFirstUrl(text) {
+  if (!text) return null
+  const match = text.match(URL_EXTRACT_PATTERN)
+  return match ? match[0] : null
+}
+
 export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
@@ -32,6 +41,12 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   const fileUrl = message.fileUrl || message.file_url
   const fileName = message.fileName || message.file_name
   const senderId = message.fromId || message.from_id
+
+  // 텍스트 메시지에서 첫 번째 URL 추출 (링크 프리뷰용)
+  const firstUrl = useMemo(() => {
+    if (contentType && contentType !== 'text') return null
+    return extractFirstUrl(message.content)
+  }, [message.content, contentType])
 
   // 캐시 URL 폴백 — 원본 URL 로드 실패 시 로컬 캐시로 전환
   const [resolvedFileUrl, setResolvedFileUrl] = useState(fileUrl)
@@ -145,7 +160,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
           {/* 메시지 내용 + 리액션 버튼 (말풍선 옆) */}
           <div className={`flex items-center gap-1 ${isMyMessage ? 'flex-row-reverse' : ''}`}>
             {(contentType === 'text' || !contentType) && (
-              <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words min-w-0">
+              <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words min-w-0 overflow-hidden">
                 {message.format === 'markdown' ? (
                   <MarkdownRenderer content={message.content} />
                 ) : (
@@ -241,6 +256,11 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
               </span>
             )}
           </div>
+
+          {/* 링크 프리뷰 카드 — 텍스트 메시지의 첫 번째 URL만 표시 */}
+          {firstUrl && (
+            <LinkPreviewCard url={firstUrl} />
+          )}
 
           {/* 리액션 배지 표시 */}
           {Object.keys(reactions).length > 0 && (
