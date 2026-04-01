@@ -1,5 +1,5 @@
 // src/components/Message.jsx
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Paperclip, Trash2, X, Clock, Check, CheckCheck, SmilePlus, Pencil } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
@@ -35,6 +35,9 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   const onlinePeers = usePeerStore(state => state.onlinePeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
   const [lightboxUrl, setLightboxUrl] = useState(null)
+  const [lightboxZoom, setLightboxZoom] = useState(1)
+  const [lightboxPos, setLightboxPos] = useState({ x: 0, y: 0 })
+  const lightboxDragRef = useRef(null)
 
   const sender = message.from || message.from_name
   const contentType = message.contentType || message.content_type
@@ -280,24 +283,71 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
         </div>
       </div>
 
-      {/* 이미지 라이트박스 */}
+      {/* 이미지 라이트박스 (확대/축소/드래그 지원) */}
       {lightboxUrl && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center"
-          onClick={() => setLightboxUrl(null)}
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center overflow-hidden"
+          onClick={() => { setLightboxUrl(null); setLightboxZoom(1); setLightboxPos({ x: 0, y: 0 }) }}
+          onWheel={(event) => {
+            event.preventDefault()
+            setLightboxZoom(prev => Math.min(Math.max(prev + (event.deltaY > 0 ? -0.2 : 0.2), 0.5), 5))
+          }}
         >
           <button
-            onClick={() => setLightboxUrl(null)}
-            className="absolute top-4 right-4 text-white/70 hover:text-white cursor-pointer"
+            onClick={() => { setLightboxUrl(null); setLightboxZoom(1); setLightboxPos({ x: 0, y: 0 }) }}
+            className="absolute top-4 right-4 text-white/70 hover:text-white cursor-pointer z-10"
             aria-label="닫기"
           >
             <X size={28} />
           </button>
+          {/* 확대율 표시 */}
+          {lightboxZoom !== 1 && (
+            <span className="absolute top-4 left-4 text-white/70 text-sm z-10">
+              {Math.round(lightboxZoom * 100)}%
+            </span>
+          )}
           <img
             src={lightboxUrl}
             alt="이미지 미리보기"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded select-none"
+            style={{
+              transform: `scale(${lightboxZoom}) translate(${lightboxPos.x}px, ${lightboxPos.y}px)`,
+              cursor: lightboxZoom > 1 ? 'grab' : 'default',
+              transition: lightboxDragRef.current ? 'none' : 'transform 0.1s ease',
+            }}
+            draggable={false}
             onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => {
+              event.stopPropagation()
+              if (lightboxZoom === 1) {
+                setLightboxZoom(2)
+              } else {
+                setLightboxZoom(1)
+                setLightboxPos({ x: 0, y: 0 })
+              }
+            }}
+            onMouseDown={(event) => {
+              if (lightboxZoom <= 1) return
+              event.preventDefault()
+              event.stopPropagation()
+              const startX = event.clientX
+              const startY = event.clientY
+              const startPos = { ...lightboxPos }
+              lightboxDragRef.current = true
+
+              const handleMouseMove = (moveEvent) => {
+                const dx = (moveEvent.clientX - startX) / lightboxZoom
+                const dy = (moveEvent.clientY - startY) / lightboxZoom
+                setLightboxPos({ x: startPos.x + dx, y: startPos.y + dy })
+              }
+              const handleMouseUp = () => {
+                lightboxDragRef.current = false
+                window.removeEventListener('mousemove', handleMouseMove)
+                window.removeEventListener('mouseup', handleMouseUp)
+              }
+              window.addEventListener('mousemove', handleMouseMove)
+              window.addEventListener('mouseup', handleMouseUp)
+            }}
           />
         </div>
       )}
