@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.7.14",
+    "date": "2026-04-01",
+    "changes": [
+      { "type": "feat", "text": "연속 이미지 메시지 가로 그리드 표시 (flex-wrap)" },
+      { "type": "feat", "text": "그룹된 이미지 일괄 삭제 지원" }
+    ]
+  },
+  {
     "version": "0.7.13",
     "date": "2026-04-01",
     "changes": [
