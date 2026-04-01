@@ -25,7 +25,7 @@ function formatFileSize(bytes) {
 const MessageInput = forwardRef(function MessageInput(props, ref) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [isSending, setIsSending] = useState(false)
-  const [pastePreview, setPastePreview] = useState(null)
+  const [pastePreview, setPastePreview] = useState(null) // null 또는 { files: [File...], previews: [{ previewUrl, fileName, fileSize }...] }
   // 수정 모드: 현재 수정 중인 메시지 객체 (null이면 일반 전송 모드)
   const [editingMessage, setEditingMessage] = useState(null)
   const fileInputRef = useRef(null)
@@ -53,28 +53,33 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       attributes: {
         class: 'outline-none text-sm text-vsc-text min-h-[40px] max-h-32 overflow-y-auto px-3 py-2.5',
       },
-      // 이미지 붙여넣기 가로채기 (여러 장 지원)
+      // 이미지 붙여넣기 가로채기 (여러 번 붙여넣기 시 누적)
       handlePaste: (view, event) => {
         const items = event.clipboardData?.items
         if (!items) return false
-        const imageFiles = []
+        const newFiles = []
         for (const item of items) {
           if (item.type.startsWith('image/')) {
             const file = item.getAsFile()
-            if (file) imageFiles.push(file)
+            if (file) newFiles.push(file)
           }
         }
-        if (imageFiles.length === 0) return false
+        if (newFiles.length === 0) return false
         event.preventDefault()
-        if (imageFiles.length === 1) {
-          // 단일 이미지 — 미리보기 다이얼로그 표시
-          const file = imageFiles[0]
-          const previewUrl = URL.createObjectURL(file)
-          setPastePreview({ file, previewUrl, fileName: file.name || '이미지.png', fileSize: file.size })
-        } else {
-          // 여러 이미지 — 바로 순차 전송
-          sendFiles(imageFiles)
-        }
+        // 기존 미리보기에 누적 추가
+        setPastePreview(prev => {
+          const existingFiles = prev ? prev.files : []
+          const existingPreviews = prev ? prev.previews : []
+          const addedPreviews = newFiles.map(file => ({
+            previewUrl: URL.createObjectURL(file),
+            fileName: file.name || '이미지.png',
+            fileSize: file.size,
+          }))
+          return {
+            files: [...existingFiles, ...newFiles],
+            previews: [...existingPreviews, ...addedPreviews],
+          }
+        })
         return true
       },
       // 백틱 입력 감지 — ``` 완성 시 코드블록 삽입
@@ -244,16 +249,29 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
 
   function confirmPasteSend() {
     if (!pastePreview) return
-    const { file, previewUrl } = pastePreview
-    URL.revokeObjectURL(previewUrl)
+    const { files, previews } = pastePreview
+    previews.forEach(p => URL.revokeObjectURL(p.previewUrl))
     setPastePreview(null)
-    sendFiles([file])
+    sendFiles(files)
   }
 
   function cancelPaste() {
     if (!pastePreview) return
-    URL.revokeObjectURL(pastePreview.previewUrl)
+    pastePreview.previews.forEach(p => URL.revokeObjectURL(p.previewUrl))
     setPastePreview(null)
+  }
+
+  function removePasteItem(index) {
+    if (!pastePreview) return
+    const { files, previews } = pastePreview
+    URL.revokeObjectURL(previews[index].previewUrl)
+    const newFiles = files.filter((_, i) => i !== index)
+    const newPreviews = previews.filter((_, i) => i !== index)
+    if (newFiles.length === 0) {
+      setPastePreview(null)
+    } else {
+      setPastePreview({ files: newFiles, previews: newPreviews })
+    }
   }
 
   // 붙여넣기 다이얼로그 키보드 단축키
@@ -287,22 +305,33 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         </div>
       )}
 
-      {/* 붙여넣기 이미지 확인 다이얼로그 */}
+      {/* 붙여넣기 이미지 확인 다이얼로그 (여러 장 누적 지원) */}
       {pastePreview && (
         <div className="absolute bottom-20 left-4 right-4 z-20 bg-vsc-panel border border-vsc-border rounded-lg p-4 shadow-lg">
           <div className="flex items-start justify-between mb-3">
-            <span className="text-sm font-semibold text-vsc-text">이미지 전송</span>
+            <span className="text-sm font-semibold text-vsc-text">
+              이미지 전송 {pastePreview.files.length > 1 && `(${pastePreview.files.length}장)`}
+            </span>
             <button onClick={cancelPaste} className="cursor-pointer text-vsc-muted hover:text-vsc-text" aria-label="취소">
               <X size={16} />
             </button>
           </div>
-          <div className="flex items-center gap-3 mb-4">
-            <img src={pastePreview.previewUrl} alt="미리보기" className="w-20 h-20 object-cover rounded border border-vsc-border bg-vsc-bg shrink-0" />
-            <div className="min-w-0">
-              <p className="text-sm text-vsc-text truncate">{pastePreview.fileName}</p>
-              <p className="text-xs text-vsc-muted mt-0.5">{formatFileSize(pastePreview.fileSize)}</p>
-            </div>
+          <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+            {pastePreview.previews.map((preview, index) => (
+              <div key={index} className="relative shrink-0 group/paste">
+                <img src={preview.previewUrl} alt="미리보기" className="w-20 h-20 object-cover rounded border border-vsc-border bg-vsc-bg" />
+                <button
+                  onClick={() => removePasteItem(index)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/paste:opacity-100 transition-opacity cursor-pointer"
+                  aria-label="제거"
+                >
+                  <X size={10} />
+                </button>
+                <p className="text-[10px] text-vsc-muted text-center mt-0.5 truncate w-20">{formatFileSize(preview.fileSize)}</p>
+              </div>
+            ))}
           </div>
+          <p className="text-xs text-vsc-muted mb-3">이미지를 더 붙여넣으면 추가됩니다</p>
           <div className="flex gap-2 justify-end">
             <button onClick={cancelPaste} className="cursor-pointer text-xs px-3 py-1.5 rounded bg-vsc-hover text-vsc-muted hover:text-vsc-text transition-colors">취소 (Esc)</button>
             <button onClick={confirmPasteSend} disabled={isSending} className="cursor-pointer text-xs px-3 py-1.5 rounded bg-vsc-accent text-white hover:opacity-90 disabled:opacity-50 transition-opacity">전송 (Enter)</button>
