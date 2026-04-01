@@ -53,21 +53,29 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       attributes: {
         class: 'outline-none text-sm text-vsc-text min-h-[40px] max-h-32 overflow-y-auto px-3 py-2.5',
       },
-      // 이미지 붙여넣기 가로채기 (기존 미리보기 다이얼로그 유지)
+      // 이미지 붙여넣기 가로채기 (여러 장 지원)
       handlePaste: (view, event) => {
         const items = event.clipboardData?.items
         if (!items) return false
+        const imageFiles = []
         for (const item of items) {
           if (item.type.startsWith('image/')) {
-            event.preventDefault()
             const file = item.getAsFile()
-            if (!file) return true
-            const previewUrl = URL.createObjectURL(file)
-            setPastePreview({ file, previewUrl, fileName: file.name || '이미지.png', fileSize: file.size })
-            return true
+            if (file) imageFiles.push(file)
           }
         }
-        return false
+        if (imageFiles.length === 0) return false
+        event.preventDefault()
+        if (imageFiles.length === 1) {
+          // 단일 이미지 — 미리보기 다이얼로그 표시
+          const file = imageFiles[0]
+          const previewUrl = URL.createObjectURL(file)
+          setPastePreview({ file, previewUrl, fileName: file.name || '이미지.png', fileSize: file.size })
+        } else {
+          // 여러 이미지 — 바로 순차 전송
+          sendFiles(imageFiles)
+        }
+        return true
       },
       // 백틱 입력 감지 — ``` 완성 시 코드블록 삽입
       handleTextInput: (view, from, to, text) => {
