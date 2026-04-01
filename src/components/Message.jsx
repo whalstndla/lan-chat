@@ -19,6 +19,24 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
+// 그룹 내 추가 이미지 썸네일 (캐시 URL 자동 해결)
+function ExtraImageThumb({ imageMessage, onClick }) {
+  const rawUrl = imageMessage.fileUrl || imageMessage.file_url
+  const [url, setUrl] = useState(rawUrl)
+  useEffect(() => {
+    if (!imageMessage.id) return
+    window.electronAPI.getCachedFileUrl(imageMessage.id).then(cached => {
+      if (cached) setUrl(cached)
+    }).catch(() => {})
+  }, [imageMessage.id])
+  if (!url) return null
+  return (
+    <div className="rounded overflow-hidden border border-vsc-border cursor-pointer" onClick={() => onClick(url)}>
+      <img src={url} alt={imageMessage.fileName || imageMessage.file_name || '이미지'} className="w-32 h-32 object-cover bg-vsc-bg" onError={(e) => { e.target.style.display = 'none' }} />
+    </div>
+  )
+}
+
 // 텍스트에서 첫 번째 URL 추출
 const URL_EXTRACT_PATTERN = /https?:\/\/[^\s]+/
 function extractFirstUrl(text) {
@@ -27,7 +45,7 @@ function extractFirstUrl(text) {
   return match ? match[0] : null
 }
 
-export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false }) {
+export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [] }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   // 리액션 로컬 상태 — 스토어 구독 없이 관리
@@ -173,19 +191,24 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
             )}
 
             {contentType === 'image' && resolvedFileUrl && (
-              <div
-                className="rounded overflow-hidden border border-vsc-border cursor-pointer"
-                onClick={() => setLightboxUrl(resolvedFileUrl)}
-              >
-                <img
-                  src={resolvedFileUrl}
-                  alt={fileName || '이미지'}
-                  className="max-w-xs max-h-64 object-contain bg-vsc-bg"
-                  onError={(event) => {
-                    if (resolvedFileUrl === fileUrl) handleFileError()
-                    else event.target.style.display = 'none'
-                  }}
-                />
+              <div className="flex flex-wrap gap-1 max-w-md">
+                <div
+                  className="rounded overflow-hidden border border-vsc-border cursor-pointer"
+                  onClick={() => setLightboxUrl(resolvedFileUrl)}
+                >
+                  <img
+                    src={resolvedFileUrl}
+                    alt={fileName || '이미지'}
+                    className={`object-cover bg-vsc-bg ${extraImages.length > 0 ? 'w-32 h-32' : 'max-w-xs max-h-64 object-contain'}`}
+                    onError={(event) => {
+                      if (resolvedFileUrl === fileUrl) handleFileError()
+                      else event.target.style.display = 'none'
+                    }}
+                  />
+                </div>
+                {extraImages.map(extra => (
+                  <ExtraImageThumb key={extra.id} imageMessage={extra} onClick={(url) => setLightboxUrl(url)} />
+                ))}
               </div>
             )}
 

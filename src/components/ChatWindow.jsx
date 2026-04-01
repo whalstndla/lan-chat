@@ -327,34 +327,78 @@ export default function ChatWindow() {
                 <span className="text-xs text-vsc-muted">이전 메시지 불러오는 중...</span>
               </div>
             )}
-            {currentMessages.map((message, index) => {
-              const prevMessage = index > 0 ? currentMessages[index - 1] : null
-              const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
+            {(() => {
+              const elements = []
+              let i = 0
+              while (i < currentMessages.length) {
+                const message = currentMessages[i]
+                const prevMessage = i > 0 ? currentMessages[i - 1] : null
+                const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
+                const messageContentType = message.contentType || message.content_type
+                const messageSenderId = message.fromId || message.from_id
 
-              const shouldShowDivider =
-                lastReadTimestamp != null &&
-                message.timestamp > lastReadTimestamp &&
-                (prevMessage === null || prevMessage.timestamp <= lastReadTimestamp) &&
-                !isMyMessage
+                const shouldShowDivider =
+                  lastReadTimestamp != null &&
+                  message.timestamp > lastReadTimestamp &&
+                  (prevMessage === null || prevMessage.timestamp <= lastReadTimestamp) &&
+                  !isMyMessage
 
-              return (
-                <React.Fragment key={message.id}>
-                  {shouldShowDivider && (
-                    <div className="flex items-center gap-2 px-4 py-1 my-1">
+                if (shouldShowDivider) {
+                  elements.push(
+                    <div key={`divider-${message.id}`} className="flex items-center gap-2 px-4 py-1 my-1">
                       <div className="flex-1 border-t border-red-400/50" />
                       <span className="text-xs text-red-400 font-semibold shrink-0">여기서부터 새 메시지</span>
                       <div className="flex-1 border-t border-red-400/50" />
                     </div>
-                  )}
+                  )
+                }
+
+                // 연속 이미지 그룹 감지
+                if (messageContentType === 'image') {
+                  const imageGroup = [message]
+                  let j = i + 1
+                  while (j < currentMessages.length) {
+                    const next = currentMessages[j]
+                    const nextContentType = next.contentType || next.content_type
+                    const nextSenderId = next.fromId || next.from_id
+                    if (nextContentType === 'image' && nextSenderId === messageSenderId) {
+                      imageGroup.push(next)
+                      j++
+                    } else break
+                  }
+
+                  if (imageGroup.length > 1) {
+                    // 연속 이미지 그룹 → 첫 번째만 Message로 렌더, 나머지는 그리드에 포함
+                    const isGrouped = prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId
+                    elements.push(
+                      <Message
+                        key={message.id}
+                        message={message}
+                        onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
+                        isHighlighted={!!searchQuery.trim() && searchResults.some(r => r.id === message.id)}
+                        isGrouped={isGrouped}
+                        extraImages={imageGroup.slice(1)}
+                      />
+                    )
+                    i = j
+                    continue
+                  }
+                }
+
+                // 일반 메시지
+                elements.push(
                   <Message
+                    key={message.id}
                     message={message}
                     onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
                     isHighlighted={!!searchQuery.trim() && searchResults.some(r => r.id === message.id)}
-                    isGrouped={prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === (message.fromId || message.from_id)}
+                    isGrouped={prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId}
                   />
-                </React.Fragment>
-              )
-            })}
+                )
+                i++
+              }
+              return elements
+            })()}
             </>
           )}
 
