@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.15",
+    "date": "2026-04-01",
+    "changes": [
+      { "type": "fix", "text": "상대방 재접속 시 재발견 안 되는 문제 수정 (discoveredPeerIds down 시 제거)" },
+      { "type": "fix", "text": "key-exchange reply 실패 시 연결 전체가 중단되는 문제 수정" },
+      { "type": "fix", "text": "닉네임 변경 후 mDNS 재등록 완료 전 응답하는 문제 수정 (await 추가)" },
+      { "type": "fix", "text": "동시 연결 시도 시 OPEN 연결 체크 순서 수정" }
+    ]
+  },
+  {
     "version": "0.7.14",
     "date": "2026-04-01",
     "changes": [
