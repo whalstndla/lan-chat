@@ -338,9 +338,12 @@ async function initApp() {
     if (message.type === 'key-exchange') {
       try {
         const publicKeyObj = importPublicKey(message.publicKey)
+        // 상대 공개키 저장 (reply 성공/실패와 무관하게 항상 저장)
+        peerPublicKeyMap.set(message.fromId, publicKeyObj)
+
         const currentNicknameForReply = getProfile(database)?.nickname || ''
-        // reply를 먼저 시도 — 실패하면 비대칭 상태 방지를 위해 공개키 저장 건너뜀
-        const replySuccess = reply({
+        // reply 시도 — 실패해도 역방향 연결에서 key-exchange를 다시 교환하므로 계속 진행
+        reply({
           type: 'key-exchange',
           fromId: peerId,
           publicKey: myPublicKeyBase64,
@@ -350,13 +353,6 @@ async function initApp() {
           filePort: getFilePort(),
           profileImageUrl: buildMyProfileImageUrl(),
         })
-        // reply 성공 후에만 상대 공개키 저장 (비대칭 상태 방지)
-        if (replySuccess !== false) {
-          peerPublicKeyMap.set(message.fromId, publicKeyObj)
-        } else {
-          console.warn(`[key-exchange] reply 실패 — ${message.fromId} 공개키 저장 건너뜀`)
-          return
-        }
 
         // 상대방 프로필 이미지 URL 업데이트
         if (message.profileImageUrl !== undefined) {
