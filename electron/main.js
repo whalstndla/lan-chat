@@ -662,12 +662,12 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   })
 
   // 닉네임 변경
-  ipcMain.handle('update-nickname', (_, newNickname) => {
+  ipcMain.handle('update-nickname', async (_, newNickname) => {
     if (!newNickname?.trim()) return { success: false, error: '닉네임을 입력해주세요.' }
     if (newNickname.trim().length > 30) return { success: false, error: '닉네임은 30자 이하여야 합니다.' }
     try {
       updateNickname(database, newNickname.trim())
-      republishService({
+      await republishService({
         nickname: newNickname.trim(),
         peerId: currentPeerId,
         wsPort: wsServerInfo?.port ?? 0,

@@ -44,7 +44,11 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
 
   browseInstance.on('down', (service) => {
     const leftPeerId = service.txt?.peerId
-    if (leftPeerId) onPeerLeft(leftPeerId)
+    if (leftPeerId) {
+      // down 시 Set에서 제거 → 재접속 시 다시 발견 가능
+      discoveredPeerIds.delete(leftPeerId)
+      onPeerLeft(leftPeerId)
+    }
   })
 }
 

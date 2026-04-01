@@ -21,6 +21,12 @@ function calculateReconnectDelay(attempt, baseDelay, maxDelay) {
 
 function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoReconnect = false, reconnectBaseDelay = 1000, reconnectMaxDelay = 30000, reconnectMaxAttempts = 10, onReconnect }) {
   return new Promise((resolve, reject) => {
+    // 이미 OPEN 연결이 있으면 재연결 불필요
+    const existingSocket = connectionMap.get(peerId)
+    if (existingSocket && existingSocket.readyState === WebSocket.OPEN && !force) {
+      resolve()
+      return
+    }
     // 동일 피어에 대한 동시 연결 시도 방지 (force가 아닌 경우)
     if (connectingSet.has(peerId) && !force) {
       resolve()
@@ -28,14 +34,7 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
     }
     connectingSet.add(peerId)
 
-    const existingSocket = connectionMap.get(peerId)
     if (existingSocket) {
-      if (existingSocket.readyState === WebSocket.OPEN && !force) {
-        // 정상 연결 중이면 재연결 불필요 (force 시 강제 교체)
-        connectingSet.delete(peerId)
-        resolve()
-        return
-      }
       // 기존 소켓 정리 — connectionMap에서 먼저 제거하여 비동기 close가 새 매핑을 건드리지 않도록 함
       connectionMap.delete(peerId)
       existingSocket.close()
