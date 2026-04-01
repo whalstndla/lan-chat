@@ -93,20 +93,26 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   }, [lightboxUrl])
 
   async function handleDelete() {
-    if (!window.confirm('이 메시지를 삭제하시겠습니까?')) return
+    const allMessages = extraImages.length > 0
+      ? [message, ...extraImages]
+      : [message]
+    const confirmText = allMessages.length > 1
+      ? `이미지 ${allMessages.length}장을 모두 삭제하시겠습니까?`
+      : '이 메시지를 삭제하시겠습니까?'
+    if (!window.confirm(confirmText)) return
 
     // DM 메시지이면 대화 상대 peerId, 전체 채팅이면 null
     const targetPeerId = (message.type === 'dm')
       ? (message.to || message.to_id)
       : null
 
-    await window.electronAPI.deleteMessage(message.id, targetPeerId)
-
-    // 로컬 스토어에서 즉시 제거
-    if (targetPeerId) {
-      useChatStore.getState().removeDMMessage(targetPeerId, message.id)
-    } else {
-      useChatStore.getState().removeGlobalMessage(message.id)
+    for (const msg of allMessages) {
+      await window.electronAPI.deleteMessage(msg.id, targetPeerId)
+      if (targetPeerId) {
+        useChatStore.getState().removeDMMessage(targetPeerId, msg.id)
+      } else {
+        useChatStore.getState().removeGlobalMessage(msg.id)
+      }
     }
   }
 
