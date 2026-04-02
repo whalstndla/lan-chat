@@ -1,6 +1,6 @@
 // src/components/Sidebar.jsx
 import React, { useState } from 'react'
-import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText } from 'lucide-react'
+import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
@@ -121,13 +121,22 @@ export default function Sidebar({ onShowPatchNotes }) {
           <div className="px-2 py-2">
             <div className="flex items-center justify-between px-2 py-1 mb-1">
               <p className="text-vsc-muted text-xs uppercase tracking-wider">채팅</p>
-              <button
-                onClick={() => setCollapsed(true)}
-                title="사이드바 접기"
-                className="cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
-              >
-                <ChevronLeft size={13} />
-              </button>
+              <div className="flex items-center gap-0.5">
+                <button
+                  onClick={() => window.electronAPI.startPeerDiscovery()}
+                  title="피어 재검색"
+                  className="cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
+                >
+                  <RotateCw size={13} />
+                </button>
+                <button
+                  onClick={() => setCollapsed(true)}
+                  title="사이드바 접기"
+                  className="cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
+                >
+                  <ChevronLeft size={13} />
+                </button>
+              </div>
             </div>
             <button
               onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}

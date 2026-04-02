@@ -88,4 +88,9 @@ async function republishService({ nickname, peerId, wsPort, filePort }) {
   })
 }
 
-module.exports = { startPeerDiscovery, stopPeerDiscovery, republishService }
+// 특정 피어를 발견 목록에서 제거 — 재연결 영구 실패 시 mDNS 재발견 허용
+function removePeerFromDiscovered(peerId) {
+  discoveredPeerIds.delete(peerId)
+}
+
+module.exports = { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered }

@@ -67,28 +67,37 @@ describe('Heartbeat 및 자동 재연결', () => {
   describe('클라이언트 자동 재연결', () => {
     it('autoReconnect: true 설정 시 서버 종료 후 재연결을 시도함', (done) => {
       serverInfo = startWsServer({ onMessage: () => {} })
-      let reconnectAttempted = false
+      const originalPort = serverInfo.port
+      let reconnectCalled = false
+      let tempServer = null
 
       connectToPeer({
         peerId: 'peer-reconnect',
         host: 'localhost',
-        wsPort: serverInfo.port,
+        wsPort: originalPort,
         autoReconnect: true,
         reconnectBaseDelay: 100, // 빠른 테스트를 위해 짧게 설정
         onReconnect: () => {
-          reconnectAttempted = true
+          reconnectCalled = true
         },
       }).then(() => {
         // 연결 성공 후 서버측 소켓을 terminate하여 클라이언트 close 이벤트 유발
         closeAllServerClients(serverInfo)
-        stopWsServer(serverInfo)
+
+        // 서버를 종료하고 같은 포트에 새 서버를 시작하여 재연결 성공을 허용
+        // (onReconnect는 재연결 성공 후에만 호출됨)
+        serverInfo.server.close(() => {
+          const { WebSocketServer } = require('ws')
+          tempServer = new WebSocketServer({ port: originalPort })
+        })
         serverInfo = null
 
-        // 재연결 시도가 발생할 때까지 대기 (close 감지 + reconnectBaseDelay + 여유)
+        // 재연결 성공 + onReconnect 콜백 호출까지 대기
         setTimeout(() => {
-          expect(reconnectAttempted).toBe(true)
+          expect(reconnectCalled).toBe(true)
           // 남은 타이머 정리
           disconnectFromPeer('peer-reconnect')
+          if (tempServer) tempServer.close()
           done()
         }, 800)
       })

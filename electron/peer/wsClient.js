@@ -13,6 +13,9 @@ const reconnectOptionsMap = new Map()
 // 현재 연결 시도 중인 피어 ID 집합 (동시 connectToPeer race condition 방지)
 const connectingSet = new Set()
 
+// 클라이언트 측 heartbeat 주기 (ms) — 서버 사망 감지용
+const CLIENT_HEARTBEAT_INTERVAL = 15000
+
 // 지수 백오프 기반 재연결 지연 시간 계산
 // 시도 횟수에 따라 delay = base * 2^attempt 로 증가, max 이하로 제한
 function calculateReconnectDelay(attempt, baseDelay, maxDelay) {
@@ -57,6 +60,20 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
         })
       }
 
+      // 클라이언트 측 heartbeat — 서버 사망 감지 (pong 미응답 시 terminate → 재연결)
+      socket._isAlive = true
+      socket.on('pong', () => { socket._isAlive = true })
+      socket._heartbeat = setInterval(() => {
+        if (!socket._isAlive) {
+          clearInterval(socket._heartbeat)
+          socket.terminate()
+          return
+        }
+        socket._isAlive = false
+        socket.ping()
+      }, CLIENT_HEARTBEAT_INTERVAL)
+      if (socket._heartbeat.unref) socket._heartbeat.unref()
+
       resolve()
     })
 
@@ -73,6 +90,7 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
     // onClose: 연결 성공 후 소켓 종료 시에만 호출 (강제 종료 감지용)
     // identity 체크: force 교체된 old 소켓의 close가 새 매핑 삭제 및 false peer-left 방지
     socket.on('close', () => {
+      if (socket._heartbeat) clearInterval(socket._heartbeat)
       connectingSet.delete(peerId)
       const isCurrent = connectionMap.get(peerId) === socket
       if (isCurrent) {
@@ -80,13 +98,14 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
       }
 
       // autoReconnect가 활성화된 경우 지수 백오프 재연결 시도
+      // 재연결 중에는 onClose를 호출하지 않음 — 영구 실패 시 scheduleReconnect에서 호출
       const savedOptions = reconnectOptionsMap.get(peerId)
       if (isCurrent && connected && savedOptions && savedOptions.autoReconnect) {
         scheduleReconnect(savedOptions, 0)
+      } else if (isCurrent && connected && onClose) {
+        // autoReconnect 없거나 교체된(replaced) 소켓 → 즉시 onClose
+        onClose()
       }
-
-      // 교체된(replaced) 소켓은 onClose를 호출하지 않음 — 의도된 교체이므로 peer-left 불필요
-      if (isCurrent && connected && onClose) onClose()
     })
 
     socket.on('error', (error) => {
@@ -116,11 +135,11 @@ function scheduleReconnect(options, attempt) {
     // 재연결 옵션이 삭제됐으면 (disconnectFromPeer/disconnectAll 호출) 중단
     if (!reconnectOptionsMap.has(peerId)) return
 
-    // onReconnect 콜백 호출 (재연결 시도 알림)
-    if (onReconnect) onReconnect(attempt + 1)
-
-    // 실제 재연결 시도 — 실패 시 다음 시도 스케줄링
-    connectToPeer({ ...options, force: false }).catch(() => {
+    // 실제 재연결 시도 — 성공 시 onReconnect 콜백, 실패 시 다음 시도 스케줄링
+    connectToPeer({ ...options, force: false }).then(() => {
+      // 재연결 성공 후 콜백 호출 (key-exchange 재전송 등)
+      if (onReconnect) onReconnect(attempt + 1)
+    }).catch(() => {
       // 재연결 실패 시 다음 시도 스케줄링
       if (reconnectOptionsMap.has(peerId)) {
         scheduleReconnect(options, attempt + 1)
@@ -160,6 +179,7 @@ function disconnectFromPeer(peerId) {
 
   const socket = connectionMap.get(peerId)
   if (socket) {
+    if (socket._heartbeat) clearInterval(socket._heartbeat)
     socket.close()
     connectionMap.delete(peerId)
   }
@@ -183,6 +203,7 @@ function disconnectAll() {
   reconnectOptionsMap.clear()
 
   connectionMap.forEach((socket) => {
+    if (socket._heartbeat) clearInterval(socket._heartbeat)
     socket.close()
   })
   connectionMap.clear()

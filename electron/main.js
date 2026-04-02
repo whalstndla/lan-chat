@@ -12,7 +12,7 @@ const {
   updatePassword, updateStatus,
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage, deleteExpiredPendingMessages } = require('./storage/pendingMessages')
-const { startPeerDiscovery, stopPeerDiscovery, republishService } = require('./peer/discovery')
+const { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered } = require('./peer/discovery')
 const { startWsServer, stopWsServer, closeAllServerClients } = require('./peer/wsServer')
 const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
@@ -380,8 +380,25 @@ async function initApp() {
             host: message.host,
             wsPort: message.wsPort,
             onMessage: handleIncomingMessage,
+            autoReconnect: true,
+            onReconnect: () => {
+              // 역방향 재연결 성공 후 key-exchange 재전송
+              if (epochAtReverse !== discoveryEpoch) return
+              const latestNickname = getProfile(database)?.nickname || defaultNickname
+              sendMessage(message.fromId, {
+                type: 'key-exchange',
+                fromId: peerId,
+                publicKey: myPublicKeyBase64,
+                nickname: latestNickname,
+                host: localIP,
+                wsPort: wsServerInfo.port,
+                filePort: getFilePort(),
+                profileImageUrl: buildMyProfileImageUrl(),
+              })
+            },
             onClose: () => {
               if (epochAtReverse !== discoveryEpoch) return
+              removePeerFromDiscovered(message.fromId)
               if (!getConnections().includes(message.fromId)) {
                 sendToRenderer('peer-left', message.fromId)
               }
@@ -616,9 +633,27 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             host: peerInfo.host,
             wsPort: peerInfo.wsPort,
             onMessage: handleIncomingMessage,
-            onClose: () => {
-              // 현재 세대의 연결이 아니면 stale → peer-left 무시
+            autoReconnect: true,
+            onReconnect: () => {
+              // 재연결 성공 후 key-exchange 재전송 (암호화 세션 복구)
               if (currentEpoch !== discoveryEpoch) return
+              const latestNickname = getProfile(database)?.nickname || defaultNickname
+              sendMessage(peerInfo.peerId, {
+                type: 'key-exchange',
+                fromId: currentPeerId,
+                publicKey: myPublicKeyBase64,
+                nickname: latestNickname,
+                host: localIP,
+                wsPort: wsServerInfo.port,
+                filePort: getFilePort(),
+                profileImageUrl: buildMyProfileImageUrl(),
+              })
+            },
+            onClose: () => {
+              // 영구 실패 시에만 호출됨 (autoReconnect 최대 시도 초과)
+              if (currentEpoch !== discoveryEpoch) return
+              // mDNS 재발견 허용 — 상대방이 다시 온라인이면 재연결 가능
+              removePeerFromDiscovered(peerInfo.peerId)
               if (!getConnections().includes(peerInfo.peerId)) {
                 sendToRenderer('peer-left', peerInfo.peerId)
               }
