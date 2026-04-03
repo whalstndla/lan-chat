@@ -1,5 +1,5 @@
 // electron/peer/wsServer.js
-const { WebSocketServer } = require('ws')
+const { WebSocketServer, WebSocket } = require('ws')
 
 // 허용되는 메시지 타입 화이트리스트
 const ALLOWED_MESSAGE_TYPES = [
@@ -76,6 +76,11 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
           recentMessageIds.add(message.id)
         }
 
+        // 메시지에서 fromId가 있으면 소켓에 peerId 태깅 (서버 inbound 피어 추적용)
+        if (message.fromId && !socket._peerId) {
+          socket._peerId = message.fromId
+        }
+
         const reply = (response) => {
           if (socket.readyState === socket.OPEN) {
             socket.send(JSON.stringify(response))
@@ -126,4 +131,15 @@ function closeAllServerClients({ server }) {
   server.clients.forEach((socket) => socket.terminate())
 }
 
-module.exports = { startWsServer, stopWsServer, closeAllServerClients }
+// 서버에 연결된 inbound 피어 ID 목록 반환 (OPEN 상태 + peerId 태깅된 소켓만)
+function getServerClientPeerIds({ server }) {
+  const peerIds = []
+  server.clients.forEach((socket) => {
+    if (socket.readyState === WebSocket.OPEN && socket._peerId) {
+      peerIds.push(socket._peerId)
+    }
+  })
+  return peerIds
+}
+
+module.exports = { startWsServer, stopWsServer, closeAllServerClients, getServerClientPeerIds }

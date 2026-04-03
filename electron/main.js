@@ -13,7 +13,7 @@ const {
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage, deleteExpiredPendingMessages } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered } = require('./peer/discovery')
-const { startWsServer, stopWsServer, closeAllServerClients } = require('./peer/wsServer')
+const { startWsServer, stopWsServer, closeAllServerClients, getServerClientPeerIds } = require('./peer/wsServer')
 const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
@@ -131,7 +131,8 @@ function loadChangelog() {
 }
 
 // 오프라인 메시지를 대상 피어에게 전송 (동시 호출 방지 락 적용)
-async function flushPendingMessages(targetPeerId) {
+// retryCount: 공개키 미도착 시 재시도 횟수 (최대 3회, 2초 간격)
+async function flushPendingMessages(targetPeerId, retryCount = 0) {
   // 동일 피어에 대한 동시 flush 방지
   if (flushingPeers.has(targetPeerId)) return
   flushingPeers.add(targetPeerId)
@@ -141,7 +142,16 @@ async function flushPendingMessages(targetPeerId) {
     if (pendingList.length === 0) return
 
     const recipientPublicKey = peerPublicKeyMap.get(targetPeerId)
-    if (!recipientPublicKey) return
+    if (!recipientPublicKey) {
+      // 공개키 미도착 — 일정 시간 후 재시도 (key-exchange 완료 대기)
+      if (retryCount < 3) {
+        setTimeout(() => {
+          flushingPeers.delete(targetPeerId)
+          flushPendingMessages(targetPeerId, retryCount + 1)
+        }, 2000 * (retryCount + 1))
+      }
+      return
+    }
 
     const currentNickname = getProfile(database)?.nickname || ''
     const sharedSecret = deriveSharedSecret(myPrivateKey, recipientPublicKey)
@@ -690,6 +700,39 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         }
       },
     })
+
+    // handshake 보완 스윕 — 공개키 미교환 피어에게 key-exchange 재전송
+    // outbound(내가 연결) + inbound(상대가 서버에 연결) 양쪽 모두 대상
+    // mDNS 발견 후 key-exchange reply 유실, 또는 한쪽만 발견된 경우를 커버
+    const sweepTimer = setTimeout(() => {
+      if (currentEpoch !== discoveryEpoch) return
+      // outbound 연결 + inbound 서버 클라이언트 합산 (중복 제거)
+      const outboundPeers = getConnections()
+      const inboundPeers = wsServerInfo ? getServerClientPeerIds(wsServerInfo) : []
+      const allPeerIds = [...new Set([...outboundPeers, ...inboundPeers])]
+      const latestNickname = getProfile(database)?.nickname || defaultNickname
+      for (const targetPeerId of allPeerIds) {
+        if (!peerPublicKeyMap.has(targetPeerId)) {
+          sendMessage(targetPeerId, {
+            type: 'key-exchange',
+            fromId: currentPeerId,
+            publicKey: myPublicKeyBase64,
+            nickname: latestNickname,
+            host: localIP,
+            wsPort: wsServerInfo.port,
+            filePort: getFilePort(),
+            profileImageUrl: buildMyProfileImageUrl(),
+          })
+        }
+      }
+      // 공개키가 있지만 pending 메시지가 남아있는 피어 flush 재시도
+      for (const targetPeerId of allPeerIds) {
+        if (peerPublicKeyMap.has(targetPeerId)) {
+          flushPendingMessages(targetPeerId)
+        }
+      }
+    }, 5000)
+    if (sweepTimer.unref) sweepTimer.unref()
   })
 
   // 닉네임 변경
