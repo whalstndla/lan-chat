@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.7.19",
+    "date": "2026-04-03",
+    "changes": [
+      { "type": "fix", "text": "DM 연결 안정성 개선 — 공개키 미도착 시 flush 자동 재시도 (3회)" },
+      { "type": "fix", "text": "앱 시작/새로고침 5초 후 handshake 보완 스윕 — 미교환 피어에게 key-exchange 재전송" },
+      { "type": "fix", "text": "서버 inbound 피어 추적 추가 — 상대방이 먼저 접속한 경우에도 키 교환 보장" }
+    ]
+  },
+  {
     "version": "0.7.18",
     "date": "2026-04-03",
     "changes": [
