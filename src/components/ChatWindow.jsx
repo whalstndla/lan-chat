@@ -29,6 +29,7 @@ export default function ChatWindow() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null)
   // 무한 스크롤 상태
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -138,9 +139,24 @@ export default function ChatWindow() {
       setShowSearch(false)
       setSearchQuery('')
       setSearchResults([])
+      setHighlightedMessageId(null)
     } else {
       setShowSearch(true)
     }
+  }
+
+  // 검색 결과 클릭 → 해당 메시지로 스크롤 + 하이라이트
+  function scrollToMessage(messageId) {
+    setHighlightedMessageId(messageId)
+    // DOM에서 해당 메시지 요소 찾아 스크롤
+    requestAnimationFrame(() => {
+      const element = messagesContainerRef.current?.querySelector(`[data-message-id="${messageId}"]`)
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+    // 3초 후 하이라이트 제거
+    setTimeout(() => setHighlightedMessageId(null), 3000)
   }
 
   async function handleSearch(query) {
@@ -150,9 +166,19 @@ export default function ChatWindow() {
       return
     }
     setIsSearching(true)
-    const type = currentRoom.type === 'global' ? 'message' : null
-    const results = await window.electronAPI.searchMessages({ query, type })
-    setSearchResults(results)
+    if (currentRoom.type === 'dm') {
+      // DM은 암호화되어 DB 검색 불가 → 이미 복호화된 메시지에서 클라이언트 사이드 검색
+      const currentDmMessages = dmMessages[currentRoom.peerId] || []
+      const lowerQuery = query.toLowerCase()
+      const filtered = currentDmMessages.filter(msg => {
+        const content = msg.content || ''
+        return content.toLowerCase().includes(lowerQuery)
+      })
+      setSearchResults(filtered)
+    } else {
+      const results = await window.electronAPI.searchMessages({ query, type: 'message' })
+      setSearchResults(results)
+    }
     setIsSearching(false)
   }
 
@@ -288,9 +314,13 @@ export default function ChatWindow() {
             {searchResults.length > 0 && (
               <div className="mt-1.5 max-h-48 overflow-y-auto rounded border border-vsc-border bg-vsc-sidebar">
                 {searchResults.map((result) => (
-                  <div key={result.id} className="px-3 py-2 hover:bg-vsc-hover border-b border-vsc-border last:border-b-0">
+                  <div
+                    key={result.id}
+                    className="px-3 py-2 hover:bg-vsc-hover border-b border-vsc-border last:border-b-0 cursor-pointer"
+                    onClick={() => scrollToMessage(result.id)}
+                  >
                     <div className="flex items-baseline gap-2 mb-0.5">
-                      <span className="text-xs font-semibold text-vsc-text">{result.from_name}</span>
+                      <span className="text-xs font-semibold text-vsc-text">{result.from_name || result.from || '알 수 없음'}</span>
                       <span className="text-xs text-vsc-muted">
                         {new Date(result.timestamp).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                       </span>
@@ -375,7 +405,7 @@ export default function ChatWindow() {
                         key={message.id}
                         message={message}
                         onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
-                        isHighlighted={!!searchQuery.trim() && searchResults.some(r => r.id === message.id)}
+                        isHighlighted={highlightedMessageId === message.id}
                         isGrouped={isGrouped}
                         extraImages={imageGroup.slice(1)}
                       />
@@ -391,7 +421,7 @@ export default function ChatWindow() {
                     key={message.id}
                     message={message}
                     onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
-                    isHighlighted={!!searchQuery.trim() && searchResults.some(r => r.id === message.id)}
+                    isHighlighted={highlightedMessageId === message.id}
                     isGrouped={prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId}
                   />
                 )

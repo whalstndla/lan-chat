@@ -50,6 +50,12 @@ export default function LinkPreviewCard({ url }) {
   // 로딩 중이거나 데이터 없으면 아무것도 표시하지 않음 (깜빡임 방지)
   if (!loaded || !preview) return null
 
+  // 에러 페이지 감지 — 제목에 에러/오류 키워드가 포함되거나 유의미한 정보가 없으면 미표시
+  const title = preview.title || ''
+  const isErrorPage = /에러|오류|error|not found|403|404|500|시스템\s?오류/i.test(title)
+  const hasUsefulContent = (title && !isErrorPage) || preview.description || preview.image
+  if (!hasUsefulContent) return null
+
   // 외부 브라우저로 열기
   function handleClick(event) {
     event.preventDefault()

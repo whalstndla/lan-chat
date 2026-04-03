@@ -139,7 +139,10 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
 
   return (
     <>
-      <div className={`flex gap-3 px-4 ${isGrouped ? 'py-0.5' : 'py-1.5'} hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${isHighlighted ? 'bg-yellow-500/10 border-l-2 border-yellow-400' : ''}`}>
+      <div
+        data-message-id={message.id}
+        className={`flex gap-3 px-4 ${isGrouped ? 'py-0.5' : 'py-1.5'} hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${isHighlighted ? 'bg-yellow-500/10 border-l-2 border-yellow-400 transition-colors duration-300' : 'transition-colors duration-300'}`}
+      >
         {/* 아바타 */}
         {isGrouped ? (
           <div className="w-8 shrink-0" />

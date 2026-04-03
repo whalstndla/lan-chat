@@ -38,6 +38,7 @@ export default function SettingsPanel({ onClose }) {
   const [passwordMessage, setPasswordMessage] = useState(null)
   const [confirmAction, setConfirmAction] = useState(null)
   const [updateState, setUpdateState] = useState('idle') // 'idle' | 'checking' | 'available' | 'downloaded' | 'not-available' | 'error'
+  const [updateErrorMessage, setUpdateErrorMessage] = useState(null)
   const fileInputRef = useRef(null)
   const soundFileInputRef = useRef(null)
 
@@ -144,9 +145,13 @@ export default function SettingsPanel({ onClose }) {
     window.electronAPI.checkForUpdates()
 
     // 업데이트 이벤트 리스너 등록
+    setUpdateErrorMessage(null)
     window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
     window.electronAPI.onUpdateNotAvailable(() => setUpdateState('not-available'))
-    window.electronAPI.onUpdateError(() => setUpdateState('error'))
+    window.electronAPI.onUpdateError((message) => {
+      setUpdateState('error')
+      setUpdateErrorMessage(message || '업데이트 확인 실패')
+    })
     window.electronAPI.onUpdateDownloaded?.(() => setUpdateState('downloaded'))
   }
 
@@ -352,6 +357,9 @@ export default function SettingsPanel({ onClose }) {
               <Download size={13} />
               {updateLabel}
             </button>
+            {updateState === 'error' && updateErrorMessage && (
+              <p className="text-[10px] text-red-400 mt-1 px-1 break-all">{updateErrorMessage}</p>
+            )}
           </div>
         </div>
       </>

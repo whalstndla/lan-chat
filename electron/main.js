@@ -203,6 +203,17 @@ async function flushPendingMessages(targetPeerId, retryCount = 0) {
   }
 }
 
+// 파일 URL의 포트를 현재 파일 서버 포트로 재작성 (앱 재시작 후 포트 변경 대응)
+// 예: http://192.168.0.1:54321/files/abc.png → http://192.168.0.1:현재포트/files/abc.png
+function rewriteFileUrl(url) {
+  if (!url || typeof url !== 'string') return url
+  const fileUrlPattern = /^http:\/\/[^/]+\/files\//
+  if (!fileUrlPattern.test(url)) return url
+  const fileName = url.split('/files/')[1]
+  if (!fileName) return url
+  return `http://${localIP}:${getFilePort()}/files/${fileName}`
+}
+
 // 내 프로필 이미지 URL 생성
 function buildMyProfileImageUrl() {
   const profile = getProfile(database)
@@ -1008,7 +1019,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   ipcMain.handle('get-global-history', (_, params) => {
     const limit = params?.limit || 100
     const offset = params?.offset || 0
-    return getGlobalHistory(database, limit, offset)
+    const history = getGlobalHistory(database, limit, offset)
+    return history.map(msg => ({
+      ...msg,
+      file_url: rewriteFileUrl(msg.file_url),
+    }))
   })
   ipcMain.handle('get-dm-history', (_, { peerId1, peerId2, limit, offset }) => {
     const history = getDMHistory(database, peerId1, peerId2, limit || 100, offset || 0)
@@ -1043,14 +1058,14 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
             read: readFlag,
             content: decryptedPayload.content,
             contentType: decryptedPayload.contentType || msg.content_type,
-            fileUrl: decryptedPayload.fileUrl || msg.file_url,
+            fileUrl: rewriteFileUrl(decryptedPayload.fileUrl || msg.file_url),
             fileName: decryptedPayload.fileName || msg.file_name,
           }
         } catch (err) {
           console.warn(`[히스토리] sharedSecret 도출 실패: msgId=${msg.id}`, err.message)
         }
       }
-      return { ...msg, read: readFlag }
+      return { ...msg, read: readFlag, file_url: rewriteFileUrl(msg.file_url) }
     })
   })
 
@@ -1069,7 +1084,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
   // 메시지 전문 검색 (FTS5)
   ipcMain.handle('search-messages', (_, { query, type }) => {
-    return searchMessages(database, { query, type })
+    const results = searchMessages(database, { query, type })
+    return results.map(msg => ({ ...msg, file_url: rewriteFileUrl(msg.file_url) }))
   })
 
   // 캐시된 파일 URL 반환 — 캐시 파일이 존재하면 file:// URL, 없으면 null
@@ -1415,9 +1431,10 @@ ipcMain.handle('check-for-updates', async () => {
   }
   try {
     await autoUpdater.checkForUpdates()
-  } catch {
+  } catch (error) {
     // app-update.yml 누락 등 업데이트 확인 실패 시 에러 이벤트 전달
-    sendToRenderer('update-error', '업데이트 확인 실패')
+    console.error('[autoUpdater] 업데이트 확인 실패:', error.message)
+    sendToRenderer('update-error', error.message || '업데이트 확인 실패')
   }
 })
 
