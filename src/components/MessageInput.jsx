@@ -135,6 +135,25 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       })
   }, [currentRoom, editor])
 
+  // 창 포커스 복귀 시 키 입력으로 에디터 자동 포커스
+  useEffect(() => {
+    if (!editor) return
+    const handleKeyDown = (event) => {
+      // 에디터에 이미 포커스가 있으면 무시
+      if (editor.isFocused) return
+      // 다른 input/textarea/select에 포커스가 있으면 무시
+      const active = document.activeElement
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)) return
+      // 단축키(Ctrl/Cmd/Alt) 조합은 무시
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      // 기능키, 탭, Esc 등 특수 키는 무시
+      if (event.key.length > 1) return
+      editor.commands.focus('end')
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editor])
+
   // 수정 모드 시작 — 선택한 메시지를 에디터에 로드
   function startEdit(message) {
     setEditingMessage(message)
