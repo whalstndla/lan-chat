@@ -1319,6 +1319,38 @@ ipcMain.handle('open-external', (_, url) => {
   }
 })
 
+// 이미지 클립보드 복사 — URL 또는 로컬 파일 경로의 이미지를 클립보드에 복사
+ipcMain.handle('copy-image-to-clipboard', async (_, imageUrl) => {
+  const { clipboard } = require('electron')
+  try {
+    let image
+    if (/^https?:\/\//i.test(imageUrl)) {
+      const { net } = require('electron')
+      const buffer = await new Promise((resolve, reject) => {
+        const request = net.request(imageUrl)
+        const chunks = []
+        request.on('response', (response) => {
+          response.on('data', (chunk) => chunks.push(chunk))
+          response.on('end', () => resolve(Buffer.concat(chunks)))
+          response.on('error', reject)
+        })
+        request.on('error', reject)
+        request.end()
+      })
+      image = nativeImage.createFromBuffer(buffer)
+    } else {
+      // 로컬 파일 경로
+      const filePath = imageUrl.startsWith('file://') ? imageUrl.replace('file://', '') : imageUrl
+      image = nativeImage.createFromPath(decodeURIComponent(filePath))
+    }
+    if (image.isEmpty()) return false
+    clipboard.writeImage(image)
+    return true
+  } catch {
+    return false
+  }
+})
+
 // 패치노트 조회 — 전체 changelog 반환
 ipcMain.handle('get-changelog', () => loadChangelog())
 

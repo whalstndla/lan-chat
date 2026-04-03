@@ -142,6 +142,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 외부 링크 열기
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
+  // 이미지 클립보드 복사
+  copyImageToClipboard: (imageUrl) => ipcRenderer.invoke('copy-image-to-clipboard', imageUrl),
+
   // 링크 프리뷰 OG 메타데이터 가져오기
   fetchLinkPreview: (url) => ipcRenderer.invoke('fetch-link-preview', url),
 
