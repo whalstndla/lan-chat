@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.7.21",
+    "date": "2026-04-07",
+    "changes": [
+      { "type": "fix", "text": "mDNS 서비스의 실제 IP 주소(addresses) 기반으로 초기 연결하도록 개선 (hostname resolve 실패 대응)" },
+      { "type": "fix", "text": "피어 초기 연결 시 다중 host 후보 순회 + 라운드 재시도(2/4/6초)로 연결 성공률 개선" },
+      { "type": "fix", "text": "WebSocket 연결 타임아웃 추가로 CONNECTING 장기 정체 시 자동 실패 처리 및 다음 재시도 허용" },
+      { "type": "fix", "text": "역방향 key-exchange 재연결 시 닉네임 참조 스코프 오류 수정" },
+      { "type": "fix", "text": "초기 연결 영구 실패 시 discovered 피어 제거로 mDNS 재발견/재연결 경로 복구" }
+    ]
+  },
+  {
     "version": "0.7.20",
     "date": "2026-04-03",
     "changes": [
