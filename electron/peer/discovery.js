@@ -43,6 +43,7 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
       nickname: service.txt?.nickname || '알 수 없음',
       host: service.host,
       addresses: service.addresses || [],
+      refererAddress: service.referer?.address || null,
       wsPort,
       filePort: Number(service.txt?.filePort),
     })

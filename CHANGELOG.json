@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.7.22",
+    "date": "2026-04-07",
+    "changes": [
+      { "type": "fix", "text": "초기 연결 실패 후 mDNS 재발견이 오지 않아 피어가 영구 미표시되는 문제 수정 (백그라운드 재시도 루프 추가)" },
+      { "type": "fix", "text": "peerId별 초기 연결 중복 시도 방지 및 stale 재시도 타이머 정리 로직 추가" },
+      { "type": "fix", "text": "mDNS addresses의 IPv4-mapped IPv6(::ffff:x.x.x.x)와 referer 주소를 연결 후보에 포함" },
+      { "type": "fix", "text": "key-exchange 수신 시 초기 연결 재시도 상태를 즉시 정리하여 복구 경로 충돌 방지" }
+    ]
+  },
+  {
     "version": "0.7.21",
     "date": "2026-04-07",
     "changes": [
