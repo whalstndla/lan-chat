@@ -28,16 +28,22 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
 
   browseInstance = bonjourInstance.find({ type: SERVICE_TYPE }, (service) => {
     const discoveredPeerId = service.txt?.peerId
+    const wsPort = Number(service.port)
     if (discoveredPeerId === peerId) return
+    // peerId/port가 비정상이면 무시 (Set 오염 및 잘못된 연결 시도 방지)
+    if (!discoveredPeerId || !Number.isInteger(wsPort) || wsPort <= 0) return
     // 이미 발견한 피어는 중복 콜백 방지
     if (discoveredPeerIds.has(discoveredPeerId)) return
     discoveredPeerIds.add(discoveredPeerId)
 
+    // addresses: mDNS A/AAAA 레코드에서 가져온 실제 IP 주소 목록
+    // host: SRV 레코드의 hostname (예: MacBook.local) — resolve 실패 가능성 있음
     onPeerFound({
       peerId: discoveredPeerId,
       nickname: service.txt?.nickname || '알 수 없음',
       host: service.host,
-      wsPort: service.port,
+      addresses: service.addresses || [],
+      wsPort,
       filePort: Number(service.txt?.filePort),
     })
   })

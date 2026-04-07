@@ -45,11 +45,69 @@ let handleIncomingMessage = null       // wsServer/wsClient 공용 메시지 핸
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
 let discoveryEpoch = 0                  // 글로벌 세대 번호 — start-peer-discovery마다 증가
 const flushingPeers = new Set()         // flushPendingMessages 동시 호출 방지용 락
+const systemDefaultNickname = os.userInfo().username
 
 function sendToRenderer(channel, data) {
   if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
     mainWindow.webContents.send(channel, data)
   }
+}
+
+// 현재 닉네임 조회 — 프로필이 없거나 DB 초기화 전이면 OS 사용자명으로 폴백
+function getCurrentNicknameSafely() {
+  if (!database) return systemDefaultNickname
+  return getProfile(database)?.nickname || systemDefaultNickname
+}
+
+// mDNS host가 FQDN 형태로 끝에 점(.)을 포함하면 제거
+function normalizeHostname(hostname) {
+  if (typeof hostname !== 'string') return ''
+  return hostname.trim().replace(/\.$/, '')
+}
+
+function isIpv4Address(address) {
+  if (typeof address !== 'string') return false
+  const octets = address.split('.')
+  if (octets.length !== 4) return false
+  return octets.every((octet) => {
+    const number = Number(octet)
+    return Number.isInteger(number) && number >= 0 && number <= 255
+  })
+}
+
+function isLoopbackOrUnspecifiedIpv4(address) {
+  return address.startsWith('127.') || address === '0.0.0.0'
+}
+
+function isLinkLocalIpv4(address) {
+  return address.startsWith('169.254.')
+}
+
+// 연결 후보 호스트 생성 — 라우팅 가능한 IPv4 우선, hostname 폴백 유지
+function buildPeerConnectHostCandidates(peerInfo) {
+  const rawAddresses = Array.isArray(peerInfo?.addresses) ? peerInfo.addresses : []
+  const ipv4Addresses = rawAddresses
+    .map(address => (typeof address === 'string' ? address.trim() : ''))
+    .filter(address => isIpv4Address(address))
+
+  const preferredIpv4Addresses = ipv4Addresses.filter(address =>
+    !isLoopbackOrUnspecifiedIpv4(address) && !isLinkLocalIpv4(address)
+  )
+  const lowPriorityIpv4Addresses = ipv4Addresses.filter(address =>
+    !preferredIpv4Addresses.includes(address)
+  )
+  const normalizedHost = normalizeHostname(peerInfo?.host)
+
+  const candidates = [
+    ...preferredIpv4Addresses,
+    ...(normalizedHost ? [normalizedHost] : []),
+    ...lowPriorityIpv4Addresses,
+  ]
+  return [...new Set(candidates)]
+}
+
+function waitForMilliseconds(delayMs) {
+  return new Promise(resolve => setTimeout(resolve, delayMs))
 }
 
 // 안읽은 메시지 badge 증가 — Dock + 트레이
@@ -405,7 +463,7 @@ async function initApp() {
             onReconnect: () => {
               // 역방향 재연결 성공 후 key-exchange 재전송
               if (epochAtReverse !== discoveryEpoch) return
-              const latestNickname = getProfile(database)?.nickname || defaultNickname
+              const latestNickname = getCurrentNicknameSafely()
               sendMessage(message.fromId, {
                 type: 'key-exchange',
                 fromId: peerId,
@@ -648,42 +706,78 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       wsPort: wsServerInfo.port,
       filePort: getFilePort(),
       onPeerFound: async (peerInfo) => {
-        try {
-          await connectToPeer({
-            peerId: peerInfo.peerId,
-            host: peerInfo.host,
-            wsPort: peerInfo.wsPort,
-            onMessage: handleIncomingMessage,
-            autoReconnect: true,
-            onReconnect: () => {
-              // 재연결 성공 후 key-exchange 재전송 (암호화 세션 복구)
-              if (currentEpoch !== discoveryEpoch) return
-              const latestNickname = getProfile(database)?.nickname || defaultNickname
-              sendMessage(peerInfo.peerId, {
-                type: 'key-exchange',
-                fromId: currentPeerId,
-                publicKey: myPublicKeyBase64,
-                nickname: latestNickname,
-                host: localIP,
-                wsPort: wsServerInfo.port,
-                filePort: getFilePort(),
-                profileImageUrl: buildMyProfileImageUrl(),
-              })
-            },
-            onClose: () => {
-              // 영구 실패 시에만 호출됨 (autoReconnect 최대 시도 초과)
-              if (currentEpoch !== discoveryEpoch) return
-              // mDNS 재발견 허용 — 상대방이 다시 온라인이면 재연결 가능
-              removePeerFromDiscovered(peerInfo.peerId)
-              if (!getConnections().includes(peerInfo.peerId)) {
-                sendToRenderer('peer-left', peerInfo.peerId)
-              }
-            },
-          })
-        } catch {
-          // 연결 실패 시 무시 (상대방이 아직 서버를 준비 중일 수 있음)
+        const connectHostCandidates = buildPeerConnectHostCandidates(peerInfo)
+        if (connectHostCandidates.length === 0) {
+          removePeerFromDiscovered(peerInfo.peerId)
           return
         }
+
+        // 초기 연결 재시도 — 상대방 서버 준비 지연 또는 일시적 네트워크 오류 대응
+        const INITIAL_CONNECT_MAX_RETRIES = 3
+        const INITIAL_CONNECT_RETRY_DELAY = 2000
+        const INITIAL_CONNECT_TIMEOUT = 3000
+        let connectedHost = null
+
+        // 라운드 단위 재시도: 각 라운드마다 모든 후보 host를 순회 시도
+        for (let attempt = 0; attempt <= INITIAL_CONNECT_MAX_RETRIES; attempt++) {
+          if (currentEpoch !== discoveryEpoch) return
+          for (const connectHost of connectHostCandidates) {
+            if (currentEpoch !== discoveryEpoch) return
+            try {
+              await connectToPeer({
+                peerId: peerInfo.peerId,
+                host: connectHost,
+                wsPort: peerInfo.wsPort,
+                connectTimeoutMs: INITIAL_CONNECT_TIMEOUT,
+                onMessage: handleIncomingMessage,
+                autoReconnect: true,
+                onReconnect: () => {
+                  // 재연결 성공 후 key-exchange 재전송 (암호화 세션 복구)
+                  if (currentEpoch !== discoveryEpoch) return
+                  const latestNickname = getProfile(database)?.nickname || defaultNickname
+                  sendMessage(peerInfo.peerId, {
+                    type: 'key-exchange',
+                    fromId: currentPeerId,
+                    publicKey: myPublicKeyBase64,
+                    nickname: latestNickname,
+                    host: localIP,
+                    wsPort: wsServerInfo.port,
+                    filePort: getFilePort(),
+                    profileImageUrl: buildMyProfileImageUrl(),
+                  })
+                },
+                onClose: () => {
+                  // 영구 실패 시에만 호출됨 (autoReconnect 최대 시도 초과)
+                  if (currentEpoch !== discoveryEpoch) return
+                  // mDNS 재발견 허용 — 상대방이 다시 온라인이면 재연결 가능
+                  removePeerFromDiscovered(peerInfo.peerId)
+                  if (!getConnections().includes(peerInfo.peerId)) {
+                    sendToRenderer('peer-left', peerInfo.peerId)
+                  }
+                },
+              })
+              connectedHost = connectHost
+              break
+            } catch {
+              // 같은 라운드의 다음 host 후보를 계속 시도
+            }
+          }
+
+          // 연결 성공 시 재시도 루프 종료
+          if (connectedHost) break
+
+          // 마지막 라운드가 아니면 대기 후 다음 라운드 진행
+          if (attempt < INITIAL_CONNECT_MAX_RETRIES) {
+            await waitForMilliseconds(INITIAL_CONNECT_RETRY_DELAY * (attempt + 1))
+          }
+        }
+
+        if (!connectedHost) {
+          // 모든 재시도 실패 — discoveredPeerIds에서 제거하여 mDNS 재발견 허용
+          removePeerFromDiscovered(peerInfo.peerId)
+          return
+        }
+
         // 연결 성공 후 epoch 재확인 — 연결 중에 refresh가 발생했으면 stale 소켓 폐기
         if (currentEpoch !== discoveryEpoch) {
           disconnectFromPeer(peerInfo.peerId)
@@ -700,7 +794,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           filePort: getFilePort(),
           profileImageUrl: buildMyProfileImageUrl(),
         })
-        sendToRenderer('peer-discovered', peerInfo)
+        sendToRenderer('peer-discovered', { ...peerInfo, host: connectedHost })
       },
       onPeerLeft: (leftPeerId) => {
         // 현재 세대가 아니면 stale mDNS 이벤트 → 무시

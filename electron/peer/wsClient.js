@@ -22,7 +22,20 @@ function calculateReconnectDelay(attempt, baseDelay, maxDelay) {
   return Math.min(baseDelay * Math.pow(2, attempt), maxDelay)
 }
 
-function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoReconnect = false, reconnectBaseDelay = 1000, reconnectMaxDelay = 30000, reconnectMaxAttempts = 10, onReconnect }) {
+function connectToPeer({
+  peerId,
+  host,
+  wsPort,
+  onMessage,
+  onClose,
+  force,
+  autoReconnect = false,
+  reconnectBaseDelay = 1000,
+  reconnectMaxDelay = 30000,
+  reconnectMaxAttempts = 10,
+  connectTimeoutMs = 5000,
+  onReconnect,
+}) {
   return new Promise((resolve, reject) => {
     // 이미 OPEN 연결이 있으면 재연결 불필요
     const existingSocket = connectionMap.get(peerId)
@@ -46,8 +59,44 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
     const socket = new WebSocket(`ws://${host}:${wsPort}`)
     // 연결 성공 여부 플래그 — 연결 실패 시 onClose가 오발되지 않도록 방지
     let connected = false
+    // Promise settle 중복 방지
+    let settled = false
+    // CONNECTING 상태가 오래 유지되면 강제 종료
+    let connectTimeoutHandle = setTimeout(() => {
+      if (connected) return
+      connectingSet.delete(peerId)
+      // CONNECTING 소켓 즉시 종료 — 다음 재시도를 막지 않도록 보장
+      socket.terminate()
+      rejectOnce(new Error(`WebSocket 연결 타임아웃: ${peerId}`))
+    }, connectTimeoutMs)
+    if (connectTimeoutHandle.unref) connectTimeoutHandle.unref()
+
+    function resolveOnce() {
+      if (settled) return
+      settled = true
+      if (connectTimeoutHandle) {
+        clearTimeout(connectTimeoutHandle)
+        connectTimeoutHandle = null
+      }
+      resolve()
+    }
+
+    function rejectOnce(error) {
+      if (settled) return
+      settled = true
+      if (connectTimeoutHandle) {
+        clearTimeout(connectTimeoutHandle)
+        connectTimeoutHandle = null
+      }
+      reject(error)
+    }
 
     socket.on('open', () => {
+      // 타임아웃/에러로 이미 실패 처리된 소켓은 즉시 정리
+      if (settled) {
+        socket.close()
+        return
+      }
       connectingSet.delete(peerId)
       connected = true
       connectionMap.set(peerId, socket)
@@ -56,7 +105,7 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
       if (autoReconnect) {
         reconnectOptionsMap.set(peerId, {
           peerId, host, wsPort, onMessage, onClose, autoReconnect,
-          reconnectBaseDelay, reconnectMaxDelay, reconnectMaxAttempts, onReconnect,
+          reconnectBaseDelay, reconnectMaxDelay, reconnectMaxAttempts, connectTimeoutMs, onReconnect,
         })
       }
 
@@ -74,7 +123,7 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
       }, CLIENT_HEARTBEAT_INTERVAL)
       if (socket._heartbeat.unref) socket._heartbeat.unref()
 
-      resolve()
+      resolveOnce()
     })
 
     // 서버가 클라이언트 소켓으로 reply 보낼 때 처리 (key-exchange reply 등)
@@ -97,6 +146,12 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
         connectionMap.delete(peerId)
       }
 
+      // open 전에 닫힌 경우 연결 실패로 간주
+      if (!connected) {
+        rejectOnce(new Error(`WebSocket 연결 실패: ${peerId}`))
+        return
+      }
+
       // autoReconnect가 활성화된 경우 지수 백오프 재연결 시도
       // 재연결 중에는 onClose를 호출하지 않음 — 영구 실패 시 scheduleReconnect에서 호출
       const savedOptions = reconnectOptionsMap.get(peerId)
@@ -110,7 +165,7 @@ function connectToPeer({ peerId, host, wsPort, onMessage, onClose, force, autoRe
 
     socket.on('error', (error) => {
       connectingSet.delete(peerId)
-      reject(error)
+      rejectOnce(error)
     })
   })
 }
@@ -169,6 +224,9 @@ function broadcastMessage(messageObj) {
 }
 
 function disconnectFromPeer(peerId) {
+  // CONNECTING 상태 시도도 함께 취소
+  connectingSet.delete(peerId)
+
   // 재연결 타이머 및 옵션 취소 (자동 재연결 방지)
   const timer = reconnectTimerMap.get(peerId)
   if (timer) {
@@ -197,6 +255,9 @@ function getConnections() {
 }
 
 function disconnectAll() {
+  // CONNECTING 상태 시도도 전체 취소
+  connectingSet.clear()
+
   // 모든 재연결 타이머 및 옵션 취소
   reconnectTimerMap.forEach((timer) => clearTimeout(timer))
   reconnectTimerMap.clear()
