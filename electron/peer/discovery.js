@@ -9,8 +9,40 @@ let browseInstance = null
 // 중복 발견 필터링용 Set — 이미 발견한 peerId를 기록
 const discoveredPeerIds = new Set()
 
+// 네트워크 상태 변화(와이파이 전환/로컬호스트명 충돌 재조정 등) 중 발생 가능한
+// mDNS 전송 오류 코드는 치명 오류로 보지 않고 복구를 기다린다.
+const NON_FATAL_MDNS_ERROR_CODES = new Set([
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'EADDRNOTAVAIL',
+])
+
+function isNonFatalMdnsError(error) {
+  if (!error) return false
+  if (NON_FATAL_MDNS_ERROR_CODES.has(error.code)) return true
+  const message = String(error.message || '')
+  return message.includes('224.0.0.251:5353')
+}
+
+function handleMdnsError(error) {
+  if (isNonFatalMdnsError(error)) {
+    console.warn(`[mDNS] 네트워크 일시 오류 무시: ${error.code || 'UNKNOWN'} ${error.message || ''}`)
+    return
+  }
+  throw error
+}
+
 function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, onPeerLeft }) {
-  bonjourInstance = new Bonjour()
+  bonjourInstance = new Bonjour({}, handleMdnsError)
+  // multicast-dns warning 이벤트도 동일 기준으로 처리해 크래시/노이즈를 줄임
+  bonjourInstance.server?.mdns?.on?.('warning', (error) => {
+    if (isNonFatalMdnsError(error)) {
+      console.warn(`[mDNS] warning 무시: ${error.code || 'UNKNOWN'} ${error.message || ''}`)
+      return
+    }
+    console.warn('[mDNS] warning:', error)
+  })
 
   // 서비스 이름에 세션 ID 추가 — 새로고침 시 다른 이름으로 등록되어
   // 상대방 browser의 캐시 문제 없이 항상 새 서비스로 인식됨
