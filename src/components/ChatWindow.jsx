@@ -367,6 +367,25 @@ export default function ChatWindow() {
                 const messageContentType = message.contentType || message.content_type
                 const messageSenderId = message.fromId || message.from_id
 
+                // 날짜 구분선: 이전 메시지와 날짜가 다르면 표시
+                const messageDate = new Date(message.timestamp)
+                const messageDateStr = messageDate.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
+                const prevDateStr = prevMessage
+                  ? new Date(prevMessage.timestamp).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
+                  : null
+                if (prevDateStr !== null && messageDateStr !== prevDateStr) {
+                  const year = messageDate.getFullYear()
+                  const month = String(messageDate.getMonth() + 1).padStart(2, '0')
+                  const day = String(messageDate.getDate()).padStart(2, '0')
+                  elements.push(
+                    <div key={`date-${message.id}`} className="flex items-center gap-2 px-4 py-2 my-1">
+                      <div className="flex-1 border-t border-vsc-border" />
+                      <span className="text-xs text-vsc-muted shrink-0">{year}년 {month}월 {day}일</span>
+                      <div className="flex-1 border-t border-vsc-border" />
+                    </div>
+                  )
+                }
+
                 const shouldShowDivider =
                   lastReadTimestamp != null &&
                   message.timestamp > lastReadTimestamp &&
