@@ -1,5 +1,6 @@
 // electron/peer/discovery.js
 const { Bonjour } = require('bonjour-service')
+const { spawn } = require('child_process')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 const { normalizeAdvertisedAddresses } = require('./networkUtils')
 
@@ -14,6 +15,11 @@ let browseBurstRefreshTimers = []
 const peerServiceMap = new Map()
 // fqdn -> peerId
 const servicePeerMap = new Map()
+
+// macOS dns-sd 서브프로세스 브라우저 상태
+let dnsSdBrowserProcess = null
+let dnsSdLookupProcesses = []
+const dnsSdInstanceMap = new Map() // instanceName -> { peerId }
 const DISCOVERY_REFRESH_INTERVAL_MS = 5000
 const DISCOVERY_BURST_REFRESH_DELAYS = [250, 750, 1500, 3000]
 
@@ -171,12 +177,18 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, advertisedAddr
     writePeerDebugLog('discovery.refresh.interval', { intervalMs: DISCOVERY_REFRESH_INTERVAL_MS })
   }, DISCOVERY_REFRESH_INTERVAL_MS)
   if (browseRefreshTimer.unref) browseRefreshTimer.unref()
+
+  // macOS: 시스템 dns-sd 서브프로세스로 mDNS 브라우징 보완
+  // (macOS mDNSResponder가 멀티캐스트를 선점해 bonjour-service JS 소켓이 수신 못하는 문제 우회)
+  startDnsSdBrowseMac(peerId, onPeerFound, onPeerLeft)
 }
 
 async function stopPeerDiscovery() {
   writePeerDebugLog('discovery.stop', {
     peerIds: [...peerServiceMap.keys()],
   })
+  // macOS dns-sd 브라우저 정리
+  stopDnsSdBrowseMac()
   // 발견된 피어 목록 초기화
   peerServiceMap.clear()
   servicePeerMap.clear()
@@ -231,6 +243,134 @@ async function republishService({ nickname, peerId, wsPort, filePort, advertised
     advertisedAddresses: normalizedAdvertisedAddresses,
     sessionId,
   })
+}
+
+// macOS 전용: dns-sd 서브프로세스로 mDNS 브라우징
+// bonjour-service의 JS 소켓이 macOS mDNSResponder에게 멀티캐스트 패킷을 빼앗기는 문제 우회
+function startDnsSdBrowseMac(myPeerId, onPeerFound, onPeerLeft) {
+  if (process.platform !== 'darwin') return
+
+  dnsSdBrowserProcess = spawn('/usr/bin/dns-sd', ['-B', `_${SERVICE_TYPE}._tcp`, '.'])
+  let buffer = ''
+
+  dnsSdBrowserProcess.stdout.on('data', (data) => {
+    buffer += data.toString()
+    const lines = buffer.split('\n')
+    buffer = lines.pop() // 미완성 줄 보존
+
+    lines.forEach(line => {
+      // 형식: "HH:MM:SS.fff  Add|Rmv  flags  if  domain  type  instance-name"
+      const match = line.match(/^\d{2}:\d{2}:\d{2}\.\d+\s+(Add|Rmv)\s+\d+\s+\d+\s+\S+\s+\S+\s+(.+?)\s*$/)
+      if (!match) return
+      const action = match[1]
+      const instanceName = match[2]
+      writePeerDebugLog('discovery.dnsSd.browse', { action, instanceName })
+
+      if (action === 'Add') {
+        lookupDnsSdServiceMac(instanceName, myPeerId, onPeerFound)
+      } else if (action === 'Rmv') {
+        const info = dnsSdInstanceMap.get(instanceName)
+        dnsSdInstanceMap.delete(instanceName)
+        if (info?.peerId) {
+          writePeerDebugLog('discovery.dnsSd.left', { peerId: info.peerId, instanceName })
+          onPeerLeft(info.peerId)
+        }
+      }
+    })
+  })
+
+  dnsSdBrowserProcess.on('error', (err) => {
+    writePeerDebugLog('discovery.dnsSd.browserError', { error: err.message })
+  })
+}
+
+function lookupDnsSdServiceMac(instanceName, myPeerId, onPeerFound) {
+  const lookupProcess = spawn('/usr/bin/dns-sd', ['-L', instanceName, `_${SERVICE_TYPE}._tcp`, 'local'])
+  dnsSdLookupProcesses.push(lookupProcess)
+  let output = ''
+  let resolved = false
+
+  const cleanupTimeout = setTimeout(() => {
+    if (!resolved) {
+      resolved = true
+      try { lookupProcess.kill() } catch {}
+      writePeerDebugLog('discovery.dnsSd.lookupTimeout', { instanceName })
+    }
+  }, 5000)
+  if (cleanupTimeout.unref) cleanupTimeout.unref()
+
+  lookupProcess.stdout.on('data', (data) => {
+    if (resolved) return
+    output += data.toString()
+
+    // "...can be reached at hostname.:port (interface N)"
+    const reachedMatch = output.match(/can be reached at ([^:]+):(\d+) \(interface/)
+    if (!reachedMatch) return
+
+    // TXT 레코드는 "can be reached" 줄 다음 줄에 공백으로 시작
+    const afterReached = output.slice(output.indexOf('can be reached'))
+    const txtLineMatch = afterReached.match(/\n[ \t]+(.+)/)
+    if (!txtLineMatch) return
+
+    resolved = true
+    clearTimeout(cleanupTimeout)
+    try { lookupProcess.kill() } catch {}
+
+    const host = reachedMatch[1].replace(/\.$/, '')
+    const port = Number(reachedMatch[2])
+    const txtLine = txtLineMatch[1]
+
+    // key=value 파싱 (space-separated)
+    const txt = {}
+    txtLine.split(/\s+/).forEach(token => {
+      const eqIdx = token.indexOf('=')
+      if (eqIdx > 0) txt[token.slice(0, eqIdx)] = token.slice(eqIdx + 1)
+    })
+
+    const discoveredPeerId = txt.peerId
+    if (!discoveredPeerId || discoveredPeerId === myPeerId) return
+
+    const addresses = txt.addresses
+      ? txt.addresses.split(',').map(a => a.trim()).filter(Boolean)
+      : (host && !host.endsWith('.local') ? [host] : [])
+
+    const peerInfo = {
+      peerId: discoveredPeerId,
+      nickname: txt.nickname || '알 수 없음',
+      host,
+      addresses,
+      advertisedAddresses: addresses,
+      refererAddress: null,
+      wsPort: port,
+      filePort: Number(txt.filePort) || 0,
+    }
+
+    writePeerDebugLog('discovery.dnsSd.found', {
+      peerId: discoveredPeerId,
+      host,
+      port,
+      filePort: peerInfo.filePort,
+      addresses,
+    })
+
+    dnsSdInstanceMap.set(instanceName, { peerId: discoveredPeerId })
+    onPeerFound(peerInfo)
+  })
+
+  lookupProcess.on('error', (err) => {
+    clearTimeout(cleanupTimeout)
+    writePeerDebugLog('discovery.dnsSd.lookupError', { instanceName, error: err.message })
+  })
+}
+
+function stopDnsSdBrowseMac() {
+  dnsSdLookupProcesses.forEach(p => { try { p.kill() } catch {} })
+  dnsSdLookupProcesses = []
+  dnsSdInstanceMap.clear()
+  if (dnsSdBrowserProcess) {
+    try { dnsSdBrowserProcess.kill() } catch {}
+    dnsSdBrowserProcess = null
+  }
 }
 
 // 특정 피어를 발견 목록에서 제거 — 재연결 영구 실패 시 mDNS 재발견 허용
