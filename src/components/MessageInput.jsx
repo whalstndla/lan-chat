@@ -40,12 +40,6 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
   const currentRoom = useChatStore(state => state.currentRoom)
-  const keepEditorFocus = useCallback(() => {
-    if (!editor) return
-    requestAnimationFrame(() => {
-      editor.commands.focus('end')
-    })
-  }, [editor])
 
   // Tiptap 에디터 설정
   const editor = useEditor({
@@ -136,6 +130,13 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       }
     },
   }, [currentRoom])
+
+  const keepEditorFocus = useCallback(() => {
+    if (!editor) return
+    requestAnimationFrame(() => {
+      editor.commands.focus('end')
+    })
+  }, [editor])
 
   // placeholder 업데이트 (방 변경 시)
   useEffect(() => {
