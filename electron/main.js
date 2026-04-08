@@ -837,9 +837,10 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     const currentEpoch = discoveryEpoch
     const currentNickname = getProfile(database)?.nickname || defaultNickname
     const INITIAL_CONNECT_MAX_RETRIES = 3
-    const INITIAL_CONNECT_RETRY_DELAY = 2000
-    const INITIAL_CONNECT_TIMEOUT = 3000
-    const BACKGROUND_CONNECT_RETRY_DELAY = 8000
+    const INITIAL_CONNECT_RETRY_DELAY = 700
+    const INITIAL_CONNECT_TIMEOUT = 1500
+    const BACKGROUND_CONNECT_RETRY_DELAY = 2500
+    const HANDSHAKE_SWEEP_DELAY = 2000
 
     const scheduleBackgroundConnectRetry = (targetPeerId) => {
       if (currentEpoch !== discoveryEpoch) return
@@ -1053,7 +1054,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           flushPendingMessages(targetPeerId)
         }
       }
-    }, 5000)
+    }, HANDSHAKE_SWEEP_DELAY)
     if (sweepTimer.unref) sweepTimer.unref()
     } finally {
       isDiscoveryStarting = false

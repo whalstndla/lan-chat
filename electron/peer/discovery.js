@@ -9,10 +9,13 @@ let bonjourInstance = null
 let publishedService = null
 let browseInstance = null
 let browseRefreshTimer = null
+let browseBurstRefreshTimers = []
 // peerId -> 현재 대표 서비스 fqdn
 const peerServiceMap = new Map()
 // fqdn -> peerId
 const servicePeerMap = new Map()
+const DISCOVERY_REFRESH_INTERVAL_MS = 5000
+const DISCOVERY_BURST_REFRESH_DELAYS = [250, 750, 1500, 3000]
 
 // 네트워크 상태 변화(와이파이 전환/로컬호스트명 충돌 재조정 등) 중 발생 가능한
 // mDNS 전송 오류 코드는 치명 오류로 보지 않고 복구를 기다린다.
@@ -137,6 +140,17 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, advertisedAddr
 
   browseInstance = bonjourInstance.find({ type: SERVICE_TYPE }, handleServiceUpsert)
   browseInstance.on('txt-update', handleServiceUpsert)
+  browseInstance.update?.()
+  writePeerDebugLog('discovery.refresh.immediate', {})
+
+  browseBurstRefreshTimers = DISCOVERY_BURST_REFRESH_DELAYS.map((delayMs) => {
+    const refreshTimer = setTimeout(() => {
+      browseInstance?.update?.()
+      writePeerDebugLog('discovery.refresh.burst', { delayMs })
+    }, delayMs)
+    if (refreshTimer.unref) refreshTimer.unref()
+    return refreshTimer
+  })
 
   browseInstance.on('down', (service) => {
     const serviceIdentity = getServiceIdentity(service)
@@ -154,7 +168,8 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, advertisedAddr
   // 일부 환경은 up 이벤트가 유실되거나 늦게 도착하므로 주기적으로 PTR 재질의
   browseRefreshTimer = setInterval(() => {
     browseInstance?.update?.()
-  }, 5000)
+    writePeerDebugLog('discovery.refresh.interval', { intervalMs: DISCOVERY_REFRESH_INTERVAL_MS })
+  }, DISCOVERY_REFRESH_INTERVAL_MS)
   if (browseRefreshTimer.unref) browseRefreshTimer.unref()
 }
 
@@ -165,6 +180,8 @@ async function stopPeerDiscovery() {
   // 발견된 피어 목록 초기화
   peerServiceMap.clear()
   servicePeerMap.clear()
+  browseBurstRefreshTimers.forEach(timer => clearTimeout(timer))
+  browseBurstRefreshTimers = []
   if (browseRefreshTimer) {
     clearInterval(browseRefreshTimer)
     browseRefreshTimer = null

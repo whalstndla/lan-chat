@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.7.28",
+    "date": "2026-04-08",
+    "changes": [
+      { "type": "fix", "text": "앱 시작 직후 mDNS 재질의를 짧은 burst로 여러 번 보내 발견이 늦게 붙는 환경의 초기 탐색 속도 개선" },
+      { "type": "fix", "text": "초기 연결 재시도와 background 재시도, handshake 보완 스윕 지연을 줄여 피어가 온라인으로 표시되기까지의 체감 대기시간 단축" }
+    ]
+  },
+  {
     "version": "0.7.27",
     "date": "2026-04-08",
     "changes": [
