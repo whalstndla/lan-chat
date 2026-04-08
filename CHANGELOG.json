@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.7.26",
+    "date": "2026-04-08",
+    "changes": [
+      { "type": "fix", "text": "광고용 로컬 IP를 단일 주소가 아닌 우선순위가 있는 다중 IPv4 후보로 계산해 VPN·가상 어댑터 환경에서 잘못된 주소 광고 가능성 완화" },
+      { "type": "fix", "text": "mDNS TXT와 key-exchange에 주소 후보 목록을 함께 실어 상대방이 단일 host 실패 시 다른 실제 LAN 주소로 재시도하도록 개선" },
+      { "type": "fix", "text": "패키지 앱에서도 userData/logs/peer-debug.log에 연결 로그를 자동 저장해 릴리즈 환경의 발견·연결 실패 경로 추적 가능" }
+    ]
+  },
+  {
     "version": "0.7.25",
     "date": "2026-04-08",
     "changes": [

@@ -13,6 +13,7 @@ const {
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage, deleteExpiredPendingMessages } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered } = require('./peer/discovery')
+const { buildPeerConnectHostCandidates, collectLocalIpv4Addresses, normalizeAdvertisedAddresses, selectPrimaryLocalIpv4 } = require('./peer/networkUtils')
 const { startWsServer, stopWsServer, closeAllServerClients, getServerClientPeerIds, sendMessageToServerPeer } = require('./peer/wsServer')
 const { connectToPeer, sendMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
@@ -42,6 +43,7 @@ let downloadedUpdateFile = null         // 다운로드된 업데이트 파일 �
 let myPrivateKey = null                 // 내 ECDH 개인키
 let myPublicKeyBase64 = null            // 네트워크 전송용 공개키
 let localIP = 'localhost'              // 내 LAN IP (key-exchange 및 파일 서버용)
+let localAddressCandidates = []         // 광고/역방향 연결에 사용할 로컬 IPv4 후보
 let handleIncomingMessage = null       // wsServer/wsClient 공용 메시지 핸들러
 const peerPublicKeyMap = new Map()      // peerId → 공개키 객체
 let discoveryEpoch = 0                  // 글로벌 세대 번호 — start-peer-discovery마다 증가
@@ -64,62 +66,23 @@ function getCurrentNicknameSafely() {
   return getProfile(database)?.nickname || systemDefaultNickname
 }
 
-// mDNS host가 FQDN 형태로 끝에 점(.)을 포함하면 제거
-function normalizeHostname(hostname) {
-  if (typeof hostname !== 'string') return ''
-  return hostname.trim().replace(/\.$/, '')
+function getMyAdvertisedAddresses() {
+  if (localAddressCandidates.length > 0) return localAddressCandidates
+  return localIP !== 'localhost' ? [localIP] : []
 }
 
-function extractIpv4FromMappedIpv6(address) {
-  if (typeof address !== 'string') return null
-  const match = address.trim().match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i)
-  return match?.[1] || null
-}
-
-function isIpv4Address(address) {
-  if (typeof address !== 'string') return false
-  const octets = address.split('.')
-  if (octets.length !== 4) return false
-  return octets.every((octet) => {
-    const number = Number(octet)
-    return Number.isInteger(number) && number >= 0 && number <= 255
-  })
-}
-
-function isLoopbackOrUnspecifiedIpv4(address) {
-  return address.startsWith('127.') || address === '0.0.0.0'
-}
-
-function isLinkLocalIpv4(address) {
-  return address.startsWith('169.254.')
-}
-
-// 연결 후보 호스트 생성 — 라우팅 가능한 IPv4 우선, hostname 폴백 유지
-function buildPeerConnectHostCandidates(peerInfo) {
-  const rawAddresses = Array.isArray(peerInfo?.addresses) ? peerInfo.addresses : []
-  const ipv4AddressesFromMdns = rawAddresses
-    .map(address => (typeof address === 'string' ? address.trim() : ''))
-    .filter(address => isIpv4Address(address))
-  const mappedIpv4Addresses = rawAddresses
-    .map(address => extractIpv4FromMappedIpv6(address))
-    .filter(address => isIpv4Address(address))
-  const refererIpv4 = isIpv4Address(peerInfo?.refererAddress) ? [peerInfo.refererAddress] : []
-  const ipv4Addresses = [...new Set([...ipv4AddressesFromMdns, ...mappedIpv4Addresses, ...refererIpv4])]
-
-  const preferredIpv4Addresses = ipv4Addresses.filter(address =>
-    !isLoopbackOrUnspecifiedIpv4(address) && !isLinkLocalIpv4(address)
-  )
-  const lowPriorityIpv4Addresses = ipv4Addresses.filter(address =>
-    !preferredIpv4Addresses.includes(address)
-  )
-  const normalizedHost = normalizeHostname(peerInfo?.host)
-
-  const candidates = [
-    ...preferredIpv4Addresses,
-    ...(normalizedHost ? [normalizedHost] : []),
-    ...lowPriorityIpv4Addresses,
-  ]
-  return [...new Set(candidates)]
+function buildMyKeyExchangePayload(currentPeerId, nickname) {
+  return {
+    type: 'key-exchange',
+    fromId: currentPeerId,
+    publicKey: myPublicKeyBase64,
+    nickname,
+    host: localIP,
+    addresses: getMyAdvertisedAddresses(),
+    wsPort: wsServerInfo?.port ?? 0,
+    filePort: getFilePort(),
+    profileImageUrl: buildMyProfileImageUrl(),
+  }
 }
 
 function waitForMilliseconds(delayMs) {
@@ -378,7 +341,12 @@ function cacheReceivedFile(messageId, fileUrl, fileName) {
 }
 
 async function initApp() {
-  if (isPeerDebugEnabled) {
+  if (!isDev) {
+    process.env.LAN_CHAT_DEBUG_PEER = process.env.LAN_CHAT_DEBUG_PEER || '1'
+    process.env.LAN_CHAT_DEBUG_LOG_PATH = process.env.LAN_CHAT_DEBUG_LOG_PATH || path.join(appDataPath, 'logs', 'peer-debug.log')
+  }
+
+  if (isPeerDebugEnabled()) {
     resetPeerDebugLog()
     writePeerDebugLog('main.peerDebug.enabled', {
       logPath: getPeerDebugLogPath(),
@@ -410,11 +378,11 @@ async function initApp() {
   checkAndNotifyUpdated()
 
   // LAN IP 계산 (key-exchange 및 파일 서버용)
-  localIP = Object.values(os.networkInterfaces())
-    .flat()
-    .find(iface => iface.family === 'IPv4' && !iface.internal)?.address || 'localhost'
+  localAddressCandidates = collectLocalIpv4Addresses(os.networkInterfaces())
+  localIP = selectPrimaryLocalIpv4(os.networkInterfaces())
   writePeerDebugLog('main.network.localIpSelected', {
     localIP,
+    localAddressCandidates,
     interfaces: os.networkInterfaces(),
   })
 
@@ -509,9 +477,11 @@ async function initApp() {
     // 키 교환 처리 — 내 키 즉시 reply + 역방향 연결 (mDNS 단방향 문제 해결)
     if (message.type === 'key-exchange') {
       try {
+        const messageAdvertisedAddresses = normalizeAdvertisedAddresses(message.addresses)
         writePeerDebugLog('main.keyExchange.received', {
           fromId: message.fromId,
           host: message.host || null,
+          addresses: messageAdvertisedAddresses,
           wsPort: message.wsPort || null,
           filePort: message.filePort || null,
           nickname: message.nickname || null,
@@ -525,19 +495,11 @@ async function initApp() {
 
         const currentNicknameForReply = getProfile(database)?.nickname || ''
         // reply 시도 — 실패해도 역방향 연결에서 key-exchange를 다시 교환하므로 계속 진행
-        reply({
-          type: 'key-exchange',
-          fromId: peerId,
-          publicKey: myPublicKeyBase64,
-          nickname: currentNicknameForReply,
-          host: localIP,
-          wsPort: wsServerInfo?.port ?? 0,
-          filePort: getFilePort(),
-          profileImageUrl: buildMyProfileImageUrl(),
-        })
+        reply(buildMyKeyExchangePayload(peerId, currentNicknameForReply))
         writePeerDebugLog('main.keyExchange.replied', {
           toPeerId: message.fromId,
           host: localIP,
+          addresses: getMyAdvertisedAddresses(),
           wsPort: wsServerInfo?.port ?? 0,
           filePort: getFilePort(),
         })
@@ -553,57 +515,83 @@ async function initApp() {
           peerId: message.fromId,
           nickname: message.nickname || '알 수 없음',
           ...(message.host && { host: message.host }),
+          addresses: messageAdvertisedAddresses,
+          advertisedAddresses: messageAdvertisedAddresses,
           ...(message.wsPort && { wsPort: message.wsPort }),
           filePort: message.filePort || 0,
           profileImageUrl: message.profileImageUrl || null,
         }
+        latestDiscoveredPeerInfoMap.set(message.fromId, peerDiscoveredData)
         sendToRenderer('peer-discovered', peerDiscoveredData)
 
         // 역방향 연결 — 기존 연결이 없는 경우에만 (mDNS 단방향 문제 해결)
         // 좀비 소켓은 start-peer-discovery의 closeAllServerClients가 사전 정리
-        if (message.host && message.wsPort && !hasPeerConnection(message.fromId)) {
+        const reverseConnectHostCandidates = buildPeerConnectHostCandidates({
+          host: message.host,
+          addresses: messageAdvertisedAddresses,
+          advertisedAddresses: messageAdvertisedAddresses,
+          wsPort: message.wsPort,
+        })
+
+        if (reverseConnectHostCandidates.length > 0 && message.wsPort && !hasPeerConnection(message.fromId)) {
           const epochAtReverse = discoveryEpoch
           writePeerDebugLog('main.keyExchange.reverseConnect.start', {
             peerId: message.fromId,
-            host: message.host,
+            reverseConnectHostCandidates,
             wsPort: message.wsPort,
             epochAtReverse,
           })
-          connectToPeer({
-            peerId: message.fromId,
-            host: message.host,
-            wsPort: message.wsPort,
-            onMessage: handleIncomingMessage,
-            autoReconnect: true,
-            onReconnect: () => {
-              // 역방향 재연결 성공 후 key-exchange 재전송
-              if (epochAtReverse !== discoveryEpoch) return
-              const latestNickname = getCurrentNicknameSafely()
-              sendPeerMessage(message.fromId, {
-                type: 'key-exchange',
-                fromId: peerId,
-                publicKey: myPublicKeyBase64,
-                nickname: latestNickname,
-                host: localIP,
-                wsPort: wsServerInfo.port,
-                filePort: getFilePort(),
-                profileImageUrl: buildMyProfileImageUrl(),
-              })
-            },
-            onClose: () => {
-              if (epochAtReverse !== discoveryEpoch) return
-              removePeerFromDiscovered(message.fromId)
-              if (!hasPeerConnection(message.fromId)) {
-                writePeerDebugLog('main.keyExchange.reverseConnect.closed', {
+          const reverseConnectPromise = (async () => {
+            for (const connectHost of reverseConnectHostCandidates) {
+              try {
+                writePeerDebugLog('main.keyExchange.reverseConnect.attempt', {
                   peerId: message.fromId,
+                  connectHost,
+                  wsPort: message.wsPort,
                   epochAtReverse,
                 })
-                sendToRenderer('peer-left', message.fromId)
+                await connectToPeer({
+                  peerId: message.fromId,
+                  host: connectHost,
+                  wsPort: message.wsPort,
+                  onMessage: handleIncomingMessage,
+                  autoReconnect: true,
+                  onReconnect: () => {
+                    // 역방향 재연결 성공 후 key-exchange 재전송
+                    if (epochAtReverse !== discoveryEpoch) return
+                    const latestNickname = getCurrentNicknameSafely()
+                    sendPeerMessage(message.fromId, buildMyKeyExchangePayload(peerId, latestNickname))
+                  },
+                  onClose: () => {
+                    if (epochAtReverse !== discoveryEpoch) return
+                    removePeerFromDiscovered(message.fromId)
+                    if (!hasPeerConnection(message.fromId)) {
+                      writePeerDebugLog('main.keyExchange.reverseConnect.closed', {
+                        peerId: message.fromId,
+                        epochAtReverse,
+                      })
+                      sendToRenderer('peer-left', message.fromId)
+                    }
+                  },
+                })
+                return connectHost
+              } catch (error) {
+                writePeerDebugLog('main.keyExchange.reverseConnect.attemptFailed', {
+                  peerId: message.fromId,
+                  connectHost,
+                  wsPort: message.wsPort,
+                  epochAtReverse,
+                  error,
+                })
               }
-            },
-          }).then(() => {
+            }
+            throw new Error(`역방향 연결 실패: ${message.fromId}`)
+          })()
+
+          reverseConnectPromise.then((connectedHost) => {
             writePeerDebugLog('main.keyExchange.reverseConnect.connected', {
               peerId: message.fromId,
+              connectedHost,
               epochAtReverse,
             })
             // 역방향 연결 성공 후 epoch 재확인 — stale이면 폐기
@@ -623,7 +611,7 @@ async function initApp() {
           // 이미 연결 중이거나 host/wsPort 없으면 즉시 flush
           writePeerDebugLog('main.keyExchange.reverseConnect.skipped', {
             peerId: message.fromId,
-            hasHost: !!message.host,
+            reverseConnectHostCandidates,
             hasWsPort: !!message.wsPort,
             hasPeerConnection: hasPeerConnection(message.fromId),
           })
@@ -942,16 +930,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
                   // 재연결 성공 후 key-exchange 재전송 (암호화 세션 복구)
                   if (currentEpoch !== discoveryEpoch) return
                   const latestNickname = getProfile(database)?.nickname || defaultNickname
-                  sendPeerMessage(peerInfo.peerId, {
-                    type: 'key-exchange',
-                    fromId: currentPeerId,
-                    publicKey: myPublicKeyBase64,
-                    nickname: latestNickname,
-                    host: localIP,
-                    wsPort: wsServerInfo.port,
-                    filePort: getFilePort(),
-                    profileImageUrl: buildMyProfileImageUrl(),
-                  })
+                  sendPeerMessage(peerInfo.peerId, buildMyKeyExchangePayload(currentPeerId, latestNickname))
                 },
                 onClose: () => {
                   // 영구 실패 시에만 호출됨 (autoReconnect 최대 시도 초과)
@@ -1013,16 +992,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
         clearPeerConnectRetry(peerInfo.peerId)
         // key-exchange에 내 접속 정보 + 프로필 이미지 포함
-        sendPeerMessage(peerInfo.peerId, {
-          type: 'key-exchange',
-          fromId: currentPeerId,
-          publicKey: myPublicKeyBase64,
-          nickname: getCurrentNicknameSafely(),
-          host: localIP,
-          wsPort: wsServerInfo.port,
-          filePort: getFilePort(),
-          profileImageUrl: buildMyProfileImageUrl(),
-        })
+        sendPeerMessage(peerInfo.peerId, buildMyKeyExchangePayload(currentPeerId, getCurrentNicknameSafely()))
         writePeerDebugLog('main.discovery.keyExchange.sent', {
           peerId: peerInfo.peerId,
           connectedHost,
@@ -1039,6 +1009,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       peerId: currentPeerId,
       wsPort: wsServerInfo.port,
       filePort: getFilePort(),
+      advertisedAddresses: getMyAdvertisedAddresses(),
       onPeerFound: async (peerInfo) => {
         latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)
         writePeerDebugLog('main.discovery.peerFound', { peerInfo, currentEpoch })
@@ -1073,16 +1044,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       const latestNickname = getProfile(database)?.nickname || defaultNickname
       for (const targetPeerId of allPeerIds) {
         if (!peerPublicKeyMap.has(targetPeerId)) {
-          sendPeerMessage(targetPeerId, {
-            type: 'key-exchange',
-            fromId: currentPeerId,
-            publicKey: myPublicKeyBase64,
-            nickname: latestNickname,
-            host: localIP,
-            wsPort: wsServerInfo.port,
-            filePort: getFilePort(),
-            profileImageUrl: buildMyProfileImageUrl(),
-          })
+          sendPeerMessage(targetPeerId, buildMyKeyExchangePayload(currentPeerId, latestNickname))
         }
       }
       // 공개키가 있지만 pending 메시지가 남아있는 피어 flush 재시도
@@ -1109,6 +1071,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         peerId: currentPeerId,
         wsPort: wsServerInfo?.port ?? 0,
         filePort: getFilePort(),
+        advertisedAddresses: getMyAdvertisedAddresses(),
       })
       broadcastPeerMessage({
         type: 'nickname-changed',

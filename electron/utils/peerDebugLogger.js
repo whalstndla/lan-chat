@@ -1,11 +1,17 @@
 const fs = require('fs')
 const path = require('path')
 
-const isPeerDebugEnabled = process.env.LAN_CHAT_DEBUG_PEER === '1'
-const peerDebugLogPath = process.env.LAN_CHAT_DEBUG_LOG_PATH || path.resolve(process.cwd(), 'logs', 'peer-debug.log')
+function isPeerDebugEnabled() {
+  return process.env.LAN_CHAT_DEBUG_PEER === '1'
+}
+
+function getPeerDebugLogPath() {
+  return process.env.LAN_CHAT_DEBUG_LOG_PATH || path.resolve(process.cwd(), 'logs', 'peer-debug.log')
+}
 
 function ensurePeerDebugLogFile() {
-  if (!isPeerDebugEnabled) return false
+  if (!isPeerDebugEnabled()) return false
+  const peerDebugLogPath = getPeerDebugLogPath()
   const logDirectoryPath = path.dirname(peerDebugLogPath)
   if (!fs.existsSync(logDirectoryPath)) {
     fs.mkdirSync(logDirectoryPath, { recursive: true })
@@ -40,6 +46,7 @@ function serializeLogValue(value, seen = new WeakSet()) {
 
 function writePeerDebugLog(eventName, details = {}) {
   if (!ensurePeerDebugLogFile()) return
+  const peerDebugLogPath = getPeerDebugLogPath()
   const logLine = JSON.stringify({
     timestamp: new Date().toISOString(),
     pid: process.pid,
@@ -51,11 +58,7 @@ function writePeerDebugLog(eventName, details = {}) {
 
 function resetPeerDebugLog() {
   if (!ensurePeerDebugLogFile()) return
-  fs.writeFileSync(peerDebugLogPath, '')
-}
-
-function getPeerDebugLogPath() {
-  return peerDebugLogPath
+  fs.writeFileSync(getPeerDebugLogPath(), '')
 }
 
 module.exports = {

@@ -1,6 +1,7 @@
 // electron/peer/discovery.js
 const { Bonjour } = require('bonjour-service')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
+const { normalizeAdvertisedAddresses } = require('./networkUtils')
 
 const SERVICE_TYPE = 'lan-chat'
 
@@ -53,6 +54,7 @@ function normalizePeerInfoFromService(service) {
     nickname: service.txt?.nickname || '알 수 없음',
     host: service.host,
     addresses: service.addresses || [],
+    advertisedAddresses: normalizeAdvertisedAddresses(service.txt?.addresses),
     refererAddress: service.referer?.address || null,
     wsPort: Number(service.port),
     filePort: Number(service.txt?.filePort),
@@ -63,8 +65,9 @@ function buildServiceName(peerId, sessionId) {
   return `lan-chat-${peerId}-${sessionId}`
 }
 
-function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, onPeerLeft }) {
-  writePeerDebugLog('discovery.start', { nickname, peerId, wsPort, filePort })
+function startPeerDiscovery({ nickname, peerId, wsPort, filePort, advertisedAddresses = [], onPeerFound, onPeerLeft }) {
+  const normalizedAdvertisedAddresses = normalizeAdvertisedAddresses(advertisedAddresses)
+  writePeerDebugLog('discovery.start', { nickname, peerId, wsPort, filePort, advertisedAddresses: normalizedAdvertisedAddresses })
   bonjourInstance = new Bonjour({}, handleMdnsError)
   // multicast-dns warning 이벤트도 동일 기준으로 처리해 크래시/노이즈를 줄임
   bonjourInstance.server?.mdns?.on?.('warning', (error) => {
@@ -88,6 +91,7 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
       nickname,
       peerId,
       filePort: String(filePort),
+      addresses: normalizedAdvertisedAddresses.join(','),
     },
   })
   writePeerDebugLog('discovery.publish', {
@@ -95,6 +99,7 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
     nickname,
     wsPort,
     filePort,
+    advertisedAddresses: normalizedAdvertisedAddresses,
     sessionId,
   })
 
@@ -118,6 +123,7 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
       serviceIdentity,
       host: service.host,
       addresses: service.addresses || [],
+      advertisedAddresses: normalizeAdvertisedAddresses(service.txt?.addresses),
       refererAddress: service.referer?.address || null,
       wsPort: discoveredWsPort,
       filePort: Number(service.txt?.filePort),
@@ -180,25 +186,32 @@ async function stopPeerDiscovery() {
 }
 
 // browse는 유지하고 서비스 공고만 재등록 (닉네임 변경 시 사용)
-async function republishService({ nickname, peerId, wsPort, filePort }) {
+async function republishService({ nickname, peerId, wsPort, filePort, advertisedAddresses = [] }) {
   if (!bonjourInstance) return
   if (publishedService) {
     publishedService.stop()
     // mDNS goodbye 패킷이 네트워크에 전파될 때까지 대기
     await new Promise(resolve => setTimeout(resolve, 1000))
   }
+  const normalizedAdvertisedAddresses = normalizeAdvertisedAddresses(advertisedAddresses)
   const sessionId = Date.now().toString(36)
   publishedService = bonjourInstance.publish({
     name: buildServiceName(peerId, sessionId),
     type: SERVICE_TYPE,
     port: wsPort,
-    txt: { nickname, peerId, filePort: String(filePort) },
+    txt: {
+      nickname,
+      peerId,
+      filePort: String(filePort),
+      addresses: normalizedAdvertisedAddresses.join(','),
+    },
   })
   writePeerDebugLog('discovery.republish', {
     peerId,
     nickname,
     wsPort,
     filePort,
+    advertisedAddresses: normalizedAdvertisedAddresses,
     sessionId,
   })
 }
