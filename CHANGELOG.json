@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.7.30",
+    "date": "2026-04-08",
+    "changes": [
+      { "type": "fix", "text": "macOS에서 피어가 전혀 발견되지 않던 근본 원인 수정 (mDNSResponder 멀티캐스트 차단 우회)" }
+    ]
+  },
+  {
     "version": "0.7.29",
     "date": "2026-04-08",
     "changes": [
