@@ -4,6 +4,7 @@
     "date": "2026-04-08",
     "changes": [
       { "type": "fix", "text": "mDNS 서비스 이름을 ASCII 전용으로 변경해 한글 닉네임 환경에서 발견이 누락될 수 있는 경로를 차단" },
+      { "type": "fix", "text": "start-peer-discovery 중복 실행을 막아 초기화/정리 race로 연결 상태가 흔들릴 수 있는 경로를 차단" },
       { "type": "fix", "text": "development 실행을 strictPort + Electron ABI rebuild 기준으로 정리해 실제 디버그 중 다른 Vite 포트/ABI 충돌 방지" },
       { "type": "feat", "text": "피어 발견, 연결 시도, key-exchange, 전송 실패를 logs/peer-debug.log에 남기는 개발용 연결 디버그 로그 추가" }
     ]
