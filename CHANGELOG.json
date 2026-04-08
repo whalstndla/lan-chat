@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.7.23",
+    "date": "2026-04-08",
+    "changes": [
+      { "type": "fix", "text": "와이파이 전환 등 네트워크 상태 변화 중 발생하는 비치명적 mDNS 전송 오류(EHOSTUNREACH 등)로 피어 발견이 흔들리는 문제 수정" },
+      { "type": "fix", "text": "multicast-dns warning 이벤트를 동일 기준으로 처리해 일시 네트워크 오류 시 불필요한 경고와 중단 가능성 완화" }
+    ]
+  },
+  {
     "version": "0.7.22",
     "date": "2026-04-07",
     "changes": [
