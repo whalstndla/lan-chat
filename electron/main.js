@@ -18,6 +18,7 @@ const { connectToPeer, sendMessage, getConnections, disconnectAll, disconnectFro
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
+const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath } = require('./utils/peerDebugLogger')
 const fs = require('fs')
 const { spawn } = require('child_process')
 const { autoUpdater } = require('electron-updater')
@@ -153,9 +154,29 @@ function hasPeerConnection(targetPeerId) {
 }
 
 function sendPeerMessage(targetPeerId, message) {
-  if (sendMessage(targetPeerId, message)) return true
-  if (!wsServerInfo) return false
-  return sendMessageToServerPeer(wsServerInfo, targetPeerId, message)
+  if (sendMessage(targetPeerId, message)) {
+    writePeerDebugLog('main.sendPeerMessage.outbound', {
+      targetPeerId,
+      messageType: message?.type,
+      messageId: message?.id || null,
+    })
+    return true
+  }
+  if (!wsServerInfo) {
+    writePeerDebugLog('main.sendPeerMessage.failedNoServer', {
+      targetPeerId,
+      messageType: message?.type,
+      messageId: message?.id || null,
+    })
+    return false
+  }
+  const sentViaInboundSocket = sendMessageToServerPeer(wsServerInfo, targetPeerId, message)
+  writePeerDebugLog(sentViaInboundSocket ? 'main.sendPeerMessage.inbound' : 'main.sendPeerMessage.failed', {
+    targetPeerId,
+    messageType: message?.type,
+    messageId: message?.id || null,
+  })
+  return sentViaInboundSocket
 }
 
 function broadcastPeerMessage(message) {
@@ -356,6 +377,14 @@ function cacheReceivedFile(messageId, fileUrl, fileName) {
 }
 
 async function initApp() {
+  if (isPeerDebugEnabled) {
+    resetPeerDebugLog()
+    writePeerDebugLog('main.peerDebug.enabled', {
+      logPath: getPeerDebugLogPath(),
+      cwd: process.cwd(),
+    })
+  }
+
   // 앱 데이터 디렉토리 권한 제한 — 소유자만 접근 (민감 정보 보호)
   try { fs.chmodSync(appDataPath, 0o700) } catch { /* 무시 */ }
 
@@ -383,6 +412,10 @@ async function initApp() {
   localIP = Object.values(os.networkInterfaces())
     .flat()
     .find(iface => iface.family === 'IPv4' && !iface.internal)?.address || 'localhost'
+  writePeerDebugLog('main.network.localIpSelected', {
+    localIP,
+    interfaces: os.networkInterfaces(),
+  })
 
   // ECDH 키 쌍 로드 (최초 실행 시 자동 생성)
   const { privateKey, publicKey } = loadOrCreateKeyPair(appDataPath)
@@ -391,6 +424,11 @@ async function initApp() {
 
   // 파일 서버 시작 (파일 + 프로필 이미지 제공)
   await startFileServer(tempFilePath, profileFolderPath)
+  writePeerDebugLog('main.fileServer.started', {
+    filePort: getFilePort(),
+    tempFilePath,
+    profileFolderPath,
+  })
 
   // wsServer/wsClient 공용 메시지 핸들러
   // reply: wsServer에서 온 경우 상대 소켓으로 응답, wsClient에서 온 경우 no-op
@@ -470,6 +508,14 @@ async function initApp() {
     // 키 교환 처리 — 내 키 즉시 reply + 역방향 연결 (mDNS 단방향 문제 해결)
     if (message.type === 'key-exchange') {
       try {
+        writePeerDebugLog('main.keyExchange.received', {
+          fromId: message.fromId,
+          host: message.host || null,
+          wsPort: message.wsPort || null,
+          filePort: message.filePort || null,
+          nickname: message.nickname || null,
+          hasProfileImageUrl: message.profileImageUrl !== undefined,
+        })
         clearPeerConnectRetry(message.fromId)
         peerConnectInFlightSet.delete(message.fromId)
         const publicKeyObj = importPublicKey(message.publicKey)
@@ -487,6 +533,12 @@ async function initApp() {
           wsPort: wsServerInfo?.port ?? 0,
           filePort: getFilePort(),
           profileImageUrl: buildMyProfileImageUrl(),
+        })
+        writePeerDebugLog('main.keyExchange.replied', {
+          toPeerId: message.fromId,
+          host: localIP,
+          wsPort: wsServerInfo?.port ?? 0,
+          filePort: getFilePort(),
         })
 
         // 상대방 프로필 이미지 URL 업데이트
@@ -510,6 +562,12 @@ async function initApp() {
         // 좀비 소켓은 start-peer-discovery의 closeAllServerClients가 사전 정리
         if (message.host && message.wsPort && !hasPeerConnection(message.fromId)) {
           const epochAtReverse = discoveryEpoch
+          writePeerDebugLog('main.keyExchange.reverseConnect.start', {
+            peerId: message.fromId,
+            host: message.host,
+            wsPort: message.wsPort,
+            epochAtReverse,
+          })
           connectToPeer({
             peerId: message.fromId,
             host: message.host,
@@ -535,19 +593,39 @@ async function initApp() {
               if (epochAtReverse !== discoveryEpoch) return
               removePeerFromDiscovered(message.fromId)
               if (!hasPeerConnection(message.fromId)) {
+                writePeerDebugLog('main.keyExchange.reverseConnect.closed', {
+                  peerId: message.fromId,
+                  epochAtReverse,
+                })
                 sendToRenderer('peer-left', message.fromId)
               }
             },
           }).then(() => {
+            writePeerDebugLog('main.keyExchange.reverseConnect.connected', {
+              peerId: message.fromId,
+              epochAtReverse,
+            })
             // 역방향 연결 성공 후 epoch 재확인 — stale이면 폐기
             if (epochAtReverse !== discoveryEpoch) {
               disconnectFromPeer(message.fromId)
               return
             }
             flushPendingMessages(message.fromId)
-          }).catch(() => { /* 역방향 연결 실패 시 무시 */ })
+          }).catch((error) => {
+            writePeerDebugLog('main.keyExchange.reverseConnect.failed', {
+              peerId: message.fromId,
+              epochAtReverse,
+              error,
+            })
+          })
         } else {
           // 이미 연결 중이거나 host/wsPort 없으면 즉시 flush
+          writePeerDebugLog('main.keyExchange.reverseConnect.skipped', {
+            peerId: message.fromId,
+            hasHost: !!message.host,
+            hasWsPort: !!message.wsPort,
+            hasPeerConnection: hasPeerConnection(message.fromId),
+          })
           flushPendingMessages(message.fromId)
         }
       } catch {
@@ -672,6 +750,7 @@ async function initApp() {
 
   // WebSocket 서버 시작 (공용 핸들러 사용)
   wsServerInfo = startWsServer({ onMessage: handleIncomingMessage })
+  writePeerDebugLog('main.wsServer.ready', { wsPort: wsServerInfo.port })
 }
 
 // IPC 핸들러 등록
@@ -748,6 +827,12 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   ipcMain.handle('start-peer-discovery', async (_event, _params) => {
     // wsServerInfo가 null이면 서버 초기화 실패 — 피어 탐색 불가
     if (!wsServerInfo) return
+    writePeerDebugLog('main.discovery.startRequested', {
+      currentPeerId,
+      previousEpoch: discoveryEpoch,
+      wsPort: wsServerInfo.port,
+      filePort: getFilePort(),
+    })
     await stopPeerDiscovery()
     disconnectAll()
     // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
@@ -767,6 +852,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       if (currentEpoch !== discoveryEpoch) return
       if (peerConnectRetryTimerMap.has(targetPeerId)) return
 
+      writePeerDebugLog('main.discovery.backgroundRetry.scheduled', {
+        targetPeerId,
+        currentEpoch,
+        delayMs: BACKGROUND_CONNECT_RETRY_DELAY,
+      })
       const retryTimer = setTimeout(() => {
         peerConnectRetryTimerMap.delete(targetPeerId)
         if (currentEpoch !== discoveryEpoch) return
@@ -774,6 +864,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
         const latestPeerInfo = latestDiscoveredPeerInfoMap.get(targetPeerId)
         if (!latestPeerInfo) return
+        writePeerDebugLog('main.discovery.backgroundRetry.run', {
+          targetPeerId,
+          currentEpoch,
+          latestPeerInfo,
+        })
         connectDiscoveredPeer(latestPeerInfo)
       }, BACKGROUND_CONNECT_RETRY_DELAY)
 
@@ -784,6 +879,10 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     const connectDiscoveredPeer = async (peerInfo) => {
       if (currentEpoch !== discoveryEpoch) return
       if (!peerInfo?.peerId) return
+      writePeerDebugLog('main.discovery.connectPeer.start', {
+        peerInfo,
+        currentEpoch,
+      })
       const peerWsPort = Number(peerInfo.wsPort)
       if (!Number.isInteger(peerWsPort) || peerWsPort <= 0) {
         removePeerFromDiscovered(peerInfo.peerId)
@@ -800,6 +899,12 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       try {
         const latestPeerInfo = latestDiscoveredPeerInfoMap.get(peerInfo.peerId) || peerInfo
         const connectHostCandidates = buildPeerConnectHostCandidates(latestPeerInfo)
+        writePeerDebugLog('main.discovery.connectPeer.candidates', {
+          peerId: peerInfo.peerId,
+          currentEpoch,
+          connectHostCandidates,
+          latestPeerInfo,
+        })
         if (connectHostCandidates.length === 0) {
           removePeerFromDiscovered(peerInfo.peerId)
           scheduleBackgroundConnectRetry(peerInfo.peerId)
@@ -814,6 +919,13 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           for (const connectHost of connectHostCandidates) {
             if (currentEpoch !== discoveryEpoch) return
             try {
+              writePeerDebugLog('main.discovery.connectPeer.attempt', {
+                peerId: peerInfo.peerId,
+                connectHost,
+                peerWsPort,
+                attempt,
+                currentEpoch,
+              })
               await connectToPeer({
                 peerId: peerInfo.peerId,
                 host: connectHost,
@@ -847,8 +959,23 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
                 },
               })
               connectedHost = connectHost
+              writePeerDebugLog('main.discovery.connectPeer.connected', {
+                peerId: peerInfo.peerId,
+                connectedHost,
+                peerWsPort,
+                attempt,
+                currentEpoch,
+              })
               break
-            } catch {
+            } catch (error) {
+              writePeerDebugLog('main.discovery.connectPeer.failed', {
+                peerId: peerInfo.peerId,
+                connectHost,
+                peerWsPort,
+                attempt,
+                currentEpoch,
+                error,
+              })
               // 같은 라운드의 다음 host 후보를 계속 시도
             }
           }
@@ -864,6 +991,10 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
         if (!connectedHost) {
           // mDNS 재발견이 오지 않는 환경을 대비해 background 재시도 스케줄링
+          writePeerDebugLog('main.discovery.connectPeer.exhausted', {
+            peerId: peerInfo.peerId,
+            currentEpoch,
+          })
           removePeerFromDiscovered(peerInfo.peerId)
           scheduleBackgroundConnectRetry(peerInfo.peerId)
           return
@@ -887,6 +1018,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           filePort: getFilePort(),
           profileImageUrl: buildMyProfileImageUrl(),
         })
+        writePeerDebugLog('main.discovery.keyExchange.sent', {
+          peerId: peerInfo.peerId,
+          connectedHost,
+          currentEpoch,
+        })
         sendToRenderer('peer-discovered', { ...latestPeerInfo, host: connectedHost })
       } finally {
         peerConnectInFlightSet.delete(peerInfo.peerId)
@@ -900,6 +1036,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       filePort: getFilePort(),
       onPeerFound: async (peerInfo) => {
         latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)
+        writePeerDebugLog('main.discovery.peerFound', { peerInfo, currentEpoch })
         await connectDiscoveredPeer(peerInfo)
       },
       onPeerLeft: (leftPeerId) => {
@@ -910,6 +1047,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         latestDiscoveredPeerInfoMap.delete(leftPeerId)
         // active outbound connection이 있으면 peer-left를 보내지 않음
         if (!hasPeerConnection(leftPeerId)) {
+          writePeerDebugLog('main.discovery.peerLeft', { leftPeerId, currentEpoch })
           sendToRenderer('peer-left', leftPeerId)
         }
       },
@@ -922,6 +1060,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       if (currentEpoch !== discoveryEpoch) return
       // outbound 연결 + inbound 서버 클라이언트 합산 (중복 제거)
       const allPeerIds = getConnectedPeerIds()
+      writePeerDebugLog('main.discovery.sweep', {
+        currentEpoch,
+        allPeerIds,
+        peerPublicKeyPeerIds: [...peerPublicKeyMap.keys()],
+      })
       const latestNickname = getProfile(database)?.nickname || defaultNickname
       for (const targetPeerId of allPeerIds) {
         if (!peerPublicKeyMap.has(targetPeerId)) {

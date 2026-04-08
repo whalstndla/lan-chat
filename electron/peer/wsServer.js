@@ -1,5 +1,6 @@
 // electron/peer/wsServer.js
 const { WebSocketServer, WebSocket } = require('ws')
+const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
 // 허용되는 메시지 타입 화이트리스트
 const ALLOWED_MESSAGE_TYPES = [
@@ -29,6 +30,7 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
   server.on('connection', (socket, req) => {
     // IP별 연결 수 제한
     const clientIP = req.socket.remoteAddress || 'unknown'
+    writePeerDebugLog('wsServer.connection.accepted', { clientIP })
     const currentCount = connectionCountByIP.get(clientIP) || 0
     if (currentCount >= MAX_CONNECTIONS_PER_IP) {
       socket.close(1008, 'Too many connections')
@@ -43,6 +45,10 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
       if (socket._peerId && server._peerSocketMap.get(socket._peerId) === socket) {
         server._peerSocketMap.delete(socket._peerId)
       }
+      writePeerDebugLog('wsServer.connection.closed', {
+        clientIP,
+        peerId: socket._peerId,
+      })
     })
 
     // heartbeat 생존 여부 플래그 — pong 수신 시 true로 갱신
@@ -91,15 +97,33 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
             socket._peerId = message.fromId
           }
           server._peerSocketMap.set(message.fromId, socket)
+          writePeerDebugLog('wsServer.connection.taggedPeer', {
+            clientIP,
+            peerId: message.fromId,
+            messageType: message.type,
+          })
         }
 
         const reply = (response) => {
           if (socket.readyState === socket.OPEN) {
+            writePeerDebugLog('wsServer.reply.sent', {
+              clientIP,
+              peerId: socket._peerId,
+              messageType: response?.type,
+              messageId: response?.id || null,
+            })
             socket.send(JSON.stringify(response))
             return true
           }
           return false
         }
+        writePeerDebugLog('wsServer.message.received', {
+          clientIP,
+          peerId: socket._peerId,
+          messageType: message.type,
+          messageId: message.id || null,
+          fromId: message.fromId || null,
+        })
         onMessage(message, reply)
       } catch {
         // 잘못된 JSON 무시
@@ -130,16 +154,21 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
   })
 
   const port = server.address().port
+  writePeerDebugLog('wsServer.started', { port, heartbeatInterval })
   return { server, port }
 }
 
 function stopWsServer({ server }) {
+  writePeerDebugLog('wsServer.stopped', { port: server.address()?.port || null })
   server.close()
 }
 
 // 서버에 연결된 모든 클라이언트 소켓 즉시 종료 (새로고침/재로그인 시 좀비 소켓 정리용)
 // terminate()는 graceful close 없이 즉시 TCP 연결을 끊어 상대방 close 이벤트를 빠르게 발생시킴
 function closeAllServerClients({ server }) {
+  writePeerDebugLog('wsServer.closeAllClients', {
+    peerIds: getServerClientPeerIds({ server }),
+  })
   server.clients.forEach((socket) => socket.terminate())
 }
 
@@ -152,7 +181,21 @@ function getServerClientPeerIds({ server }) {
 
 function sendMessageToServerPeer({ server }, peerId, messageObj) {
   const socket = server?._peerSocketMap?.get(peerId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) return false
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    writePeerDebugLog('wsServer.send.skipped', {
+      peerId,
+      messageType: messageObj?.type,
+      messageId: messageObj?.id || null,
+      hasSocket: !!socket,
+      readyState: socket?.readyState ?? null,
+    })
+    return false
+  }
+  writePeerDebugLog('wsServer.send.sent', {
+    peerId,
+    messageType: messageObj?.type,
+    messageId: messageObj?.id || null,
+  })
   socket.send(JSON.stringify(messageObj))
   return true
 }

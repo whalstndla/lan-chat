@@ -1,10 +1,11 @@
 {
   "name": "lan-chat",
-  "version": "0.7.24",
+  "version": "0.7.25",
   "description": "",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently \"vite --strictPort\" \"wait-on http://localhost:5173 && electron .\"",
+    "dev:peer-debug": "sh -c 'mkdir -p logs && : > logs/dev.log && : > logs/peer-debug.log && npm run prerelease && LAN_CHAT_DEBUG_PEER=1 npm run dev 2>&1 | tee logs/dev.log'",
     "prerelease": "electron-rebuild -f -w better-sqlite3",
     "release": "dotenv -e .env -- sh -c 'vite build && electron-builder --publish always'",
     "pretest": "npm rebuild better-sqlite3",

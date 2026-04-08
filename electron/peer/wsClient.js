@@ -1,5 +1,6 @@
 // electron/peer/wsClient.js
 const WebSocket = require('ws')
+const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
 // 피어 ID → WebSocket 소켓 매핑
 const connectionMap = new Map()
@@ -37,20 +38,33 @@ function connectToPeer({
   onReconnect,
 }) {
   return new Promise((resolve, reject) => {
+    writePeerDebugLog('wsClient.connect.start', {
+      peerId,
+      host,
+      wsPort,
+      force: !!force,
+      autoReconnect,
+      reconnectMaxAttempts,
+      connectTimeoutMs,
+    })
+
     // 이미 OPEN 연결이 있으면 재연결 불필요
     const existingSocket = connectionMap.get(peerId)
     if (existingSocket && existingSocket.readyState === WebSocket.OPEN && !force) {
+      writePeerDebugLog('wsClient.connect.skipExistingOpen', { peerId, host, wsPort })
       resolve()
       return
     }
     // 동일 피어에 대한 동시 연결 시도 방지 (force가 아닌 경우)
     if (connectingSet.has(peerId) && !force) {
+      writePeerDebugLog('wsClient.connect.skipInFlight', { peerId, host, wsPort })
       resolve()
       return
     }
     connectingSet.add(peerId)
 
     if (existingSocket) {
+      writePeerDebugLog('wsClient.connect.closeExistingSocket', { peerId, readyState: existingSocket.readyState })
       // 기존 소켓 정리 — connectionMap에서 먼저 제거하여 비동기 close가 새 매핑을 건드리지 않도록 함
       connectionMap.delete(peerId)
       existingSocket.close()
@@ -67,6 +81,7 @@ function connectToPeer({
       connectingSet.delete(peerId)
       // CONNECTING 소켓 즉시 종료 — 다음 재시도를 막지 않도록 보장
       socket.terminate()
+      writePeerDebugLog('wsClient.connect.timeout', { peerId, host, wsPort, connectTimeoutMs })
       rejectOnce(new Error(`WebSocket 연결 타임아웃: ${peerId}`))
     }, connectTimeoutMs)
     if (connectTimeoutHandle.unref) connectTimeoutHandle.unref()
@@ -100,6 +115,7 @@ function connectToPeer({
       connectingSet.delete(peerId)
       connected = true
       connectionMap.set(peerId, socket)
+      writePeerDebugLog('wsClient.connect.open', { peerId, host, wsPort })
 
       // 연결 성공 시 재연결 옵션 저장 (이후 close 이벤트에서 참조)
       if (autoReconnect) {
@@ -131,6 +147,14 @@ function connectToPeer({
       if (onMessage) {
         try {
           const message = JSON.parse(data.toString())
+          writePeerDebugLog('wsClient.message.received', {
+            peerId,
+            host,
+            wsPort,
+            messageType: message.type,
+            messageId: message.id || null,
+            fromId: message.fromId || null,
+          })
           onMessage(message, () => {}) // 클라이언트는 reply 불필요
         } catch { /* 잘못된 JSON 무시 */ }
       }
@@ -138,13 +162,23 @@ function connectToPeer({
 
     // onClose: 연결 성공 후 소켓 종료 시에만 호출 (강제 종료 감지용)
     // identity 체크: force 교체된 old 소켓의 close가 새 매핑 삭제 및 false peer-left 방지
-    socket.on('close', () => {
+    socket.on('close', (code, reasonBuffer) => {
       if (socket._heartbeat) clearInterval(socket._heartbeat)
       connectingSet.delete(peerId)
       const isCurrent = connectionMap.get(peerId) === socket
       if (isCurrent) {
         connectionMap.delete(peerId)
       }
+      const closeReason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '')
+      writePeerDebugLog('wsClient.connect.close', {
+        peerId,
+        host,
+        wsPort,
+        code,
+        reason: closeReason,
+        connected,
+        isCurrent,
+      })
 
       // open 전에 닫힌 경우 연결 실패로 간주
       if (!connected) {
@@ -165,6 +199,7 @@ function connectToPeer({
 
     socket.on('error', (error) => {
       connectingSet.delete(peerId)
+      writePeerDebugLog('wsClient.connect.error', { peerId, host, wsPort, error })
       rejectOnce(error)
     })
   })
@@ -176,6 +211,7 @@ function scheduleReconnect(options, attempt) {
 
   // 최대 시도 횟수 초과 시 재연결 중단 — 호출자에게 영구 실패 알림
   if (attempt >= reconnectMaxAttempts) {
+    writePeerDebugLog('wsClient.reconnect.giveUp', { peerId, attempt, reconnectMaxAttempts })
     if (options.onClose) options.onClose()
     connectionMap.delete(peerId)
     reconnectOptionsMap.delete(peerId)
@@ -183,6 +219,7 @@ function scheduleReconnect(options, attempt) {
   }
 
   const delay = calculateReconnectDelay(attempt, reconnectBaseDelay, reconnectMaxDelay)
+  writePeerDebugLog('wsClient.reconnect.scheduled', { peerId, attempt, delay })
 
   const timer = setTimeout(() => {
     reconnectTimerMap.delete(peerId)
@@ -192,9 +229,11 @@ function scheduleReconnect(options, attempt) {
 
     // 실제 재연결 시도 — 성공 시 onReconnect 콜백, 실패 시 다음 시도 스케줄링
     connectToPeer({ ...options, force: false }).then(() => {
+      writePeerDebugLog('wsClient.reconnect.success', { peerId, attempt: attempt + 1 })
       // 재연결 성공 후 콜백 호출 (key-exchange 재전송 등)
       if (onReconnect) onReconnect(attempt + 1)
     }).catch(() => {
+      writePeerDebugLog('wsClient.reconnect.failed', { peerId, attempt: attempt + 1 })
       // 재연결 실패 시 다음 시도 스케줄링
       if (reconnectOptionsMap.has(peerId)) {
         scheduleReconnect(options, attempt + 1)
@@ -210,7 +249,21 @@ function scheduleReconnect(options, attempt) {
 
 function sendMessage(peerId, messageObj) {
   const socket = connectionMap.get(peerId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) return false
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    writePeerDebugLog('wsClient.send.skipped', {
+      peerId,
+      messageType: messageObj?.type,
+      messageId: messageObj?.id || null,
+      hasSocket: !!socket,
+      readyState: socket?.readyState ?? null,
+    })
+    return false
+  }
+  writePeerDebugLog('wsClient.send.sent', {
+    peerId,
+    messageType: messageObj?.type,
+    messageId: messageObj?.id || null,
+  })
   socket.send(JSON.stringify(messageObj))
   return true
 }
@@ -224,6 +277,7 @@ function broadcastMessage(messageObj) {
 }
 
 function disconnectFromPeer(peerId) {
+  writePeerDebugLog('wsClient.disconnect.peer', { peerId })
   // CONNECTING 상태 시도도 함께 취소
   connectingSet.delete(peerId)
 
@@ -255,6 +309,10 @@ function getConnections() {
 }
 
 function disconnectAll() {
+  writePeerDebugLog('wsClient.disconnect.all', {
+    connectedPeerIds: getConnections(),
+    connectingPeerIds: [...connectingSet],
+  })
   // CONNECTING 상태 시도도 전체 취소
   connectingSet.clear()
 

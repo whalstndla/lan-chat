@@ -1,5 +1,6 @@
 // electron/peer/discovery.js
 const { Bonjour } = require('bonjour-service')
+const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
 const SERVICE_TYPE = 'lan-chat'
 
@@ -30,9 +31,11 @@ function isNonFatalMdnsError(error) {
 
 function handleMdnsError(error) {
   if (isNonFatalMdnsError(error)) {
+    writePeerDebugLog('discovery.mdns.nonFatalError', { error })
     console.warn(`[mDNS] 네트워크 일시 오류 무시: ${error.code || 'UNKNOWN'} ${error.message || ''}`)
     return
   }
+  writePeerDebugLog('discovery.mdns.fatalError', { error })
   throw error
 }
 
@@ -56,14 +59,21 @@ function normalizePeerInfoFromService(service) {
   }
 }
 
+function buildServiceName(peerId, sessionId) {
+  return `lan-chat-${peerId}-${sessionId}`
+}
+
 function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, onPeerLeft }) {
+  writePeerDebugLog('discovery.start', { nickname, peerId, wsPort, filePort })
   bonjourInstance = new Bonjour({}, handleMdnsError)
   // multicast-dns warning 이벤트도 동일 기준으로 처리해 크래시/노이즈를 줄임
   bonjourInstance.server?.mdns?.on?.('warning', (error) => {
     if (isNonFatalMdnsError(error)) {
+      writePeerDebugLog('discovery.mdns.warningIgnored', { error })
       console.warn(`[mDNS] warning 무시: ${error.code || 'UNKNOWN'} ${error.message || ''}`)
       return
     }
+    writePeerDebugLog('discovery.mdns.warning', { error })
     console.warn('[mDNS] warning:', error)
   })
 
@@ -71,7 +81,7 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
   // 상대방 browser의 캐시 문제 없이 항상 새 서비스로 인식됨
   const sessionId = Date.now().toString(36)
   publishedService = bonjourInstance.publish({
-    name: `${nickname}__${peerId}__${sessionId}`,
+    name: buildServiceName(peerId, sessionId),
     type: SERVICE_TYPE,
     port: wsPort,
     txt: {
@@ -79,6 +89,13 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
       peerId,
       filePort: String(filePort),
     },
+  })
+  writePeerDebugLog('discovery.publish', {
+    peerId,
+    nickname,
+    wsPort,
+    filePort,
+    sessionId,
   })
 
   const handleServiceUpsert = (service) => {
@@ -96,6 +113,16 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
 
     peerServiceMap.set(discoveredPeerId, serviceIdentity)
     servicePeerMap.set(serviceIdentity, discoveredPeerId)
+    writePeerDebugLog('discovery.service.upsert', {
+      peerId: discoveredPeerId,
+      serviceIdentity,
+      host: service.host,
+      addresses: service.addresses || [],
+      refererAddress: service.referer?.address || null,
+      wsPort: discoveredWsPort,
+      filePort: Number(service.txt?.filePort),
+      nickname: service.txt?.nickname || '알 수 없음',
+    })
 
     // addresses: mDNS A/AAAA 레코드에서 가져온 실제 IP 주소 목록
     // host: SRV 레코드의 hostname (예: MacBook.local) — resolve 실패 가능성 있음
@@ -114,6 +141,7 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
     if (peerServiceMap.get(leftPeerId) !== serviceIdentity) return
 
     peerServiceMap.delete(leftPeerId)
+    writePeerDebugLog('discovery.service.down', { peerId: leftPeerId, serviceIdentity })
     onPeerLeft(leftPeerId)
   })
 
@@ -125,6 +153,9 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
 }
 
 async function stopPeerDiscovery() {
+  writePeerDebugLog('discovery.stop', {
+    peerIds: [...peerServiceMap.keys()],
+  })
   // 발견된 피어 목록 초기화
   peerServiceMap.clear()
   servicePeerMap.clear()
@@ -158,10 +189,17 @@ async function republishService({ nickname, peerId, wsPort, filePort }) {
   }
   const sessionId = Date.now().toString(36)
   publishedService = bonjourInstance.publish({
-    name: `${nickname}__${peerId}__${sessionId}`,
+    name: buildServiceName(peerId, sessionId),
     type: SERVICE_TYPE,
     port: wsPort,
     txt: { nickname, peerId, filePort: String(filePort) },
+  })
+  writePeerDebugLog('discovery.republish', {
+    peerId,
+    nickname,
+    wsPort,
+    filePort,
+    sessionId,
   })
 }
 
@@ -172,6 +210,7 @@ function removePeerFromDiscovered(peerId) {
     servicePeerMap.delete(serviceIdentity)
   }
   peerServiceMap.delete(peerId)
+  writePeerDebugLog('discovery.removePeer', { peerId })
 }
 
 module.exports = { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered }
