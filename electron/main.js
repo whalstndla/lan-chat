@@ -905,6 +905,10 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           return
         }
 
+        // 기존 autoReconnect 루프(구 포트) 취소 — mDNS 재발견 시 포트가 바뀌었을 수 있으므로
+        // disconnectFromPeer는 connectingSet, reconnectTimerMap, reconnectOptionsMap을 모두 정리함
+        disconnectFromPeer(peerInfo.peerId)
+
         let connectedHost = null
 
         // 라운드 단위 재시도: 각 라운드마다 모든 후보 host를 순회 시도
