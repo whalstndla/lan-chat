@@ -22,6 +22,14 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function isEditableElement(target) {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.closest('[data-prevent-editor-autofocus="true"]')) return true
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.tagName === 'BUTTON') return true
+  if (target.isContentEditable) return true
+  return !!target.closest('[contenteditable="true"]')
+}
+
 const MessageInput = forwardRef(function MessageInput(props, ref) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [isSending, setIsSending] = useState(false)
@@ -32,6 +40,12 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
   const currentRoom = useChatStore(state => state.currentRoom)
+  const keepEditorFocus = useCallback(() => {
+    if (!editor) return
+    requestAnimationFrame(() => {
+      editor.commands.focus('end')
+    })
+  }, [editor])
 
   // Tiptap 에디터 설정
   const editor = useEditor({
@@ -139,11 +153,13 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   useEffect(() => {
     if (!editor) return
     const handleKeyDown = (event) => {
+      if (event.isComposing || event.keyCode === 229) return
       // 에디터에 이미 포커스가 있으면 무시
       if (editor.isFocused) return
-      // 다른 input/textarea/select에 포커스가 있으면 무시
+      // 이벤트 대상이나 현재 포커스가 편집 가능한 요소면 무시
+      if (isEditableElement(event.target)) return
       const active = document.activeElement
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)) return
+      if (isEditableElement(active)) return
       // 단축키(Ctrl/Cmd/Alt) 조합은 무시
       if (event.ctrlKey || event.metaKey || event.altKey) return
       // 기능키, 탭, Esc 등 특수 키는 무시
@@ -176,12 +192,14 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     }
     setEditingMessage(null)
     editor.commands.clearContent()
+    keepEditorFocus()
   }
 
   // 수정 모드 취소 — 에디터 초기화
   function cancelEdit() {
     setEditingMessage(null)
     editor?.commands.clearContent()
+    keepEditorFocus()
   }
 
   const sendMessage = useCallback(async () => {
@@ -215,10 +233,11 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
       editor.commands.clearContent()
+      keepEditorFocus()
     } finally {
       setIsSending(false)
     }
-  }, [editor, isSending, currentRoom, editingMessage])
+  }, [editor, isSending, currentRoom, editingMessage, keepEditorFocus])
 
   // sendMessage를 ref에 저장 (handleKeyDown에서 참조)
   useEffect(() => {
@@ -376,6 +395,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             {/* 굵게 */}
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => editor.chain().focus().toggleBold().run()}
               title="굵게 (Ctrl+B)"
               className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
@@ -389,6 +409,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             {/* 기울임 */}
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => editor.chain().focus().toggleItalic().run()}
               title="기울임 (Ctrl+I)"
               className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
@@ -402,6 +423,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             {/* 취소선 */}
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => editor.chain().focus().toggleStrike().run()}
               title="취소선 (Ctrl+Shift+S)"
               className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
@@ -415,6 +437,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             {/* 인라인 코드 */}
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => editor.chain().focus().toggleCode().run()}
               title="인라인 코드 (Ctrl+E)"
               className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
@@ -428,6 +451,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             {/* 코드블록 */}
             <button
               type="button"
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => editor.chain().focus().toggleCodeBlock().run()}
               title="코드블록"
               className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
@@ -451,15 +475,15 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         <div className="flex items-center gap-0.5 pr-2 pb-1.5">
           <input ref={fileInputRef} type="file" accept="image/*,video/*,*" multiple className="hidden"
             onChange={(event) => { const files = event.target.files; if (files && files.length > 0) sendFiles(Array.from(files)); event.target.value = '' }} />
-          <button onClick={() => fileInputRef.current?.click()} disabled={isSending} aria-label="파일 첨부" title="파일 첨부"
+          <button onMouseDown={(event) => event.preventDefault()} onClick={() => fileInputRef.current?.click()} disabled={isSending} aria-label="파일 첨부" title="파일 첨부"
             className="cursor-pointer p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150">
             <Paperclip size={16} />
           </button>
-          <button onClick={() => setShowEmojiPicker(prev => !prev)} aria-label="이모지 선택" title="이모지"
+          <button onMouseDown={(event) => event.preventDefault()} onClick={() => setShowEmojiPicker(prev => !prev)} aria-label="이모지 선택" title="이모지"
             className={`cursor-pointer p-1.5 rounded transition-colors duration-150 ${showEmojiPicker ? 'text-vsc-accent bg-vsc-hover' : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'}`}>
             <Smile size={16} />
           </button>
-          <button onClick={sendMessage} disabled={!canSend} aria-label="메시지 전송" title="전송 (Enter)"
+          <button onMouseDown={(event) => event.preventDefault()} onClick={sendMessage} disabled={!canSend} aria-label="메시지 전송" title="전송 (Enter)"
             className="cursor-pointer p-1.5 rounded transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-30 text-vsc-accent hover:bg-vsc-hover disabled:hover:bg-transparent">
             {isSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
           </button>

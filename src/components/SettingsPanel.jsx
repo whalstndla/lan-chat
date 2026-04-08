@@ -403,7 +403,7 @@ export default function SettingsPanel({ onClose }) {
 
   // ─── 렌더링 ───
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div data-prevent-editor-autofocus="true" className="flex flex-col h-full overflow-hidden">
       {activeMenu === null && <MenuList />}
       {activeMenu === 'profile' && <ProfilePage />}
       {activeMenu === 'notification' && <NotificationPage />}
