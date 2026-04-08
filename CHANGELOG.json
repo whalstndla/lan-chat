@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.7.24",
+    "date": "2026-04-08",
+    "changes": [
+      { "type": "fix", "text": "서버 inbound 소켓도 정상 연결로 승격해 한쪽만 먼저 붙은 경우에도 DM·읽음·상태 전파가 동작하도록 수정" },
+      { "type": "fix", "text": "메시지 전송과 peer-left 판정을 outbound 전용 기준에서 inbound/outbound 통합 기준으로 변경" },
+      { "type": "fix", "text": "mDNS 발견 상태를 peerId별 최신 서비스로 갱신하고 txt-update + 주기적 재질의로 발견 누락 복구 강화" }
+    ]
+  },
+  {
     "version": "0.7.23",
     "date": "2026-04-08",
     "changes": [
