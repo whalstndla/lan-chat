@@ -21,6 +21,7 @@ const MAX_RECENT_MESSAGE_IDS = 1000
 function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL }) {
   // 최대 페이로드 10MB 제한 — 대용량 메시지로 인한 메모리 소진 방지
   const server = new WebSocketServer({ port: 0, maxPayload: 10 * 1024 * 1024 })
+  server._peerSocketMap = new Map()
 
   // Replay Attack 방어: 최근 수신된 메시지 ID 집합 (서버 인스턴스당 유지)
   const recentMessageIds = new Set()
@@ -34,10 +35,14 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
       return
     }
     connectionCountByIP.set(clientIP, currentCount + 1)
+    socket._peerId = null
     socket.on('close', () => {
       const count = connectionCountByIP.get(clientIP) || 1
       if (count <= 1) connectionCountByIP.delete(clientIP)
       else connectionCountByIP.set(clientIP, count - 1)
+      if (socket._peerId && server._peerSocketMap.get(socket._peerId) === socket) {
+        server._peerSocketMap.delete(socket._peerId)
+      }
     })
 
     // heartbeat 생존 여부 플래그 — pong 수신 시 true로 갱신
@@ -77,8 +82,15 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
         }
 
         // 메시지에서 fromId가 있으면 소켓에 peerId 태깅 (서버 inbound 피어 추적용)
-        if (message.fromId && !socket._peerId) {
-          socket._peerId = message.fromId
+        if (message.fromId) {
+          if (socket._peerId && socket._peerId !== message.fromId) {
+            socket.close(1008, 'Peer identity changed')
+            return
+          }
+          if (!socket._peerId) {
+            socket._peerId = message.fromId
+          }
+          server._peerSocketMap.set(message.fromId, socket)
         }
 
         const reply = (response) => {
@@ -133,13 +145,22 @@ function closeAllServerClients({ server }) {
 
 // 서버에 연결된 inbound 피어 ID 목록 반환 (OPEN 상태 + peerId 태깅된 소켓만)
 function getServerClientPeerIds({ server }) {
-  const peerIds = []
-  server.clients.forEach((socket) => {
-    if (socket.readyState === WebSocket.OPEN && socket._peerId) {
-      peerIds.push(socket._peerId)
-    }
-  })
-  return peerIds
+  return [...server._peerSocketMap.entries()]
+    .filter(([, socket]) => socket.readyState === WebSocket.OPEN)
+    .map(([peerId]) => peerId)
 }
 
-module.exports = { startWsServer, stopWsServer, closeAllServerClients, getServerClientPeerIds }
+function sendMessageToServerPeer({ server }, peerId, messageObj) {
+  const socket = server?._peerSocketMap?.get(peerId)
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false
+  socket.send(JSON.stringify(messageObj))
+  return true
+}
+
+module.exports = {
+  startWsServer,
+  stopWsServer,
+  closeAllServerClients,
+  getServerClientPeerIds,
+  sendMessageToServerPeer,
+}

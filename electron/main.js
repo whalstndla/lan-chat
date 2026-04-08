@@ -13,8 +13,8 @@ const {
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage, deleteExpiredPendingMessages } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered } = require('./peer/discovery')
-const { startWsServer, stopWsServer, closeAllServerClients, getServerClientPeerIds } = require('./peer/wsServer')
-const { connectToPeer, sendMessage, broadcastMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
+const { startWsServer, stopWsServer, closeAllServerClients, getServerClientPeerIds, sendMessageToServerPeer } = require('./peer/wsServer')
+const { connectToPeer, sendMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { loadOrCreateKeyPair, exportPublicKey, importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, encryptDM, decryptDM } = require('./crypto/encryption')
@@ -137,6 +137,31 @@ function clearAllPeerConnectRetryState() {
   peerConnectRetryTimerMap.clear()
   peerConnectInFlightSet.clear()
   latestDiscoveredPeerInfoMap.clear()
+}
+
+function getInboundConnections() {
+  if (!wsServerInfo) return []
+  return getServerClientPeerIds(wsServerInfo)
+}
+
+function getConnectedPeerIds() {
+  return [...new Set([...getConnections(), ...getInboundConnections()])]
+}
+
+function hasPeerConnection(targetPeerId) {
+  return getConnectedPeerIds().includes(targetPeerId)
+}
+
+function sendPeerMessage(targetPeerId, message) {
+  if (sendMessage(targetPeerId, message)) return true
+  if (!wsServerInfo) return false
+  return sendMessageToServerPeer(wsServerInfo, targetPeerId, message)
+}
+
+function broadcastPeerMessage(message) {
+  getConnectedPeerIds().forEach((targetPeerId) => {
+    sendPeerMessage(targetPeerId, message)
+  })
 }
 
 // 안읽은 메시지 badge 증가 — Dock + 트레이
@@ -272,7 +297,7 @@ async function flushPendingMessages(targetPeerId, retryCount = 0) {
           fileName: null,
           timestamp: pending.created_at,
         }
-        const sent = sendMessage(targetPeerId, message)
+        const sent = sendPeerMessage(targetPeerId, message)
         if (sent) {
           try { deletePendingMessage(database, pending.id) } catch { /* DB 삭제 실패 시 무시 */ }
           flushedMessageIds.push(pending.id)
@@ -483,7 +508,7 @@ async function initApp() {
 
         // 역방향 연결 — 기존 연결이 없는 경우에만 (mDNS 단방향 문제 해결)
         // 좀비 소켓은 start-peer-discovery의 closeAllServerClients가 사전 정리
-        if (message.host && message.wsPort && !getConnections().includes(message.fromId)) {
+        if (message.host && message.wsPort && !hasPeerConnection(message.fromId)) {
           const epochAtReverse = discoveryEpoch
           connectToPeer({
             peerId: message.fromId,
@@ -495,7 +520,7 @@ async function initApp() {
               // 역방향 재연결 성공 후 key-exchange 재전송
               if (epochAtReverse !== discoveryEpoch) return
               const latestNickname = getCurrentNicknameSafely()
-              sendMessage(message.fromId, {
+              sendPeerMessage(message.fromId, {
                 type: 'key-exchange',
                 fromId: peerId,
                 publicKey: myPublicKeyBase64,
@@ -509,7 +534,7 @@ async function initApp() {
             onClose: () => {
               if (epochAtReverse !== discoveryEpoch) return
               removePeerFromDiscovered(message.fromId)
-              if (!getConnections().includes(message.fromId)) {
+              if (!hasPeerConnection(message.fromId)) {
                 sendToRenderer('peer-left', message.fromId)
               }
             },
@@ -745,7 +770,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       const retryTimer = setTimeout(() => {
         peerConnectRetryTimerMap.delete(targetPeerId)
         if (currentEpoch !== discoveryEpoch) return
-        if (getConnections().includes(targetPeerId)) return
+        if (hasPeerConnection(targetPeerId)) return
 
         const latestPeerInfo = latestDiscoveredPeerInfoMap.get(targetPeerId)
         if (!latestPeerInfo) return
@@ -765,7 +790,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         scheduleBackgroundConnectRetry(peerInfo.peerId)
         return
       }
-      if (getConnections().includes(peerInfo.peerId)) {
+      if (hasPeerConnection(peerInfo.peerId)) {
         clearPeerConnectRetry(peerInfo.peerId)
         return
       }
@@ -800,7 +825,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
                   // 재연결 성공 후 key-exchange 재전송 (암호화 세션 복구)
                   if (currentEpoch !== discoveryEpoch) return
                   const latestNickname = getProfile(database)?.nickname || defaultNickname
-                  sendMessage(peerInfo.peerId, {
+                  sendPeerMessage(peerInfo.peerId, {
                     type: 'key-exchange',
                     fromId: currentPeerId,
                     publicKey: myPublicKeyBase64,
@@ -815,7 +840,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
                   // 영구 실패 시에만 호출됨 (autoReconnect 최대 시도 초과)
                   if (currentEpoch !== discoveryEpoch) return
                   removePeerFromDiscovered(peerInfo.peerId)
-                  if (!getConnections().includes(peerInfo.peerId)) {
+                  if (!hasPeerConnection(peerInfo.peerId)) {
                     sendToRenderer('peer-left', peerInfo.peerId)
                     scheduleBackgroundConnectRetry(peerInfo.peerId)
                   }
@@ -852,7 +877,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
 
         clearPeerConnectRetry(peerInfo.peerId)
         // key-exchange에 내 접속 정보 + 프로필 이미지 포함
-        sendMessage(peerInfo.peerId, {
+        sendPeerMessage(peerInfo.peerId, {
           type: 'key-exchange',
           fromId: currentPeerId,
           publicKey: myPublicKeyBase64,
@@ -884,7 +909,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         peerConnectInFlightSet.delete(leftPeerId)
         latestDiscoveredPeerInfoMap.delete(leftPeerId)
         // active outbound connection이 있으면 peer-left를 보내지 않음
-        if (!getConnections().includes(leftPeerId)) {
+        if (!hasPeerConnection(leftPeerId)) {
           sendToRenderer('peer-left', leftPeerId)
         }
       },
@@ -896,13 +921,11 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     const sweepTimer = setTimeout(() => {
       if (currentEpoch !== discoveryEpoch) return
       // outbound 연결 + inbound 서버 클라이언트 합산 (중복 제거)
-      const outboundPeers = getConnections()
-      const inboundPeers = wsServerInfo ? getServerClientPeerIds(wsServerInfo) : []
-      const allPeerIds = [...new Set([...outboundPeers, ...inboundPeers])]
+      const allPeerIds = getConnectedPeerIds()
       const latestNickname = getProfile(database)?.nickname || defaultNickname
       for (const targetPeerId of allPeerIds) {
         if (!peerPublicKeyMap.has(targetPeerId)) {
-          sendMessage(targetPeerId, {
+          sendPeerMessage(targetPeerId, {
             type: 'key-exchange',
             fromId: currentPeerId,
             publicKey: myPublicKeyBase64,
@@ -936,7 +959,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         wsPort: wsServerInfo?.port ?? 0,
         filePort: getFilePort(),
       })
-      broadcastMessage({
+      broadcastPeerMessage({
         type: 'nickname-changed',
         fromId: currentPeerId,
         nickname: newNickname.trim(),
@@ -987,7 +1010,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       fileName: fileName || null,
       timestamp: Date.now(),
     }
-    broadcastMessage(message)
+    broadcastPeerMessage(message)
     // 내 메시지도 로컬 저장 — 저장 실패 시에도 메시지 반환은 계속
     try {
       saveMessage(database, {
@@ -1077,7 +1100,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       fileUrl: null, fileName: null, timestamp,
     }
 
-    const sent = sendMessage(recipientPeerId, message)
+    const sent = sendPeerMessage(recipientPeerId, message)
 
     if (!sent) {
       // 소켓은 있지만 연결 끊긴 경우 → pending 저장
@@ -1119,9 +1142,9 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       timestamp: Date.now(),
     }
     if (targetPeerId) {
-      sendMessage(targetPeerId, typingMessage)
+      sendPeerMessage(targetPeerId, typingMessage)
     } else {
-      broadcastMessage(typingMessage)
+      broadcastPeerMessage(typingMessage)
     }
   })
 
@@ -1135,7 +1158,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     if (!targetPeerId || !messageIds?.length) return
     // 배열 크기 제한 — SQL 쿼리 부하 방지
     if (messageIds.length > 500) return
-    const sent = sendMessage(targetPeerId, {
+    const sent = sendPeerMessage(targetPeerId, {
       type: 'read-receipt',
       fromId: currentPeerId,
       messageIds,
@@ -1160,9 +1183,9 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       timestamp: Date.now(),
     }
     if (targetPeerId) {
-      sendMessage(targetPeerId, deletePayload)
+      sendPeerMessage(targetPeerId, deletePayload)
     } else {
-      broadcastMessage(deletePayload)
+      broadcastPeerMessage(deletePayload)
     }
   })
 
@@ -1177,8 +1200,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       type: 'edit-message', messageId, fromId: currentPeerId, from: currentNickname,
       newContent, editedAt, to: targetPeerId || null, timestamp: Date.now(),
     }
-    if (targetPeerId) sendMessage(targetPeerId, editPayload)
-    else broadcastMessage(editPayload)
+    if (targetPeerId) sendPeerMessage(targetPeerId, editPayload)
+    else broadcastPeerMessage(editPayload)
     return { editedAt }
   })
 
@@ -1187,7 +1210,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     const allowedTypes = ['online', 'away', 'busy', 'dnd']
     if (!allowedTypes.includes(statusType)) return
     updateStatus(database, { statusType, statusMessage: (statusMessage || '').slice(0, 100) })
-    broadcastMessage({
+    broadcastPeerMessage({
       type: 'status-changed', fromId: currentPeerId,
       statusType, statusMessage: statusMessage || '', timestamp: Date.now(),
     })
@@ -1327,8 +1350,8 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     const reactionMessage = {
       type: 'reaction', messageId, fromId: currentPeerId, emoji, action, timestamp: Date.now(),
     }
-    if (targetPeerId) sendMessage(targetPeerId, reactionMessage)
-    else broadcastMessage(reactionMessage)
+    if (targetPeerId) sendPeerMessage(targetPeerId, reactionMessage)
+    else broadcastPeerMessage(reactionMessage)
     return { action }
   })
 

@@ -1,5 +1,5 @@
 // tests/peer/wsServer.test.js
-const { startWsServer, stopWsServer } = require('../../electron/peer/wsServer')
+const { startWsServer, stopWsServer, getServerClientPeerIds, sendMessageToServerPeer } = require('../../electron/peer/wsServer')
 const WebSocket = require('ws')
 
 describe('WebSocket 서버', () => {
@@ -32,6 +32,40 @@ describe('WebSocket 서버', () => {
     const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
     client.on('open', () => {
       client.send(JSON.stringify(testMessage))
+    })
+  })
+
+  it('inbound 소켓에 peerId가 태깅되면 서버에서도 해당 피어로 전송할 수 있음', (done) => {
+    const inboundKeyExchange = {
+      type: 'key-exchange',
+      fromId: 'peer-inbound',
+      publicKey: 'dummy-key',
+      timestamp: Date.now(),
+    }
+
+    serverInfo = startWsServer({
+      onMessage: (received) => {
+        if (received.type !== 'key-exchange') return
+
+        expect(getServerClientPeerIds(serverInfo)).toContain('peer-inbound')
+        const sent = sendMessageToServerPeer(serverInfo, 'peer-inbound', {
+          type: 'typing',
+          fromId: 'server-peer',
+          timestamp: Date.now(),
+        })
+        expect(sent).toBe(true)
+      },
+    })
+
+    const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
+    client.on('message', (data) => {
+      const received = JSON.parse(data.toString())
+      expect(received.type).toBe('typing')
+      expect(received.fromId).toBe('server-peer')
+      done()
+    })
+    client.on('open', () => {
+      client.send(JSON.stringify(inboundKeyExchange))
     })
   })
 })

@@ -6,8 +6,11 @@ const SERVICE_TYPE = 'lan-chat'
 let bonjourInstance = null
 let publishedService = null
 let browseInstance = null
-// 중복 발견 필터링용 Set — 이미 발견한 peerId를 기록
-const discoveredPeerIds = new Set()
+let browseRefreshTimer = null
+// peerId -> 현재 대표 서비스 fqdn
+const peerServiceMap = new Map()
+// fqdn -> peerId
+const servicePeerMap = new Map()
 
 // 네트워크 상태 변화(와이파이 전환/로컬호스트명 충돌 재조정 등) 중 발생 가능한
 // mDNS 전송 오류 코드는 치명 오류로 보지 않고 복구를 기다린다.
@@ -31,6 +34,26 @@ function handleMdnsError(error) {
     return
   }
   throw error
+}
+
+function getServiceIdentity(service) {
+  if (service?.fqdn) return service.fqdn
+  const peerId = service?.txt?.peerId || 'unknown-peer'
+  const host = service?.host || 'unknown-host'
+  const port = Number(service?.port) || 0
+  return `${peerId}:${host}:${port}`
+}
+
+function normalizePeerInfoFromService(service) {
+  return {
+    peerId: service.txt?.peerId,
+    nickname: service.txt?.nickname || '알 수 없음',
+    host: service.host,
+    addresses: service.addresses || [],
+    refererAddress: service.referer?.address || null,
+    wsPort: Number(service.port),
+    filePort: Number(service.txt?.filePort),
+  }
 }
 
 function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, onPeerLeft }) {
@@ -58,42 +81,57 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, onPeerFound, o
     },
   })
 
-  browseInstance = bonjourInstance.find({ type: SERVICE_TYPE }, (service) => {
+  const handleServiceUpsert = (service) => {
     const discoveredPeerId = service.txt?.peerId
-    const wsPort = Number(service.port)
+    const discoveredWsPort = Number(service.port)
     if (discoveredPeerId === peerId) return
     // peerId/port가 비정상이면 무시 (Set 오염 및 잘못된 연결 시도 방지)
-    if (!discoveredPeerId || !Number.isInteger(wsPort) || wsPort <= 0) return
-    // 이미 발견한 피어는 중복 콜백 방지
-    if (discoveredPeerIds.has(discoveredPeerId)) return
-    discoveredPeerIds.add(discoveredPeerId)
+    if (!discoveredPeerId || !Number.isInteger(discoveredWsPort) || discoveredWsPort <= 0) return
+
+    const serviceIdentity = getServiceIdentity(service)
+    const previousServiceIdentity = peerServiceMap.get(discoveredPeerId)
+    if (previousServiceIdentity && previousServiceIdentity !== serviceIdentity) {
+      servicePeerMap.delete(previousServiceIdentity)
+    }
+
+    peerServiceMap.set(discoveredPeerId, serviceIdentity)
+    servicePeerMap.set(serviceIdentity, discoveredPeerId)
 
     // addresses: mDNS A/AAAA 레코드에서 가져온 실제 IP 주소 목록
     // host: SRV 레코드의 hostname (예: MacBook.local) — resolve 실패 가능성 있음
-    onPeerFound({
-      peerId: discoveredPeerId,
-      nickname: service.txt?.nickname || '알 수 없음',
-      host: service.host,
-      addresses: service.addresses || [],
-      refererAddress: service.referer?.address || null,
-      wsPort,
-      filePort: Number(service.txt?.filePort),
-    })
-  })
+    onPeerFound(normalizePeerInfoFromService(service))
+  }
+
+  browseInstance = bonjourInstance.find({ type: SERVICE_TYPE }, handleServiceUpsert)
+  browseInstance.on('txt-update', handleServiceUpsert)
 
   browseInstance.on('down', (service) => {
-    const leftPeerId = service.txt?.peerId
-    if (leftPeerId) {
-      // down 시 Set에서 제거 → 재접속 시 다시 발견 가능
-      discoveredPeerIds.delete(leftPeerId)
-      onPeerLeft(leftPeerId)
-    }
+    const serviceIdentity = getServiceIdentity(service)
+    const leftPeerId = servicePeerMap.get(serviceIdentity) || service.txt?.peerId
+    if (!leftPeerId) return
+
+    servicePeerMap.delete(serviceIdentity)
+    if (peerServiceMap.get(leftPeerId) !== serviceIdentity) return
+
+    peerServiceMap.delete(leftPeerId)
+    onPeerLeft(leftPeerId)
   })
+
+  // 일부 환경은 up 이벤트가 유실되거나 늦게 도착하므로 주기적으로 PTR 재질의
+  browseRefreshTimer = setInterval(() => {
+    browseInstance?.update?.()
+  }, 5000)
+  if (browseRefreshTimer.unref) browseRefreshTimer.unref()
 }
 
 async function stopPeerDiscovery() {
   // 발견된 피어 목록 초기화
-  discoveredPeerIds.clear()
+  peerServiceMap.clear()
+  servicePeerMap.clear()
+  if (browseRefreshTimer) {
+    clearInterval(browseRefreshTimer)
+    browseRefreshTimer = null
+  }
   if (publishedService) {
     publishedService.stop()
     publishedService = null
@@ -129,7 +167,11 @@ async function republishService({ nickname, peerId, wsPort, filePort }) {
 
 // 특정 피어를 발견 목록에서 제거 — 재연결 영구 실패 시 mDNS 재발견 허용
 function removePeerFromDiscovered(peerId) {
-  discoveredPeerIds.delete(peerId)
+  const serviceIdentity = peerServiceMap.get(peerId)
+  if (serviceIdentity) {
+    servicePeerMap.delete(serviceIdentity)
+  }
+  peerServiceMap.delete(peerId)
 }
 
 module.exports = { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered }
