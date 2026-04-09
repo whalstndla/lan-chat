@@ -50,7 +50,7 @@ export default function ChatWindow() {
     : `${currentRoom.nickname} (DM)`
 
   const typingUserList = currentRoom.type === 'global'
-    ? Object.values(typingUsers)
+    ? Object.values(typingUsers).filter(u => u.to === null)
     : (typingUsers[currentRoom.peerId] ? [typingUsers[currentRoom.peerId]] : [])
 
   function handleScroll() {

@@ -194,7 +194,7 @@ export default function App() {
       })
 
       window.electronAPI.onTypingEvent((data) => {
-        useChatStore.getState().setTyping(data.fromId, data.from)
+        useChatStore.getState().setTyping(data.fromId, data.from, data.to || null)
       })
 
       // 피어 닉네임 변경 이벤트

@@ -1063,6 +1063,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       wsPort: wsServerInfo.port,
       filePort: getFilePort(),
       addresses: getMyAdvertisedAddresses(),
+      myAddresses: localAddressCandidates,
       onPeerFound: async (peerInfo) => {
         if (currentEpoch !== discoveryEpoch) return
         latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)

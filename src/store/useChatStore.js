@@ -99,11 +99,12 @@ const useChatStore = create((set, get) => ({
       },
     })),
 
-  setTyping: (peerId, nickname) =>
+  setTyping: (peerId, nickname, to) =>
     set((state) => ({
       typingUsers: {
         ...state.typingUsers,
-        [peerId]: { nickname, timestamp: Date.now() },
+        // to: null이면 전체채팅, to가 있으면 해당 DM
+        [peerId]: { nickname, timestamp: Date.now(), to: to || null },
       },
     })),
 

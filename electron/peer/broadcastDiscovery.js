@@ -43,7 +43,7 @@ function buildPacket({ peerId, nickname, wsPort, filePort, addresses }) {
   }))
 }
 
-function startBroadcastDiscovery({ peerId, nickname, wsPort, filePort, addresses = [], onPeerFound }) {
+function startBroadcastDiscovery({ peerId, nickname, wsPort, filePort, addresses = [], onPeerFound, myAddresses = [] }) {
   stopBroadcastDiscovery()
 
   broadcastSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true })
@@ -57,7 +57,8 @@ function startBroadcastDiscovery({ peerId, nickname, wsPort, filePort, addresses
     try {
       const data = JSON.parse(msg.toString())
       if (data.type !== PACKET_TYPE) return
-      if (data.peerId === peerId) return // 내 브로드캐스트 무시
+      if (data.peerId === peerId) return // 내 브로드캐스트 무시 (peerId 기준)
+      if (myAddresses.includes(rinfo.address)) return // 내 IP에서 온 패킷 무시 (루프백 방어)
       if (!data.peerId || !data.wsPort) return
 
       writePeerDebugLog('broadcastDiscovery.received', {
