@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.7.34",
+    "date": "2026-04-09",
+    "changes": [
+      { "type": "feat", "text": "UDP 브로드캐스트 발견 추가 — mDNS가 양방향 차단된 네트워크(AP isolation)에서도 피어 발견 가능" }
+    ]
+  },
+  {
     "version": "0.7.33",
     "date": "2026-04-09",
     "changes": [
