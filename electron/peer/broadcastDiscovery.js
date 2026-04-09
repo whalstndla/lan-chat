@@ -3,7 +3,27 @@
 // — mDNS(멀티캐스트)가 AP isolation으로 차단된 네트워크에서도 동작
 // — 대부분의 라우터는 브로드캐스트를 클라이언트 간에 허용 (DHCP 필요)
 const dgram = require('dgram')
+const os = require('os')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
+
+// 서브넷 브로드캐스트 주소 계산 (192.168.0.255 등)
+// macOS에서 255.255.255.255는 EHOSTUNREACH → 서브넷 브로드캐스트를 사용해야 함
+function getSubnetBroadcastAddresses() {
+  const addresses = []
+  const interfaces = os.networkInterfaces()
+  for (const iface of Object.values(interfaces)) {
+    for (const info of (iface || [])) {
+      if (info.family !== 'IPv4' || info.internal) continue
+      // 브로드캐스트 = (IP & mask) | (~mask)
+      const ipParts = info.address.split('.').map(Number)
+      const maskParts = info.netmask.split('.').map(Number)
+      const broadcast = ipParts.map((b, i) => (b & maskParts[i]) | (~maskParts[i] & 0xff)).join('.')
+      if (broadcast && broadcast !== info.address) addresses.push(broadcast)
+    }
+  }
+  // 고유값만 반환, 없으면 fallback
+  return [...new Set(addresses)]
+}
 
 const BROADCAST_PORT = 49155
 const BROADCAST_INTERVAL_MS = 4000
@@ -69,11 +89,16 @@ function startBroadcastDiscovery({ peerId, nickname, wsPort, filePort, addresses
     writePeerDebugLog('broadcastDiscovery.started', { port: BROADCAST_PORT, wsPort, peerId })
 
     // 즉시 한 번 전송 후 주기적으로 반복
+    const broadcastTargets = getSubnetBroadcastAddresses()
+    writePeerDebugLog('broadcastDiscovery.targets', { broadcastTargets })
+
     const sendBroadcast = () => {
       const packet = buildPacket({ peerId, nickname, wsPort, filePort, addresses })
-      broadcastSocket?.send(packet, BROADCAST_PORT, '255.255.255.255', (err) => {
-        if (err) writePeerDebugLog('broadcastDiscovery.sendError', { error: err.message })
-      })
+      for (const target of broadcastTargets) {
+        broadcastSocket?.send(packet, BROADCAST_PORT, target, (err) => {
+          if (err) writePeerDebugLog('broadcastDiscovery.sendError', { target, error: err.message })
+        })
+      }
     }
     sendBroadcast()
     broadcastTimer = setInterval(sendBroadcast, BROADCAST_INTERVAL_MS)
