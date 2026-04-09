@@ -13,6 +13,7 @@ const {
 } = require('./storage/profile')
 const { savePendingMessage, getPendingMessages, deletePendingMessage, deleteExpiredPendingMessages } = require('./storage/pendingMessages')
 const { startPeerDiscovery, stopPeerDiscovery, republishService, removePeerFromDiscovered } = require('./peer/discovery')
+const { startBroadcastDiscovery, stopBroadcastDiscovery } = require('./peer/broadcastDiscovery')
 const { buildPeerConnectHostCandidates, collectLocalIpv4Addresses, normalizeAdvertisedAddresses, selectPrimaryLocalIpv4 } = require('./peer/networkUtils')
 const { startWsServer, stopWsServer, closeAllServerClients, getServerClientPeerIds, sendMessageToServerPeer } = require('./peer/wsServer')
 const { connectToPeer, sendMessage, getConnections, disconnectAll, disconnectFromPeer } = require('./peer/wsClient')
@@ -811,6 +812,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
   // 로그아웃 — last_login_at 초기화 + 연결 종료
   ipcMain.handle('logout', async () => {
     clearLastLogin(database)
+    stopBroadcastDiscovery()
     await stopPeerDiscovery()
     disconnectAll()
     if (wsServerInfo) closeAllServerClients(wsServerInfo)
@@ -843,6 +845,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       wsPort: wsServerInfo.port,
       filePort: getFilePort(),
     })
+    stopBroadcastDiscovery()
     await stopPeerDiscovery()
     disconnectAll()
     // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
@@ -1049,6 +1052,22 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
           writePeerDebugLog('main.discovery.peerLeft', { leftPeerId, currentEpoch })
           sendToRenderer('peer-left', leftPeerId)
         }
+      },
+    })
+
+    // UDP 브로드캐스트 발견 — mDNS 멀티캐스트가 AP isolation으로 차단된 경우 보완
+    // 브로드캐스트는 대부분의 라우터가 클라이언트 간에도 허용 (DHCP 필요하므로)
+    startBroadcastDiscovery({
+      peerId: currentPeerId,
+      nickname: currentNickname,
+      wsPort: wsServerInfo.port,
+      filePort: getFilePort(),
+      addresses: getMyAdvertisedAddresses(),
+      onPeerFound: async (peerInfo) => {
+        if (currentEpoch !== discoveryEpoch) return
+        latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)
+        writePeerDebugLog('main.broadcastDiscovery.peerFound', { peerInfo, currentEpoch })
+        await connectDiscoveredPeer(peerInfo)
       },
     })
 
