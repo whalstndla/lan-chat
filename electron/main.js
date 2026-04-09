@@ -505,8 +505,8 @@ async function initApp() {
           filePort: getFilePort(),
         })
 
-        // 피어 캐시 저장 — IP와 포트를 DB에 기록해 mDNS 없이도 재연결 가능하게
-        if (database && message.host && message.wsPort) {
+        // 피어 캐시 저장 — IP와 포트를 DB에 기록해 mDNS 없이도 재연결 가능하게 (자기 자신 제외)
+        if (database && message.host && message.wsPort && message.fromId !== peerId) {
           try {
             savePeerCache(database, {
               peerId: message.fromId,
@@ -1037,6 +1037,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       filePort: getFilePort(),
       advertisedAddresses: getMyAdvertisedAddresses(),
       onPeerFound: async (peerInfo) => {
+        if (peerInfo.peerId === currentPeerId) return // 자기 자신 무시
         latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)
         writePeerDebugLog('main.discovery.peerFound', { peerInfo, currentEpoch })
         await connectDiscoveredPeer(peerInfo)
@@ -1065,6 +1066,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       addresses: getMyAdvertisedAddresses(),
       myAddresses: localAddressCandidates,
       onPeerFound: async (peerInfo) => {
+        if (peerInfo.peerId === currentPeerId) return // 자기 자신 무시
         if (currentEpoch !== discoveryEpoch) return
         latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)
         writePeerDebugLog('main.broadcastDiscovery.peerFound', { peerInfo, currentEpoch })
@@ -1075,11 +1077,14 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
     // 피어 캐시 재연결 — mDNS 없이도 마지막 접속 IP:포트로 바로 연결 시도
     // 네트워크가 mDNS를 단방향만 통과시키는 환경(AP isolation 등)에서도 동작
     if (database) {
+      // 혹시 자기 자신이 캐시에 저장돼 있으면 제거
+      try { deletePeerCache(database, currentPeerId) } catch {}
       setTimeout(() => {
         if (currentEpoch !== discoveryEpoch) return
         const cachedPeers = loadPeerCache(database)
         writePeerDebugLog('main.peerCache.reconnect', { count: cachedPeers.length, currentEpoch })
         for (const cached of cachedPeers) {
+          if (cached.peerId === currentPeerId) continue // 자기 자신 무시
           if (hasPeerConnection(cached.peerId)) continue
           if (peerConnectInFlightSet.has(cached.peerId)) continue
           // latestDiscoveredPeerInfoMap에 없으면 캐시 정보로 채워서 connectDiscoveredPeer 호출
