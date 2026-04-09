@@ -4,7 +4,7 @@ const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
 const { initDatabase, migrateDatabase } = require('./storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead: markMessagesAsReadDB, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache } = require('./storage/queries')
+const { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead: markMessagesAsReadDB, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache, savePeerCache, loadPeerCache, deletePeerCache } = require('./storage/queries')
 const {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
@@ -503,6 +503,23 @@ async function initApp() {
           wsPort: wsServerInfo?.port ?? 0,
           filePort: getFilePort(),
         })
+
+        // 피어 캐시 저장 — IP와 포트를 DB에 기록해 mDNS 없이도 재연결 가능하게
+        if (database && message.host && message.wsPort) {
+          try {
+            savePeerCache(database, {
+              peerId: message.fromId,
+              ip: message.host,
+              wsPort: message.wsPort,
+              nickname: message.nickname || '알 수 없음',
+            })
+            writePeerDebugLog('main.peerCache.saved', {
+              peerId: message.fromId,
+              ip: message.host,
+              wsPort: message.wsPort,
+            })
+          } catch { /* DB 저장 실패 시 무시 */ }
+        }
 
         // 상대방 프로필 이미지 URL 업데이트
         if (message.profileImageUrl !== undefined) {
@@ -1034,6 +1051,34 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
         }
       },
     })
+
+    // 피어 캐시 재연결 — mDNS 없이도 마지막 접속 IP:포트로 바로 연결 시도
+    // 네트워크가 mDNS를 단방향만 통과시키는 환경(AP isolation 등)에서도 동작
+    if (database) {
+      setTimeout(() => {
+        if (currentEpoch !== discoveryEpoch) return
+        const cachedPeers = loadPeerCache(database)
+        writePeerDebugLog('main.peerCache.reconnect', { count: cachedPeers.length, currentEpoch })
+        for (const cached of cachedPeers) {
+          if (hasPeerConnection(cached.peerId)) continue
+          if (peerConnectInFlightSet.has(cached.peerId)) continue
+          // latestDiscoveredPeerInfoMap에 없으면 캐시 정보로 채워서 connectDiscoveredPeer 호출
+          if (!latestDiscoveredPeerInfoMap.has(cached.peerId)) {
+            latestDiscoveredPeerInfoMap.set(cached.peerId, {
+              peerId: cached.peerId,
+              nickname: cached.nickname,
+              host: cached.ip,
+              addresses: [cached.ip],
+              advertisedAddresses: [cached.ip],
+              refererAddress: null,
+              wsPort: cached.wsPort,
+              filePort: 0,
+            })
+          }
+          connectDiscoveredPeer(latestDiscoveredPeerInfoMap.get(cached.peerId))
+        }
+      }, 1000) // DNS-SD보다 조금 늦게 시작 (mDNS가 먼저 성공하면 캐시 불필요)
+    }
 
     // handshake 보완 스윕 — 공개키 미교환 피어에게 key-exchange 재전송
     // outbound(내가 연결) + inbound(상대가 서버에 연결) 양쪽 모두 대상

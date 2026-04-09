@@ -93,6 +93,17 @@ function migrateDatabase(db) {
     CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id);
   `)
 
+  // 피어 캐시 — mDNS 없이도 마지막으로 연결된 피어에 재연결하기 위한 저장소
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS peer_cache (
+      peer_id   TEXT PRIMARY KEY,
+      ip        TEXT NOT NULL,
+      ws_port   INTEGER NOT NULL,
+      nickname  TEXT NOT NULL DEFAULT '',
+      last_seen INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
+    );
+  `)
+
   // FTS5 전문 검색 (글로벌 메시지만 — DM은 암호화되어 인덱싱 불가)
   try {
     db.exec(`

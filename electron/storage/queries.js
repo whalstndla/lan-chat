@@ -166,4 +166,32 @@ function getFileCache(db, messageId) {
   return row?.cached_file_path || null
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache }
+// 피어 캐시 저장 — key-exchange 성공 시 IP·포트 기록 (mDNS 없이도 재연결 가능)
+function savePeerCache(db, { peerId, ip, wsPort, nickname }) {
+  db.prepare(`
+    INSERT INTO peer_cache (peer_id, ip, ws_port, nickname, last_seen)
+    VALUES (@peerId, @ip, @wsPort, @nickname, strftime('%s','now') * 1000)
+    ON CONFLICT(peer_id) DO UPDATE SET
+      ip = excluded.ip,
+      ws_port = excluded.ws_port,
+      nickname = excluded.nickname,
+      last_seen = excluded.last_seen
+  `).run({ peerId, ip, wsPort, nickname })
+}
+
+// 피어 캐시 전체 조회 (최근 접속 순, 최대 20개)
+function loadPeerCache(db) {
+  return db.prepare(`
+    SELECT peer_id AS peerId, ip, ws_port AS wsPort, nickname
+    FROM peer_cache
+    ORDER BY last_seen DESC
+    LIMIT 20
+  `).all()
+}
+
+// 특정 피어 캐시 삭제
+function deletePeerCache(db, peerId) {
+  db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
+}
+
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache, savePeerCache, loadPeerCache, deletePeerCache }
