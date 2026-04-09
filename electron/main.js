@@ -890,6 +890,7 @@ function registerIpcHandlers(currentPeerId, defaultNickname) {
       if (peerConnectInFlightSet.has(peerInfo.peerId)) return
 
       peerConnectInFlightSet.add(peerInfo.peerId)
+      sendToRenderer('peer-connecting', peerInfo.peerId)
       try {
         const latestPeerInfo = latestDiscoveredPeerInfoMap.get(peerInfo.peerId) || peerInfo
         const connectHostCandidates = buildPeerConnectHostCandidates(latestPeerInfo)

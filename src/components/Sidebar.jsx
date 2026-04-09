@@ -1,5 +1,5 @@
 // src/components/Sidebar.jsx
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
@@ -44,10 +44,49 @@ function PeerAvatar({ peer, isOnline }) {
   )
 }
 
+// 연결 상태 표시 바
+function ConnectionStatusBar({ onlinePeers, connectingCount }) {
+  if (onlinePeers.length > 0) {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-vsc-border">
+        <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+        <span className="text-xs text-vsc-muted">{onlinePeers.length}명 연결됨</span>
+      </div>
+    )
+  }
+  if (connectingCount > 0) {
+    return (
+      <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-vsc-border">
+        <span className="w-2 h-2 rounded-full bg-yellow-400 shrink-0 animate-pulse" />
+        <span className="text-xs text-vsc-muted">연결 시도 중...</span>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center gap-1.5 px-3 py-1.5 border-t border-vsc-border">
+      <span className="w-2 h-2 rounded-full bg-vsc-muted shrink-0 animate-pulse" />
+      <span className="text-xs text-vsc-muted">피어 탐색 중...</span>
+    </div>
+  )
+}
+
 export default function Sidebar({ onShowPatchNotes }) {
   const [collapsed, setCollapsed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [connectingCount, setConnectingCount] = useState(0)
   const onlinePeers = usePeerStore(state => state.onlinePeers)
+
+  // peer-connecting 이벤트로 연결 시도 중 상태 추적
+  useEffect(() => {
+    const handleConnecting = () => setConnectingCount(c => c + 1)
+    window.electronAPI.onPeerConnecting(handleConnecting)
+    return () => {}
+  }, [])
+
+  // 연결 완료/해제 시 connectingCount 리셋
+  useEffect(() => {
+    setConnectingCount(0)
+  }, [onlinePeers.length])
   const pastDMPeers = usePeerStore(state => state.pastDMPeers)
   const myStatusType = useUserStore(state => state.myStatusType)
 
@@ -186,6 +225,9 @@ export default function Sidebar({ onShowPatchNotes }) {
               })
             )}
           </div>
+
+          {/* 연결 상태 바 */}
+          <ConnectionStatusBar onlinePeers={onlinePeers} connectingCount={connectingCount} />
 
           {/* 하단 영역: 상태 선택 + 설정 버튼 */}
           <div className="px-3 py-2 border-t border-vsc-border space-y-1.5">
