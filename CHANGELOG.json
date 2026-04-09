@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.7.38",
+    "date": "2026-04-09",
+    "changes": [
+      { "type": "fix", "text": "AP isolation 환경에서 상대방 이미지 안 보이는 문제 수정 — HTTP 실패 시 WebSocket으로 파일 직접 전달" }
+    ]
+  },
+  {
     "version": "0.7.37",
     "date": "2026-04-09",
     "changes": [
