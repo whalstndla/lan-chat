@@ -14,10 +14,10 @@ describe('Replay Attack 방어', () => {
     }
   })
 
-  it('동일한 메시지 ID를 두 번 보내면 첫 번째만 onMessage에 도달함', (done) => {
+  it('동일한 메시지 ID를 두 번 보내면 첫 번째만 onMessage에 도달함', async () => {
     let receiveCount = 0
 
-    serverInfo = startWsServer({
+    serverInfo = await startWsServer({
       onMessage: () => {
         receiveCount++
       },
@@ -33,24 +33,26 @@ describe('Replay Attack 방어', () => {
       timestamp: Date.now(),
     }
 
-    const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
-    client.on('open', () => {
-      // 동일한 메시지를 두 번 연속 전송
-      client.send(JSON.stringify(duplicateMessage))
-      client.send(JSON.stringify(duplicateMessage))
+    await new Promise((resolve) => {
+      const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
+      client.on('open', () => {
+        // 동일한 메시지를 두 번 연속 전송
+        client.send(JSON.stringify(duplicateMessage))
+        client.send(JSON.stringify(duplicateMessage))
 
-      // 두 메시지가 처리될 충분한 시간 대기 후 카운트 확인
-      setTimeout(() => {
-        expect(receiveCount).toBe(1)
-        done()
-      }, 200)
+        // 두 메시지가 처리될 충분한 시간 대기 후 카운트 확인
+        setTimeout(() => {
+          expect(receiveCount).toBe(1)
+          resolve()
+        }, 200)
+      })
     })
   })
 
-  it('서로 다른 메시지 ID는 모두 onMessage에 도달함', (done) => {
+  it('서로 다른 메시지 ID는 모두 onMessage에 도달함', async () => {
     let receiveCount = 0
 
-    serverInfo = startWsServer({
+    serverInfo = await startWsServer({
       onMessage: () => {
         receiveCount++
       },
@@ -76,22 +78,24 @@ describe('Replay Attack 방어', () => {
       timestamp: Date.now(),
     }
 
-    const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
-    client.on('open', () => {
-      client.send(JSON.stringify(firstMessage))
-      client.send(JSON.stringify(secondMessage))
+    await new Promise((resolve) => {
+      const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
+      client.on('open', () => {
+        client.send(JSON.stringify(firstMessage))
+        client.send(JSON.stringify(secondMessage))
 
-      setTimeout(() => {
-        expect(receiveCount).toBe(2)
-        done()
-      }, 200)
+        setTimeout(() => {
+          expect(receiveCount).toBe(2)
+          resolve()
+        }, 200)
+      })
     })
   })
 
-  it('id 필드가 없는 메시지는 중복 검사 없이 매번 onMessage에 도달함', (done) => {
+  it('id 필드가 없는 메시지는 중복 검사 없이 매번 onMessage에 도달함', async () => {
     let receiveCount = 0
 
-    serverInfo = startWsServer({
+    serverInfo = await startWsServer({
       onMessage: () => {
         receiveCount++
       },
@@ -107,15 +111,17 @@ describe('Replay Attack 방어', () => {
       timestamp: Date.now(),
     }
 
-    const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
-    client.on('open', () => {
-      client.send(JSON.stringify(messageWithoutId))
-      client.send(JSON.stringify(messageWithoutId))
+    await new Promise((resolve) => {
+      const client = new WebSocket(`ws://localhost:${serverInfo.port}`)
+      client.on('open', () => {
+        client.send(JSON.stringify(messageWithoutId))
+        client.send(JSON.stringify(messageWithoutId))
 
-      setTimeout(() => {
-        expect(receiveCount).toBe(2)
-        done()
-      }, 200)
+        setTimeout(() => {
+          expect(receiveCount).toBe(2)
+          resolve()
+        }, 200)
+      })
     })
   })
 })
