@@ -34,31 +34,32 @@ describe('WebSocket 클라이언트', () => {
     done()
   })
 
-  it('피어에 연결하고 메시지를 전송함', (done) => {
+  it('피어에 연결하고 메시지를 전송함', async () => {
     const testMessage = {
       type: 'message', id: 'msg1', from: '홍길동', fromId: 'peer1',
       content: '안녕', contentType: 'text', timestamp: Date.now()
     }
 
-    serverInfo = startWsServer({
-      onMessage: (received) => {
-        expect(received.content).toBe('안녕')
-        done()
-      }
-    })
+    await new Promise(async (resolve, reject) => {
+      serverInfo = await startWsServer({
+        onMessage: (received) => {
+          expect(received.content).toBe('안녕')
+          resolve()
+        }
+      })
 
-    connectToPeer({ peerId: 'peer-remote', host: 'localhost', wsPort: serverInfo.port })
-      .then(() => sendMessage('peer-remote', testMessage))
+      connectToPeer({ peerId: 'peer-remote', host: 'localhost', wsPort: serverInfo.port })
+        .then(() => sendMessage('peer-remote', testMessage))
+        .catch(reject)
+    })
   })
 
-  it('연결 후 연결목록에 포함됨', (done) => {
-    serverInfo = startWsServer({ onMessage: () => {} })
+  it('연결 후 연결목록에 포함됨', async () => {
+    serverInfo = await startWsServer({ onMessage: () => {} })
 
-    connectToPeer({ peerId: 'peer-x', host: 'localhost', wsPort: serverInfo.port })
-      .then(() => {
-        expect(getConnections()).toContain('peer-x')
-        done()
-      })
+    await connectToPeer({ peerId: 'peer-x', host: 'localhost', wsPort: serverInfo.port })
+
+    expect(getConnections()).toContain('peer-x')
   })
 
   it('연결 타임아웃 이후 동일 peerId로 재연결 가능함', async () => {
@@ -81,7 +82,7 @@ describe('WebSocket 클라이언트', () => {
       })
     ).rejects.toThrow()
 
-    serverInfo = startWsServer({ onMessage: () => {} })
+    serverInfo = await startWsServer({ onMessage: () => {} })
     await connectToPeer({
       peerId: 'peer-timeout',
       host: 'localhost',

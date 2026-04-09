@@ -737,8 +737,8 @@ async function initApp() {
     if (message.fileUrl) cacheReceivedFile(message.id, message.fileUrl, message.fileName)
   }
 
-  // WebSocket 서버 시작 (공용 핸들러 사용)
-  wsServerInfo = startWsServer({ onMessage: handleIncomingMessage })
+  // WebSocket 서버 시작 (공용 핸들러 사용) — 고정 포트 범위 49152~49161 우선 시도
+  wsServerInfo = await startWsServer({ onMessage: handleIncomingMessage })
   writePeerDebugLog('main.wsServer.ready', { wsPort: wsServerInfo.port })
 }
 
