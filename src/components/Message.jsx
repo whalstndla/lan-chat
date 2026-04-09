@@ -70,9 +70,10 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
     return extractFirstUrl(message.content)
   }, [message.content, contentType])
 
-  // 캐시 URL 폴백 — 원본 URL 로드 실패 시 로컬 캐시로 전환
-  const [resolvedFileUrl, setResolvedFileUrl] = useState(fileUrl)
-  useEffect(() => { setResolvedFileUrl(fileUrl) }, [fileUrl])
+  // 캐시 URL 폴백 — 원본 URL 로드 실패 시 로컬 캐시로 전환 (WebSocket 수신 포함)
+  const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[message.id])
+  const [resolvedFileUrl, setResolvedFileUrl] = useState(wsFileCachedUrl || fileUrl)
+  useEffect(() => { setResolvedFileUrl(wsFileCachedUrl || fileUrl) }, [fileUrl, wsFileCachedUrl])
 
   async function handleFileError() {
     const cachedUrl = await window.electronAPI.getCachedFileUrl(message.id)

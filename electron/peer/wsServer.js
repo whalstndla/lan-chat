@@ -6,6 +6,7 @@ const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 const ALLOWED_MESSAGE_TYPES = [
   'key-exchange', 'typing', 'delete-message', 'nickname-changed',
   'read-receipt', 'message', 'dm', 'reaction', 'edit-message', 'status-changed',
+  'file-request', 'file-data',
 ]
 
 // IP별 연결 수 추적 (DoS 방지)

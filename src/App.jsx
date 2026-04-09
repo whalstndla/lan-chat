@@ -197,6 +197,11 @@ export default function App() {
         useChatStore.getState().setTyping(data.fromId, data.from, data.to || null)
       })
 
+      // 파일 캐시 완료 — WebSocket으로 수신한 파일이 로컬에 저장됨
+      window.electronAPI.onFileCached(({ messageId, cachedPath }) => {
+        useChatStore.getState().setCachedFileUrl(messageId, `file://${cachedPath}`)
+      })
+
       // 피어 닉네임 변경 이벤트
       window.electronAPI.onPeerNicknameChanged(({ peerId: changedPeerId, nickname: newNickname }) => {
         usePeerStore.getState().updatePeerNickname(changedPeerId, newNickname)

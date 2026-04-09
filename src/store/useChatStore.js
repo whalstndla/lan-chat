@@ -29,6 +29,7 @@ const useChatStore = create((set, get) => ({
   unreadCounts: {}, // { peerId: 숫자 }
   typingUsers: {}, // { peerId: { nickname, timestamp } }
   mutedRooms: loadMutedRooms(), // { roomKey: boolean } — 채팅방별 알림 뮤트 상태
+  cachedFileUrls: {}, // { messageId: 'file://...' } — WebSocket으로 수신한 파일 캐시 경로
 
   // 채팅방 뮤트 토글 (roomKey: 'global' 또는 peerId)
   toggleRoomMute: (roomKey) =>
@@ -97,6 +98,11 @@ const useChatStore = create((set, get) => ({
         ...state.unreadCounts,
         [peerId]: 0,
       },
+    })),
+
+  setCachedFileUrl: (messageId, localPath) =>
+    set((state) => ({
+      cachedFileUrls: { ...state.cachedFileUrls, [messageId]: localPath },
     })),
 
   setTyping: (peerId, nickname, to) =>

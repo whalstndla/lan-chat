@@ -86,6 +86,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-connecting')
     ipcRenderer.on('peer-connecting', (_, peerId) => callback(peerId))
   },
+  onFileCached: (callback) => {
+    ipcRenderer.removeAllListeners('file-cached')
+    ipcRenderer.on('file-cached', (_, data) => callback(data))
+  },
   subscribeToPeerLeft: (callback) => {
     ipcRenderer.removeAllListeners('peer-left')
     ipcRenderer.on('peer-left', (_, peerId) => callback(peerId))
@@ -131,6 +135,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-profile-updated')
     ipcRenderer.removeAllListeners('pending-messages-flushed')
     ipcRenderer.removeAllListeners('peer-connecting')
+    ipcRenderer.removeAllListeners('file-cached')
     ipcRenderer.removeAllListeners('read-receipt')
     ipcRenderer.removeAllListeners('navigate-to-room')
     ipcRenderer.removeAllListeners('reaction-updated')

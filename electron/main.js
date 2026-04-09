@@ -319,8 +319,8 @@ function buildMyProfileImageUrl() {
   return `http://${localIP}:${getFilePort()}/profile/${profile.profile_image}`
 }
 
-// 수신된 파일을 로컬 캐시 디렉토리에 저장하고 DB에 경로 기록
-function cacheReceivedFile(messageId, fileUrl, fileName) {
+// 수신된 파일을 로컬 캐시에 저장 — HTTP 실패 시 WebSocket으로 fallback
+function cacheReceivedFile(messageId, fileUrl, fileName, fromId) {
   if (!fileUrl || !fileName) return
   const cacheDir = path.join(appDataPath, 'file_cache')
   if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
@@ -328,16 +328,45 @@ function cacheReceivedFile(messageId, fileUrl, fileName) {
   const cachedFileName = `${messageId}${ext}`
   const cachedPath = path.join(cacheDir, cachedFileName)
 
+  // 이미 캐시됐으면 스킵
+  if (fs.existsSync(cachedPath)) {
+    try { saveFileCache(database, { messageId, cachedPath }) } catch {}
+    return
+  }
+
   const http = require('http')
   const file = fs.createWriteStream(cachedPath)
   http.get(fileUrl, (response) => {
+    if (response.statusCode !== 200) {
+      file.close()
+      try { fs.unlinkSync(cachedPath) } catch {}
+      // HTTP 실패 → WebSocket으로 파일 요청
+      requestFileViaWebSocket(messageId, fileName, fromId)
+      return
+    }
     response.pipe(file)
     file.on('finish', () => {
       file.close()
-      try { saveFileCache(database, { messageId, cachedPath }) } catch { /* DB 저장 실패 시 무시 */ }
+      try { saveFileCache(database, { messageId, cachedPath }) } catch {}
+      sendToRenderer('file-cached', { messageId, cachedPath })
     })
   }).on('error', () => {
-    try { fs.unlinkSync(cachedPath) } catch { /* 파일 삭제 실패 시 무시 */ }
+    file.close()
+    try { fs.unlinkSync(cachedPath) } catch {}
+    // HTTP 오류 → WebSocket으로 파일 요청 (AP isolation 대응)
+    requestFileViaWebSocket(messageId, fileName, fromId)
+  })
+}
+
+// WebSocket을 통해 파일 전송 요청 — HTTP가 막힌 네트워크 환경용
+function requestFileViaWebSocket(messageId, fileName, fromId) {
+  if (!fromId) return
+  writePeerDebugLog('main.fileTransfer.request', { messageId, fileName, fromId })
+  sendPeerMessage(fromId, {
+    type: 'file-request',
+    fromId: peerId,
+    messageId,
+    fileName,
   })
 }
 
@@ -405,6 +434,52 @@ async function initApp() {
   handleIncomingMessage = (message, reply) => {
     // DB가 초기화되지 않은 경우 메시지 수신 불가
     if (!database) return
+
+    // 파일 전송 요청 — HTTP가 막힌 환경(AP isolation)에서 WebSocket으로 파일 직접 전달
+    if (message.type === 'file-request') {
+      const { messageId, fileName } = message
+      const filePath = path.join(appDataPath, 'files', fileName)
+      if (!fileName || !fs.existsSync(filePath)) {
+        writePeerDebugLog('main.fileTransfer.notFound', { messageId, fileName })
+        return
+      }
+      try {
+        const data = fs.readFileSync(filePath).toString('base64')
+        const ext = path.extname(fileName)
+        sendPeerMessage(message.fromId, {
+          type: 'file-data',
+          fromId: peerId,
+          messageId,
+          fileName,
+          ext,
+          data,
+        })
+        writePeerDebugLog('main.fileTransfer.sent', { messageId, fileName, toId: message.fromId })
+      } catch (err) {
+        writePeerDebugLog('main.fileTransfer.sendError', { messageId, error: err.message })
+      }
+      return
+    }
+
+    // 파일 데이터 수신 — WebSocket 파일 전송 응답 처리
+    if (message.type === 'file-data') {
+      const { messageId, fileName, data } = message
+      if (!messageId || !fileName || !data) return
+      try {
+        const cacheDir = path.join(appDataPath, 'file_cache')
+        if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true })
+        const ext = path.extname(fileName)
+        const cachedFileName = `${messageId}${ext}`
+        const cachedPath = path.join(cacheDir, cachedFileName)
+        fs.writeFileSync(cachedPath, Buffer.from(data, 'base64'))
+        try { saveFileCache(database, { messageId, cachedPath }) } catch {}
+        sendToRenderer('file-cached', { messageId, cachedPath })
+        writePeerDebugLog('main.fileTransfer.received', { messageId, fileName, cachedPath })
+      } catch (err) {
+        writePeerDebugLog('main.fileTransfer.receiveError', { messageId, error: err.message })
+      }
+      return
+    }
 
     // 타이핑 이벤트 — DB 저장 없이 렌더러로 전달만
     if (message.type === 'typing') {
@@ -703,7 +778,7 @@ async function initApp() {
           fileName: decryptedPayload.fileName,
         })
         // DM 파일 메시지면 로컬 캐시에 저장
-        if (decryptedPayload.fileUrl) cacheReceivedFile(message.id, decryptedPayload.fileUrl, decryptedPayload.fileName)
+        if (decryptedPayload.fileUrl) cacheReceivedFile(message.id, decryptedPayload.fileUrl, decryptedPayload.fileName, message.fromId)
       } catch (err) {
         console.error(`[DM 수신] 복호화 실패: msgId=${message.id}, fromId=${message.fromId}`, err.message)
         // 복호화 실패해도 암호문은 DB에 저장 (나중에 재복호화 가능)
@@ -752,7 +827,7 @@ async function initApp() {
 
     sendToRenderer('message-received', message)
     // 파일 메시지면 로컬 캐시에 저장
-    if (message.fileUrl) cacheReceivedFile(message.id, message.fileUrl, message.fileName)
+    if (message.fileUrl) cacheReceivedFile(message.id, message.fileUrl, message.fileName, message.fromId)
   }
 
   // WebSocket 서버 시작 (공용 핸들러 사용) — 고정 포트 범위 49152~49161 우선 시도
