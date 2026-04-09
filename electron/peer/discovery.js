@@ -272,8 +272,15 @@ function startDnsSdBrowseMac(myPeerId, onPeerFound, onPeerLeft) {
         const info = dnsSdInstanceMap.get(instanceName)
         dnsSdInstanceMap.delete(instanceName)
         if (info?.peerId) {
-          writePeerDebugLog('discovery.dnsSd.left', { peerId: info.peerId, instanceName })
-          onPeerLeft(info.peerId)
+          // 같은 peerId의 다른 서비스(새 세션)가 아직 활성이면 onPeerLeft 호출 금지
+          // — 재시작 시 구 서비스 Rmv와 신 서비스 Add가 겹치는 경우 재연결 루프가 끊기는 버그 방지
+          const hasOtherActiveService = [...dnsSdInstanceMap.values()].some(v => v.peerId === info.peerId)
+          if (hasOtherActiveService) {
+            writePeerDebugLog('discovery.dnsSd.rmvIgnored', { peerId: info.peerId, instanceName, reason: 'other service active' })
+          } else {
+            writePeerDebugLog('discovery.dnsSd.left', { peerId: info.peerId, instanceName })
+            onPeerLeft(info.peerId)
+          }
         }
       }
     })
