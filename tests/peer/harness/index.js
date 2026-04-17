@@ -175,6 +175,15 @@ async function createNode({ peerId, nickname }) {
         : [...rendererEvents],
     clearRendererEvents: () => { rendererEvents.length = 0 },
     callIpc,
+    // 격리된 wsClient 모듈의 현재 outbound 연결 peerId 목록 (OPEN 상태만)
+    getOutboundConnections: () => wsClientModule.getConnections(),
+    hasOutboundConnection: (peerId) => wsClientModule.getConnections().includes(peerId),
+    // 격리된 wsServer 모듈의 현재 inbound 연결 peerId 목록
+    getInboundConnections: () => wsServerModule.getServerClientPeerIds(wsServerInfo),
+    // 전체 연결 상태 — ipcHandlers/peer.js의 hasPeerConnection 와 동일 의미
+    hasAnyConnection: (peerId) =>
+      wsClientModule.getConnections().includes(peerId) ||
+      wsServerModule.getServerClientPeerIds(wsServerInfo).includes(peerId),
     async shutdown() {
       // discoveryEpoch를 증가시켜 ipcHandlers/peer.js 내부 setTimeout 콜백들이
       // `if (currentEpoch !== ctx.state.discoveryEpoch) return` 로 조기 종료되게 함.
@@ -193,6 +202,9 @@ async function createNode({ peerId, nickname }) {
         if (fakeBroadcast.isStarted()) fakeBroadcast.stopBroadcastDiscovery()
       } catch { /* 무시 */ }
       try { if (wsClientModule) wsClientModule.disconnectAll() } catch { /* 무시 */ }
+      // 기존 inbound 소켓들을 terminate — 상대방에게 즉시 close 이벤트 전파.
+      // server.close()만 호출하면 기존 연결은 유지되어 상대방 outbound 가 계속 OPEN 으로 남음.
+      try { if (wsServerModule && wsServerInfo) wsServerModule.closeAllServerClients(wsServerInfo) } catch { /* 무시 */ }
       try { if (wsServerModule && wsServerInfo) wsServerModule.stopWsServer(wsServerInfo) } catch { /* 무시 */ }
       try { if (db) db.close() } catch { /* 무시 */ }
       // DB가 먼저 close되지 않도록 약간 대기 — 이미 epoch 무효화로 대부분 안전
