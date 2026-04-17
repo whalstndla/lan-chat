@@ -2,6 +2,7 @@
 // 피어 발견 및 연결 관련 IPC 핸들러
 
 const { ipcMain } = require('electron')
+const { randomUUID } = require('crypto')
 const { startPeerDiscovery, stopPeerDiscovery, removePeerFromDiscovered } = require('../peer/discovery')
 const { startBroadcastDiscovery, stopBroadcastDiscovery } = require('../peer/broadcastDiscovery')
 const { buildPeerConnectHostCandidates } = require('../peer/networkUtils')
@@ -10,6 +11,7 @@ const { closeAllServerClients } = require('../peer/wsServer')
 const { getFilePort } = require('../peer/fileServer')
 const { loadPeerCache, deletePeerCache } = require('../storage/queries')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
+const { PeerManager } = require('../peer/manager')
 const {
   sendToRenderer,
   getMyAdvertisedAddresses,
@@ -50,6 +52,15 @@ function registerPeerHandlers(ctx) {
       ctx.state.discoveryEpoch++
       const currentEpoch = ctx.state.discoveryEpoch
       const currentNickname = getCurrentNicknameSafely(ctx)
+
+      // Phase 1b: PeerManager shadow mode 초기화.
+      // mySessionId 는 앱 프로세스 수명 동안 고정 — 한 번만 생성.
+      if (!ctx.state.mySessionId) ctx.state.mySessionId = randomUUID()
+      // 매 start-peer-discovery 마다 새 Manager 인스턴스 (세대 분리)
+      ctx.state.peerManager = new PeerManager({
+        myPeerId: ctx.state.peerId,
+        mySessionId: ctx.state.mySessionId,
+      })
       const INITIAL_CONNECT_MAX_RETRIES = 3
       const INITIAL_CONNECT_RETRY_DELAY = 700
       const INITIAL_CONNECT_TIMEOUT = 1500
@@ -232,6 +243,8 @@ function registerPeerHandlers(ctx) {
         onPeerFound: async (peerInfo) => {
           if (peerInfo.peerId === ctx.state.peerId) return // 자기 자신 무시
           ctx.state.latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)
+          // Phase 1b shadow mode: PeerManager 에도 알림
+          if (ctx.state.peerManager) ctx.state.peerManager.handleDiscovery('mdns', peerInfo)
           writePeerDebugLog('main.discovery.peerFound', { peerInfo, currentEpoch })
           await connectDiscoveredPeer(peerInfo)
         },
@@ -243,6 +256,8 @@ function registerPeerHandlers(ctx) {
           ctx.state.latestDiscoveredPeerInfoMap.delete(leftPeerId)
           // active outbound connection이 있으면 peer-left를 보내지 않음
           if (!hasPeerConnection(ctx, leftPeerId)) {
+            // Phase 1b shadow mode: PeerManager 에도 알림
+            if (ctx.state.peerManager) ctx.state.peerManager.handleLost(leftPeerId)
             writePeerDebugLog('main.discovery.peerLeft', { leftPeerId, currentEpoch })
             sendToRenderer(ctx, 'peer-left', leftPeerId)
           }
@@ -261,6 +276,8 @@ function registerPeerHandlers(ctx) {
           if (peerInfo.peerId === ctx.state.peerId) return // 자기 자신 무시
           if (currentEpoch !== ctx.state.discoveryEpoch) return
           ctx.state.latestDiscoveredPeerInfoMap.set(peerInfo.peerId, peerInfo)
+          // Phase 1b shadow mode
+          if (ctx.state.peerManager) ctx.state.peerManager.handleDiscovery('broadcast', peerInfo)
           writePeerDebugLog('main.broadcastDiscovery.peerFound', { peerInfo, currentEpoch })
           await connectDiscoveredPeer(peerInfo)
         },
@@ -291,6 +308,8 @@ function registerPeerHandlers(ctx) {
                 filePort: 0,
               })
             }
+            // Phase 1b shadow mode
+            if (ctx.state.peerManager) ctx.state.peerManager.handleDiscovery('cache', ctx.state.latestDiscoveredPeerInfoMap.get(cached.peerId))
             connectDiscoveredPeer(ctx.state.latestDiscoveredPeerInfoMap.get(cached.peerId))
           }
         }, 1000) // DNS-SD보다 조금 늦게 시작 (mDNS가 먼저 성공하면 캐시 불필요)

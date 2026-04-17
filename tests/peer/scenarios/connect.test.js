@@ -39,5 +39,17 @@ describe('Scenario 1: 연결 + key-exchange', () => {
     const bDiscovered = nodeB.getRendererEvents('peer-discovered')
     expect(aDiscovered.some(e => e.data.peerId === 'peer-b')).toBe(true)
     expect(bDiscovered.some(e => e.data.peerId === 'peer-a')).toBe(true)
+
+    // Phase 1b shadow mode: PeerManager 가 기존 ctx.state 와 동기화되어 있어야 함
+    const aSession = nodeA.ctx.state.peerManager.getSession('peer-b')
+    expect(aSession).toBeDefined()
+    expect(aSession.state).toBe('READY')
+    expect(aSession.crypto.publicKey).toBe(nodeB.ctx.state.myPublicKeyBase64)
+    expect(aSession.discovered.sources.has('mdns')).toBe(true)
+
+    const bSession = nodeB.ctx.state.peerManager.getSession('peer-a')
+    expect(bSession).toBeDefined()
+    expect(bSession.state).toBe('READY')
+    expect(bSession.crypto.publicKey).toBe(nodeA.ctx.state.myPublicKeyBase64)
   })
 })

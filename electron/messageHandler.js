@@ -13,6 +13,7 @@ const { normalizeAdvertisedAddresses, buildPeerConnectHostCandidates } = require
 const { removePeerFromDiscovered } = require('./peer/discovery')
 const { getFilePort } = require('./peer/fileServer')
 const { writePeerDebugLog } = require('./utils/peerDebugLogger')
+const { adaptV1KeyExchangeToHello } = require('./peer/wire')
 const {
   sendToRenderer,
   incrementBadge,
@@ -166,6 +167,12 @@ function createIncomingMessageHandler(ctx) {
         const publicKeyObj = importPublicKey(message.publicKey)
         // 상대 공개키 저장 (reply 성공/실패와 무관하게 항상 저장)
         ctx.state.peerPublicKeyMap.set(message.fromId, publicKeyObj)
+
+        // Phase 1b shadow mode: PeerManager 에도 hello(=adapted v1 key-exchange) 전달
+        if (ctx.state.peerManager) {
+          const adapted = adaptV1KeyExchangeToHello(message)
+          if (adapted.ok) ctx.state.peerManager.handleRemoteHello(adapted.hello)
+        }
 
         const currentNicknameForReply = getProfile(ctx.state.database)?.nickname || ''
         // reply 시도 — 실패해도 역방향 연결에서 key-exchange를 다시 교환하므로 계속 진행

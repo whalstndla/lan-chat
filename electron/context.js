@@ -26,6 +26,12 @@ function createAppContext(config) {
       peerConnectInFlightSet: new Set(),
       peerConnectRetryTimerMap: new Map(),
       latestDiscoveredPeerInfoMap: new Map(),
+      // Phase 1b: PeerManager shadow mode 인스턴스.
+      // start-peer-discovery 시점에 생성되며, 기존 로직과 병행 실행하는 관찰자.
+      // Phase 1c 에서 기존 ctx.state.peer* 를 대체할 예정.
+      peerManager: null,
+      // 현재 세션 ID — 앱 실행 중 고정 (프로세스 수명 동안)
+      mySessionId: null,
     },
   }
 }
