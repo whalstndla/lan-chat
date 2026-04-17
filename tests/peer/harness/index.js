@@ -62,12 +62,10 @@ async function createNode({ peerId, nickname }) {
         const wsClient = require('../../../electron/peer/wsClient')
         const { createIncomingMessageHandler } = require('../../../electron/messageHandler')
         const { loadOrCreateKeyPair, exportPublicKey } = require('../../../electron/crypto/keyManager')
-        const appUtils = require('../../../electron/utils/appUtils')
 
-        // sendToRenderer 가로채기 — 렌더러 이벤트를 테스트에서 조회 가능하게 함
-        appUtils.sendToRenderer = (_ctx, channel, data) => {
-          rendererEvents.push({ channel, data, at: Date.now() })
-        }
+        // messageHandler.js 등 여러 파일이 destructuring 으로 sendToRenderer 를 import 하므로
+        // appUtils.sendToRenderer 를 몽키패치해도 효과 없음 (참조가 이미 복사됨).
+        // 대신 실제 sendToRenderer 구현이 호출하는 mainWindow.webContents.send 를 intercept 한다.
 
         // 본 하네스에서 필요한 IPC 핸들러만 선택적으로 등록 (electron-updater 회피)
         const { registerPeerHandlers } = require('../../../electron/ipcHandlers/peer')
@@ -103,11 +101,17 @@ async function createNode({ peerId, nickname }) {
         // 메시지 핸들러
         ctx.state.handleIncomingMessage = createIncomingMessageHandler(ctx)
 
-        // mainWindow 스텁 — focus/destroyed 체크 통과
+        // mainWindow 스텁 — webContents.send 를 renderer 이벤트 수집기로 만든다.
+        // sendToRenderer(ctx, channel, data) 의 종착지가 여기.
         ctx.state.mainWindow = {
           isDestroyed: () => false,
           isFocused: () => true,
-          webContents: { isDestroyed: () => false, send: () => {} },
+          webContents: {
+            isDestroyed: () => false,
+            send: (channel, data) => {
+              rendererEvents.push({ channel, data, at: Date.now() })
+            },
+          },
           show: () => {},
           focus: () => {},
           hide: () => {},
