@@ -66,3 +66,47 @@ describe('wire protocol v2', () => {
     expect(WIRE_VERSION).toBe(2)
   })
 })
+
+describe('adaptV1KeyExchangeToHello', () => {
+  const { adaptV1KeyExchangeToHello } = require('../../electron/peer/wire')
+
+  it('v1 key-exchange 를 hello 로 변환한다', () => {
+    const v1 = {
+      type: 'key-exchange',
+      fromId: 'peer-z',
+      publicKey: 'ZZZZ',
+      nickname: '지',
+      wsPort: 49154,
+      filePort: 49155,
+      addresses: ['10.0.0.5'],
+      profileImageUrl: 'http://foo/profile.png',
+    }
+    const result = adaptV1KeyExchangeToHello(v1, 'fake-session-1')
+    expect(result.ok).toBe(true)
+    expect(result.hello.peerId).toBe('peer-z')
+    expect(result.hello.sessionId).toBe('fake-session-1')
+    expect(result.hello.publicKey).toBe('ZZZZ')
+    expect(result.hello.wsPort).toBe(49154)
+    expect(result.hello.addresses).toEqual(['10.0.0.5'])
+    expect(result.hello.profileImageUrl).toBe('http://foo/profile.png')
+    expect(result.hello.capabilities).toEqual([])
+  })
+
+  it('잘못된 type은 거부', () => {
+    const result = adaptV1KeyExchangeToHello({ type: 'dm' }, 'x')
+    expect(result.ok).toBe(false)
+  })
+
+  it('fromId 누락 시 거부', () => {
+    const result = adaptV1KeyExchangeToHello({ type: 'key-exchange', publicKey: 'A' }, 'x')
+    expect(result.ok).toBe(false)
+  })
+
+  it('synthesizedSessionId 생략 시 자동 생성', () => {
+    const result = adaptV1KeyExchangeToHello({
+      type: 'key-exchange', fromId: 'peer-a', publicKey: 'A',
+    })
+    expect(result.ok).toBe(true)
+    expect(result.hello.sessionId).toMatch(/^v1-peer-a-/)
+  })
+})

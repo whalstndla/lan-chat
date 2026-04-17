@@ -92,10 +92,35 @@ function negotiateCapabilities(remoteCapabilities) {
   return LOCAL_CAPABILITIES.filter(cap => remoteSet.has(cap))
 }
 
+// Phase 1b 호환 레이어: v1 key-exchange 메시지를 v2 hello 형태로 어댑트.
+// v1에는 sessionId 필드가 없으므로 synthesizedSessionId 를 주입한다 (재시작 구분 불가하나
+// shadow mode 관찰용으로는 충분).
+function adaptV1KeyExchangeToHello(v1Message, synthesizedSessionId) {
+  if (!v1Message || v1Message.type !== 'key-exchange') {
+    return { ok: false, reason: 'not a v1 key-exchange message' }
+  }
+  if (!v1Message.fromId || !v1Message.publicKey) {
+    return { ok: false, reason: 'missing fromId/publicKey' }
+  }
+  const hello = {
+    peerId: v1Message.fromId,
+    sessionId: synthesizedSessionId || `v1-${v1Message.fromId}-${Date.now()}`,
+    publicKey: v1Message.publicKey,
+    nickname: String(v1Message.nickname || ''),
+    wsPort: Number.isInteger(v1Message.wsPort) ? v1Message.wsPort : 0,
+    filePort: Number.isInteger(v1Message.filePort) ? v1Message.filePort : 0,
+    addresses: Array.isArray(v1Message.addresses) ? v1Message.addresses.filter(a => typeof a === 'string') : [],
+    profileImageUrl: typeof v1Message.profileImageUrl === 'string' ? v1Message.profileImageUrl : null,
+    capabilities: [],  // v1에는 capabilities 없음 — 빈 배열로 (shadow mode 에서는 무의미)
+  }
+  return { ok: true, hello }
+}
+
 module.exports = {
   WIRE_VERSION,
   LOCAL_CAPABILITIES,
   buildHello,
   parseHello,
   negotiateCapabilities,
+  adaptV1KeyExchangeToHello,
 }
