@@ -172,6 +172,16 @@ async function createNode({ peerId, nickname }) {
     clearRendererEvents: () => { rendererEvents.length = 0 },
     callIpc,
     async shutdown() {
+      // discoveryEpoch를 증가시켜 ipcHandlers/peer.js 내부 setTimeout 콜백들이
+      // `if (currentEpoch !== ctx.state.discoveryEpoch) return` 로 조기 종료되게 함.
+      // peer.js는 peer cache 재연결(1초), handshake sweep(2초) 등 지연 동작을 스케줄하는데,
+      // 이들이 DB close 후 실행되면 크래시 유발. epoch 무효화로 차단.
+      if (ctx && ctx.state) {
+        ctx.state.discoveryEpoch++
+        ctx.state.peerConnectRetryTimerMap.forEach(t => clearTimeout(t))
+        ctx.state.peerConnectRetryTimerMap.clear()
+        ctx.state.peerConnectInFlightSet.clear()
+      }
       try {
         if (fakeDiscovery.isStarted()) await fakeDiscovery.stopPeerDiscovery()
       } catch { /* 무시 */ }
@@ -181,6 +191,8 @@ async function createNode({ peerId, nickname }) {
       try { if (wsClientModule) wsClientModule.disconnectAll() } catch { /* 무시 */ }
       try { if (wsServerModule && wsServerInfo) wsServerModule.stopWsServer(wsServerInfo) } catch { /* 무시 */ }
       try { if (db) db.close() } catch { /* 무시 */ }
+      // DB가 먼저 close되지 않도록 약간 대기 — 이미 epoch 무효화로 대부분 안전
+      await new Promise(r => setTimeout(r, 50))
       removeTempAppDataPath(appDataPath)
     },
   }

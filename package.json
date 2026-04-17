@@ -23,7 +23,7 @@
       "^.+\\.jsx?$": "babel-jest"
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!(zustand)/)"
+      "node_modules/(?!(zustand|uuid)/)"
     ]
   },
   "keywords": [],
