@@ -97,7 +97,8 @@ function startPeerDiscovery({ nickname, peerId, wsPort, filePort, advertisedAddr
     type: SERVICE_TYPE,
     port: wsPort,
     txt: {
-      nickname,
+      // DNS TXT 레코드 값은 255바이트 이하 — nickname을 200자로 제한
+      nickname: nickname.slice(0, 200),
       peerId,
       filePort: String(filePort),
       addresses: normalizedAdvertisedAddresses.join(','),
@@ -229,7 +230,8 @@ async function republishService({ nickname, peerId, wsPort, filePort, advertised
     type: SERVICE_TYPE,
     port: wsPort,
     txt: {
-      nickname,
+      // DNS TXT 레코드 값은 255바이트 이하 — nickname을 200자로 제한
+      nickname: nickname.slice(0, 200),
       peerId,
       filePort: String(filePort),
       addresses: normalizedAdvertisedAddresses.join(','),
@@ -294,6 +296,11 @@ function startDnsSdBrowseMac(myPeerId, onPeerFound, onPeerLeft) {
 function lookupDnsSdServiceMac(instanceName, myPeerId, onPeerFound) {
   const lookupProcess = spawn('/usr/bin/dns-sd', ['-L', instanceName, `_${SERVICE_TYPE}._tcp`, 'local'])
   dnsSdLookupProcesses.push(lookupProcess)
+  // 프로세스 종료 시 배열에서 제거 — 누적 방지
+  lookupProcess.once('close', () => {
+    const index = dnsSdLookupProcesses.indexOf(lookupProcess)
+    if (index !== -1) dnsSdLookupProcesses.splice(index, 1)
+  })
   let output = ''
   let resolved = false
 

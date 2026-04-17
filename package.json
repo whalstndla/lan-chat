@@ -1,7 +1,7 @@
 {
   "name": "lan-chat",
   "version": "0.7.38",
-  "description": "",
+  "description": "LAN 환경 전용 P2P 암호화 채팅 앱",
   "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently \"vite --strictPort\" \"wait-on http://localhost:5173 && electron .\"",
@@ -13,7 +13,13 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "jest": {
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.jsx?$": "babel-jest"
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(zustand)/)"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -111,8 +117,11 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.2",
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.27",
+    "babel-jest": "^30.3.0",
     "concurrently": "^9.2.1",
     "dotenv": "^17.3.1",
     "dotenv-cli": "^11.0.0",

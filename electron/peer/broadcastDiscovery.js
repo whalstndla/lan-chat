@@ -25,7 +25,7 @@ function getSubnetBroadcastAddresses() {
   return [...new Set(addresses)]
 }
 
-const BROADCAST_PORT = 49155
+const BROADCAST_PORT = 49162
 const BROADCAST_INTERVAL_MS = 4000
 const PACKET_TYPE = 'lan-chat-discovery'
 
