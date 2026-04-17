@@ -2,9 +2,9 @@
 const { WebSocketServer, WebSocket } = require('ws')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
-// 허용되는 메시지 타입 화이트리스트
+// 허용되는 메시지 타입 화이트리스트 — Phase 1c: 'hello' (wire v2) 추가
 const ALLOWED_MESSAGE_TYPES = [
-  'key-exchange', 'typing', 'delete-message', 'nickname-changed',
+  'key-exchange', 'hello', 'typing', 'delete-message', 'nickname-changed',
   'read-receipt', 'message', 'dm', 'reaction', 'edit-message', 'status-changed',
   'file-request', 'file-data',
 ]

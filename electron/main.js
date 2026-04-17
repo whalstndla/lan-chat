@@ -11,6 +11,7 @@ const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileSer
 const { collectLocalIpv4Addresses, selectPrimaryLocalIpv4 } = require('./peer/networkUtils')
 const { loadOrCreateKeyPair, exportPublicKey } = require('./crypto/keyManager')
 const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath } = require('./utils/peerDebugLogger')
+const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
 const { stopPeerDiscovery } = require('./peer/discovery')
 const { deleteExpiredPendingMessages } = require('./storage/pendingMessages')
 const { autoUpdater } = require('electron-updater')
@@ -50,6 +51,12 @@ async function initApp() {
       logPath: getPeerDebugLogPath(),
       cwd: process.cwd(),
     })
+  }
+
+  // Phase 4: 성능 계측이 활성화되면 메모리 모니터 시작 (5분 간격).
+  if (perfEnabled) {
+    startMemoryMonitor()
+    writePeerDebugLog('main.perf.enabled', {})
   }
 
   // 앱 데이터 디렉토리 권한 제한 — 소유자만 접근 (민감 정보 보호)
@@ -284,6 +291,7 @@ let hasCleanedUp = false
 async function performCleanup() {
   if (hasCleanedUp) return
   hasCleanedUp = true
+  stopMemoryMonitor()
   // mDNS goodbye 패킷 전파를 위해 await (500ms 대기 포함)
   try { await stopPeerDiscovery() } catch { /* 무시 */ }
   try { stopFileServer() } catch { /* 무시 */ }

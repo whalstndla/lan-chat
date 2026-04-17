@@ -77,12 +77,15 @@ const useChatStore = create((set, get) => ({
     })),
 
   addDMMessage: (peerId, message) =>
-    set((state) => ({
-      dmMessages: {
-        ...state.dmMessages,
-        [peerId]: [...(state.dmMessages[peerId] || []), message],
-      },
-    })),
+    set((state) => {
+      const existing = state.dmMessages[peerId] || []
+      const appended = [...existing, message]
+      // Phase 4: 메모리 누적 방지 — 최근 500개만 유지 (globalMessages 와 동일 정책)
+      const trimmed = appended.length > 500 ? appended.slice(-500) : appended
+      return {
+        dmMessages: { ...state.dmMessages, [peerId]: trimmed },
+      }
+    }),
 
   incrementUnread: (peerId) =>
     set((state) => ({
