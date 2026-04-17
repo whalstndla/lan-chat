@@ -16,8 +16,11 @@ const deleteMessageHandler = require('./handlers/delete')
 const editMessageHandler = require('./handlers/edit')
 const fileRequest = require('./handlers/fileRequest')
 const fileData = require('./handlers/fileData')
+const keyExchange = require('./handlers/keyExchange')
+const dm = require('./handlers/dm')
+const globalMessage = require('./handlers/message')
 
-// type → handler 매핑. 여기 없는 타입은 messageHandler.js 의 레거시 경로로 폴스루.
+// type → handler 매핑. 알려지지 않은 type 은 무시됨.
 const HANDLERS = {
   'typing': typing,
   'status-changed': status,
@@ -28,10 +31,12 @@ const HANDLERS = {
   'edit-message': editMessageHandler,
   'file-request': fileRequest,
   'file-data': fileData,
+  'key-exchange': keyExchange,
+  'dm': dm,
+  'message': globalMessage,
 }
 
-// handleInbound 가 true 를 반환하면 dispatcher 가 메시지를 처리했다는 뜻.
-// 레거시 messageHandler.js 는 이 반환값이 true 면 조기 return 한다.
+// dispatchInbound 가 true 를 반환하면 dispatcher 가 메시지를 처리했다는 뜻.
 function dispatchInbound({ message, ctx, reply }) {
   const handler = HANDLERS[message.type]
   if (!handler) return false
