@@ -1,11 +1,13 @@
 // src/components/MessageInput.jsx
 import React, { useState, useRef, useEffect, Suspense, lazy, useCallback, forwardRef, useImperativeHandle } from 'react'
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
-import { Paperclip, Smile, Send, Loader2, X, Pencil, Bold, Italic, Strikethrough, Code, FileCode } from 'lucide-react'
+import { Paperclip, Smile, Send, Loader2, X, Pencil } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
+import FormattingToolbar from './input/FormattingToolbar'
+import PastePreviewDialog from './input/PastePreviewDialog'
 import useChatStore from '../store/useChatStore'
 
 // 파일 MIME 타입 → contentType 변환
@@ -13,13 +15,6 @@ function getFileContentType(file) {
   if (file.type.startsWith('image/')) return 'image'
   if (file.type.startsWith('video/')) return 'video'
   return 'file'
-}
-
-// 바이트 → 사람이 읽기 쉬운 파일 크기 문자열
-function formatFileSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function isEditableElement(target) {
@@ -313,17 +308,6 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     }
   }
 
-  // 붙여넣기 다이얼로그 키보드 단축키
-  useEffect(() => {
-    if (!pastePreview) return
-    const handleKeyDown = (event) => {
-      if (event.key === 'Enter') { event.preventDefault(); confirmPasteSend() }
-      else if (event.key === 'Escape') cancelPaste()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [pastePreview])
-
   function onEmojiSelect(emojiData) {
     if (editor) {
       editor.chain().focus().insertContent(emojiData.emoji).run()
@@ -344,39 +328,13 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         </div>
       )}
 
-      {/* 붙여넣기 이미지 확인 다이얼로그 (여러 장 누적 지원) */}
-      {pastePreview && (
-        <div className="absolute bottom-20 left-4 right-4 z-20 bg-vsc-panel border border-vsc-border rounded-lg p-4 shadow-lg">
-          <div className="flex items-start justify-between mb-3">
-            <span className="text-sm font-semibold text-vsc-text">
-              이미지 전송 {pastePreview.files.length > 1 && `(${pastePreview.files.length}장)`}
-            </span>
-            <button onClick={cancelPaste} className="cursor-pointer text-vsc-muted hover:text-vsc-text" aria-label="취소">
-              <X size={16} />
-            </button>
-          </div>
-          <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-            {pastePreview.previews.map((preview, index) => (
-              <div key={index} className="relative shrink-0 group/paste">
-                <img src={preview.previewUrl} alt="미리보기" className="w-20 h-20 object-cover rounded border border-vsc-border bg-vsc-bg" />
-                <button
-                  onClick={() => removePasteItem(index)}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/paste:opacity-100 transition-opacity cursor-pointer"
-                  aria-label="제거"
-                >
-                  <X size={10} />
-                </button>
-                <p className="text-[10px] text-vsc-muted text-center mt-0.5 truncate w-20">{formatFileSize(preview.fileSize)}</p>
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-vsc-muted mb-3">이미지를 더 붙여넣으면 추가됩니다</p>
-          <div className="flex gap-2 justify-end">
-            <button onClick={cancelPaste} className="cursor-pointer text-xs px-3 py-1.5 rounded bg-vsc-hover text-vsc-muted hover:text-vsc-text transition-colors">취소 (Esc)</button>
-            <button onClick={confirmPasteSend} disabled={isSending} className="cursor-pointer text-xs px-3 py-1.5 rounded bg-vsc-accent text-white hover:opacity-90 disabled:opacity-50 transition-opacity">전송 (Enter)</button>
-          </div>
-        </div>
-      )}
+      <PastePreviewDialog
+        pastePreview={pastePreview}
+        isSending={isSending}
+        onConfirm={confirmPasteSend}
+        onCancel={cancelPaste}
+        onRemoveItem={removePasteItem}
+      />
 
       <div className="flex flex-col bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors duration-150">
         {/* 수정 모드 배너 — 수정 중일 때만 표시 */}
@@ -391,80 +349,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         )}
 
         {/* 마크다운 포맷팅 툴바 */}
-        {editor && (
-          <div className="flex items-center gap-0.5 px-2 py-1 border-b border-vsc-border">
-            {/* 굵게 */}
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => editor.chain().focus().toggleBold().run()}
-              title="굵게 (Ctrl+B)"
-              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
-                editor.isActive('bold')
-                  ? 'text-vsc-accent bg-vsc-hover'
-                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
-              }`}
-            >
-              <Bold size={14} />
-            </button>
-            {/* 기울임 */}
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-              title="기울임 (Ctrl+I)"
-              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
-                editor.isActive('italic')
-                  ? 'text-vsc-accent bg-vsc-hover'
-                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
-              }`}
-            >
-              <Italic size={14} />
-            </button>
-            {/* 취소선 */}
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => editor.chain().focus().toggleStrike().run()}
-              title="취소선 (Ctrl+Shift+S)"
-              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
-                editor.isActive('strike')
-                  ? 'text-vsc-accent bg-vsc-hover'
-                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
-              }`}
-            >
-              <Strikethrough size={14} />
-            </button>
-            {/* 인라인 코드 */}
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => editor.chain().focus().toggleCode().run()}
-              title="인라인 코드 (Ctrl+E)"
-              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
-                editor.isActive('code')
-                  ? 'text-vsc-accent bg-vsc-hover'
-                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
-              }`}
-            >
-              <Code size={14} />
-            </button>
-            {/* 코드블록 */}
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-              title="코드블록"
-              className={`cursor-pointer p-1 rounded transition-colors duration-100 ${
-                editor.isActive('codeBlock')
-                  ? 'text-vsc-accent bg-vsc-hover'
-                  : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
-              }`}
-            >
-              <FileCode size={14} />
-            </button>
-          </div>
-        )}
+        <FormattingToolbar editor={editor} />
 
         <div className="flex items-end gap-2">
         {/* Tiptap 에디터 */}
