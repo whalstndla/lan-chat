@@ -1,9 +1,10 @@
 // src/components/Message.jsx
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Paperclip, Trash2, X, Clock, Check, CheckCheck, SmilePlus, Pencil, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
+import ImageLightbox from './message/ImageLightbox'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
@@ -53,10 +54,6 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   const onlinePeers = usePeerStore(state => state.onlinePeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
   const [lightboxUrl, setLightboxUrl] = useState(null)
-  const [lightboxZoom, setLightboxZoom] = useState(1)
-  const [lightboxPos, setLightboxPos] = useState({ x: 0, y: 0 })
-  const lightboxDragRef = useRef(null)
-  const [contextMenu, setContextMenu] = useState(null) // { x, y } 우클릭 메뉴 위치
 
   const sender = message.from || message.from_name
   const contentType = message.contentType || message.content_type
@@ -83,16 +80,6 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   // 발신자 아바타 URL 계산
   const senderPeer = onlinePeers.find(p => p.peerId === senderId)
   const avatarUrl = isMyMessage ? myProfileImageUrl : senderPeer?.profileImageUrl
-
-  // Escape 키로 라이트박스 닫기
-  useEffect(() => {
-    if (!lightboxUrl) return
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') setLightboxUrl(null)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [lightboxUrl])
 
   async function handleDelete() {
     const allMessages = extraImages.length > 0
@@ -317,136 +304,8 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
         </div>
       </div>
 
-      {/* 이미지 라이트박스 (확대/축소/드래그 지원) */}
       {lightboxUrl && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center overflow-hidden"
-          onClick={() => { setLightboxUrl(null); setLightboxZoom(1); setLightboxPos({ x: 0, y: 0 }); setContextMenu(null) }}
-          onWheel={(event) => {
-            event.preventDefault()
-            setLightboxZoom(prev => Math.min(Math.max(prev + (event.deltaY > 0 ? -0.2 : 0.2), 0.5), 5))
-          }}
-        >
-          <button
-            onClick={() => { setLightboxUrl(null); setLightboxZoom(1); setLightboxPos({ x: 0, y: 0 }) }}
-            className="absolute top-4 right-4 text-white/70 hover:text-white cursor-pointer z-10"
-            aria-label="닫기"
-          >
-            <X size={28} />
-          </button>
-          {/* 확대/축소 컨트롤 */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 bg-black/60 rounded-full px-2 py-1" onClick={(event) => event.stopPropagation()}>
-            <button
-              onClick={() => setLightboxZoom(prev => Math.max(prev - 0.25, 0.5))}
-              disabled={lightboxZoom <= 0.5}
-              className="p-1.5 text-white/70 hover:text-white disabled:text-white/30 cursor-pointer disabled:cursor-not-allowed"
-              aria-label="축소"
-            >
-              <ZoomOut size={18} />
-            </button>
-            <span className="text-white/80 text-xs min-w-[40px] text-center select-none">
-              {Math.round(lightboxZoom * 100)}%
-            </span>
-            <button
-              onClick={() => setLightboxZoom(prev => Math.min(prev + 0.25, 5))}
-              disabled={lightboxZoom >= 5}
-              className="p-1.5 text-white/70 hover:text-white disabled:text-white/30 cursor-pointer disabled:cursor-not-allowed"
-              aria-label="확대"
-            >
-              <ZoomIn size={18} />
-            </button>
-            {lightboxZoom !== 1 && (
-              <button
-                onClick={() => { setLightboxZoom(1); setLightboxPos({ x: 0, y: 0 }) }}
-                className="p-1.5 text-white/70 hover:text-white cursor-pointer ml-0.5"
-                aria-label="원래 크기"
-              >
-                <RotateCcw size={16} />
-              </button>
-            )}
-          </div>
-          <img
-            src={lightboxUrl}
-            alt="이미지 미리보기"
-            className="max-w-[90vw] max-h-[90vh] object-contain rounded select-none"
-            style={{
-              transform: `scale(${lightboxZoom}) translate(${lightboxPos.x}px, ${lightboxPos.y}px)`,
-              cursor: lightboxZoom > 1 ? 'grab' : 'zoom-in',
-              transition: lightboxDragRef.current ? 'none' : 'transform 0.1s ease',
-            }}
-            draggable={false}
-            onClick={(event) => {
-              event.stopPropagation()
-              setContextMenu(null)
-              // 드래그 직후 클릭은 무시
-              if (lightboxDragRef.current === 'dragged') { lightboxDragRef.current = null; return }
-              if (lightboxZoom === 1) {
-                // 클릭 지점으로 2배 확대 — 이미지 중심 기준 오프셋 계산
-                const rect = event.currentTarget.getBoundingClientRect()
-                const centerX = rect.left + rect.width / 2
-                const centerY = rect.top + rect.height / 2
-                const targetZoom = 2
-                const offsetX = (centerX - event.clientX) / targetZoom
-                const offsetY = (centerY - event.clientY) / targetZoom
-                setLightboxZoom(targetZoom)
-                setLightboxPos({ x: offsetX, y: offsetY })
-              } else {
-                // 확대 상태에서 클릭 → 원래 크기로 복귀
-                setLightboxZoom(1)
-                setLightboxPos({ x: 0, y: 0 })
-              }
-            }}
-            onContextMenu={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              setContextMenu({ x: event.clientX, y: event.clientY })
-            }}
-            onMouseDown={(event) => {
-              if (lightboxZoom <= 1) return
-              event.preventDefault()
-              event.stopPropagation()
-              const startX = event.clientX
-              const startY = event.clientY
-              const startPos = { ...lightboxPos }
-              lightboxDragRef.current = true
-
-              let dragged = false
-              const handleMouseMove = (moveEvent) => {
-                dragged = true
-                const dx = (moveEvent.clientX - startX) / lightboxZoom
-                const dy = (moveEvent.clientY - startY) / lightboxZoom
-                setLightboxPos({ x: startPos.x + dx, y: startPos.y + dy })
-              }
-              const handleMouseUp = () => {
-                // 드래그가 실제로 발생했으면 'dragged' 플래그 남김 → onClick에서 줌 토글 방지
-                lightboxDragRef.current = dragged ? 'dragged' : null
-                window.removeEventListener('mousemove', handleMouseMove)
-                window.removeEventListener('mouseup', handleMouseUp)
-              }
-              window.addEventListener('mousemove', handleMouseMove)
-              window.addEventListener('mouseup', handleMouseUp)
-            }}
-          />
-          {/* 우클릭 컨텍스트 메뉴 — 이미지 복사 */}
-          {contextMenu && (
-            <div
-              className="fixed z-[60] bg-vsc-panel border border-vsc-border rounded-md shadow-lg py-1 min-w-[140px]"
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                className="w-full text-left px-3 py-1.5 text-sm text-vsc-text hover:bg-vsc-hover cursor-pointer"
-                onClick={async () => {
-                  const success = await window.electronAPI.copyImageToClipboard(lightboxUrl)
-                  setContextMenu(null)
-                  if (!success) console.warn('이미지 복사 실패')
-                }}
-              >
-                이미지 복사
-              </button>
-            </div>
-          )}
-        </div>
+        <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
       )}
     </>
   )
