@@ -20,6 +20,10 @@ export default function ChatWindow() {
   const currentRoomKeyRef = useRef(null)
   const messageInputRef = useRef(null)
   const dragCounterRef = useRef(0)
+  // 방 진입 후 첫 메시지 로드 시 맨 아래로 스냅 — 이미지/비디오 async 로드로 레이아웃이
+  // 커져도 "중간에 멈춤" 현상 방지 (여러 번 재스크롤 + ResizeObserver)
+  const pendingInitialScrollRef = useRef(false)
+  const resizeObserverRef = useRef(null)
   // 읽지 않은 메시지 구분선 기준 타임스탬프 (로컬 ref — 스토어 구독 없음)
   const lastReadTimestampsRef = useRef({})
 
@@ -105,6 +109,27 @@ export default function ChatWindow() {
     isNearBottomRef.current = true
     scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     setNewMessageToast(null)
+  }
+
+  // 방 진입 후 첫 메시지 로드 시: 이미지/비디오 async 로딩으로 레이아웃이 커지는 것을
+  // 따라잡기 위해 여러 번 즉시 스크롤 + 컨테이너 크기 변화 관찰.
+  function snapToBottomInstant() {
+    const container = messagesContainerRef.current
+    if (container) container.scrollTop = container.scrollHeight
+  }
+
+  function runInitialScrollSnap() {
+    pendingInitialScrollRef.current = true
+    // 즉시 + 여러 시점 재스크롤 (이미지 로드 타이밍 분산 대응)
+    snapToBottomInstant()
+    requestAnimationFrame(() => snapToBottomInstant())
+    const t1 = setTimeout(() => snapToBottomInstant(), 100)
+    const t2 = setTimeout(() => snapToBottomInstant(), 400)
+    const t3 = setTimeout(() => {
+      snapToBottomInstant()
+      pendingInitialScrollRef.current = false
+    }, 1200)
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
   }
 
   function handleDragEnter(event) {
@@ -219,24 +244,35 @@ export default function ChatWindow() {
     }
   }, [currentRoom])
 
-  // 새 메시지 처리
+  // 새 메시지 처리 + 초기 로드 시 맨 아래 스냅
   useEffect(() => {
     const roomKey = currentRoom.type === 'global' ? 'global' : currentRoom.peerId
-    if (currentRoomKeyRef.current !== roomKey) {
+    const isRoomChange = currentRoomKeyRef.current !== roomKey
+
+    if (isRoomChange) {
       currentRoomKeyRef.current = roomKey
       prevMessageCountRef.current = currentMessages.length
+      // 방 진입 시점에 이미 메시지가 있으면 즉시 스냅. 비어있으면 아래의 첫 로드 감지 경로에서 처리.
+      if (currentMessages.length > 0) {
+        return runInitialScrollSnap()
+      }
       return
     }
 
     const prevCount = prevMessageCountRef.current
     prevMessageCountRef.current = currentMessages.length
 
+    // 방 진입 후 첫 메시지 로드 (0 → N) 감지 시 맨 아래로 스냅
+    if (prevCount === 0 && currentMessages.length > 0) {
+      return runInitialScrollSnap()
+    }
+
     if (currentMessages.length <= prevCount || currentMessages.length === 0) return
 
     const lastMessage = currentMessages[currentMessages.length - 1]
 
-    if (isNearBottomRef.current) {
-      scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (isNearBottomRef.current || pendingInitialScrollRef.current) {
+      scrollEndRef.current?.scrollIntoView({ behavior: pendingInitialScrollRef.current ? 'auto' : 'smooth' })
     } else {
       const isMyMessage = lastMessage.fromId === myPeerId || lastMessage.from_id === myPeerId
       if (isMyMessage) {
@@ -253,13 +289,30 @@ export default function ChatWindow() {
     }
   }, [currentMessages, currentRoom])
 
-  // 채팅방 변경 시 하단으로 이동 + 무한 스크롤 초기화
+  // 채팅방 변경 시 상태 초기화 (스크롤은 위의 useEffect 에서 메시지 로드 타이밍에 맞춰 처리)
   useEffect(() => {
     isNearBottomRef.current = true
     setNewMessageToast(null)
     setHasMore(true)
     setLoadingMore(false)
-    scrollEndRef.current?.scrollIntoView({ behavior: 'auto' })
+  }, [currentRoom])
+
+  // 컨테이너 크기 변화 감지 — 초기 스크롤 snap 기간 동안 이미지/비디오가 로드되어
+  // 레이아웃이 커지면 자동으로 아래로 재스크롤. pendingInitialScrollRef 가 false 가 되면 비활성화.
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (pendingInitialScrollRef.current) snapToBottomInstant()
+    })
+    observer.observe(container)
+    // 내부 자식들도 관찰 — 이미지 하나하나의 크기 변화까지 캐치
+    Array.from(container.querySelectorAll('img, video')).forEach(el => observer.observe(el))
+    resizeObserverRef.current = observer
+    return () => {
+      observer.disconnect()
+      resizeObserverRef.current = null
+    }
   }, [currentRoom])
 
   return (
