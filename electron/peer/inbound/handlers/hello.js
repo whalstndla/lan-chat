@@ -55,8 +55,7 @@ module.exports = function handleHelloV2({ message, ctx, reply }) {
       ctx.state.peerManager.handleRemoteHello(hello)
     }
 
-    // v1 상대와의 호환을 위해 reply 는 계속 v1 key-exchange 포맷.
-    // v0.9.0 에서 양쪽이 모두 v2 가 되면 이 reply 도 v2 hello 로 전환.
+    // v0.8.0+: reply 도 v2 hello 포맷. (buildMyKeyExchangePayload 는 내부적으로 buildMyHelloPayload 호출)
     const currentNicknameForReply = getProfile(ctx.state.database)?.nickname || ''
     reply(buildMyKeyExchangePayload(ctx, ctx.state.peerId, currentNicknameForReply))
 

@@ -1,11 +1,7 @@
-// Phase 2b: 키 교환 수신 핸들러.
-// v1 key-exchange 메시지를 수신하면:
-//   1) 공개키 저장 (ctx.state.peerPublicKeyMap)
-//   2) reply 로 내 키 전송
-//   3) 피어 캐시 저장
-//   4) peer-discovered 렌더러 이벤트 발행
-//   5) 역방향 연결 시도 (mDNS 단방향 문제 해결)
-//   6) PeerManager 에 adapted hello 전달 (Phase 1b shadow)
+// v1 key-exchange 수신 핸들러 (legacy — v0.7.x 피어 호환용).
+// v0.8.0 이후 송신은 v2 hello 로 전환되었으나, 구버전 피어가 보낸 v1 메시지는 여전히 수용.
+// reply 는 v2 hello 로 답장 → 구버전 피어는 이를 이해 못 함 (의도된 breaking).
+// 이 핸들러는 v0.9.0 에서 제거될 예정.
 
 const { getProfile } = require('../../../storage/profile')
 const { savePeerCache } = require('../../../storage/queries')

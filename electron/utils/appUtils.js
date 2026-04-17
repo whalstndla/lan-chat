@@ -37,19 +37,27 @@ function getMyAdvertisedAddresses(ctx) {
   return ctx.state.localIP !== 'localhost' ? [ctx.state.localIP] : []
 }
 
-// key-exchange 페이로드 생성
-function buildMyKeyExchangePayload(ctx, currentPeerId, nickname) {
-  return {
-    type: 'key-exchange',
-    fromId: currentPeerId,
+// Phase 1c: v2 hello 페이로드 생성 (wire.buildHello 래핑).
+// 기존 buildMyKeyExchangePayload 는 v0.8.0 부터 v2 hello 를 반환 —
+// 호환성을 위해 이름은 유지하지만 내부적으로 v2 포맷으로 송신.
+const { buildHello } = require('../peer/wire')
+
+function buildMyHelloPayload(ctx, currentPeerId, nickname) {
+  return buildHello({
+    peerId: currentPeerId,
+    sessionId: ctx.state.mySessionId,
     publicKey: ctx.state.myPublicKeyBase64,
     nickname,
-    host: ctx.state.localIP,
-    addresses: getMyAdvertisedAddresses(ctx),
     wsPort: ctx.state.wsServerInfo?.port ?? 0,
     filePort: getFilePort(),
+    addresses: getMyAdvertisedAddresses(ctx),
     profileImageUrl: buildMyProfileImageUrl(ctx),
-  }
+  })
+}
+
+// 레거시 이름 — 기존 호출처 호환. 송신은 v2 hello 로 전환됨.
+function buildMyKeyExchangePayload(ctx, currentPeerId, nickname) {
+  return buildMyHelloPayload(ctx, currentPeerId, nickname)
 }
 
 // 지정된 밀리초만큼 대기
@@ -72,6 +80,25 @@ function clearAllPeerConnectRetryState(ctx) {
   ctx.state.peerConnectRetryTimerMap.clear()
   ctx.state.peerConnectInFlightSet.clear()
   ctx.state.latestDiscoveredPeerInfoMap.clear()
+  // PeerManager 도 함께 초기화 (Phase 1c 권한 이양)
+  if (ctx.state.peerManager) ctx.state.peerManager.clear()
+}
+
+// Phase 1c: 권한 이양 조회기 — PeerManager 우선, 없으면 레거시 맵 폴백.
+function getPeerPublicKey(ctx, peerId) {
+  if (ctx.state.peerManager) {
+    const session = ctx.state.peerManager.getSession(peerId)
+    if (session?.crypto?.publicKey) {
+      // Manager 는 publicKey 를 base64 문자열로 보관. 레거시 경로는 KeyObject 이므로 혼재.
+      // 혼재 방지: Manager 가 있을 때도 레거시 맵(KeyObject) 우선 (DM 암/복호화가 KeyObject 필요).
+      return ctx.state.peerPublicKeyMap.get(peerId)
+    }
+  }
+  return ctx.state.peerPublicKeyMap.get(peerId)
+}
+
+function hasPeerPublicKey(ctx, peerId) {
+  return ctx.state.peerPublicKeyMap.has(peerId)
 }
 
 // 서버에 연결된 인바운드 피어 ID 목록 반환
@@ -344,9 +371,12 @@ module.exports = {
   getCurrentNicknameSafely,
   getMyAdvertisedAddresses,
   buildMyKeyExchangePayload,
+  buildMyHelloPayload,
   waitForMilliseconds,
   clearPeerConnectRetry,
   clearAllPeerConnectRetryState,
+  getPeerPublicKey,
+  hasPeerPublicKey,
   getInboundConnections,
   getConnectedPeerIds,
   hasPeerConnection,

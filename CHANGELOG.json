@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.8.0",
+    "date": "2026-04-17",
+    "changes": [
+      { "type": "feat", "text": "대규모 리팩토링: peer 연결 레이어 재설계 — PeerSession FSM + PeerManager 조정자 도입 (연결 불안정 근본 원인 해결)" },
+      { "type": "feat", "text": "와이어 프로토콜 v2 (hello) — sessionId 로 앱 재시작 즉시 감지, capabilities 로 점진적 기능 확장, v1 호환 수신 유지" },
+      { "type": "feat", "text": "인바운드 메시지 핸들러 완전 분해 — 12개 타입이 각자 독립 파일로 분리 (messageHandler.js 434줄 → 21줄)" },
+      { "type": "feat", "text": "통합 테스트 하네스 + 시나리오 10개 — 연결/재연결/DM/오프라인큐/race 자동 검증 (105 tests green)" },
+      { "type": "feat", "text": "성능 계측 인프라 — LAN_CHAT_PERF=1 로 메모리/슬로우쿼리/인바운드 처리시간 기록" },
+      { "type": "feat", "text": "Renderer 컴포넌트 분해 — ImageLightbox, FormattingToolbar, PastePreviewDialog, ChatSearchBar, useChatSubscriptions hook 분리" },
+      { "type": "fix", "text": "DM 메시지 무제한 누적 방지 — 채팅방당 500개 상한 (globalMessages와 동일 정책)" },
+      { "type": "break", "text": "v0.7.x 피어와의 호환 제한 — v0.8.0 송신은 v2 hello 전용 (수신은 양쪽 호환). 모든 피어 업데이트 권장." }
+    ]
+  },
+  {
     "version": "0.7.38",
     "date": "2026-04-09",
     "changes": [
