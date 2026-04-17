@@ -5,7 +5,7 @@
 const path = require('path')
 const fs = require('fs')
 const { getProfile } = require('./storage/profile')
-const { savePeerCache, saveFileCache, saveMessage, editMessage, deleteMessage, addReaction, removeReaction, markMessagesAsRead: markMessagesAsReadDB } = require('./storage/queries')
+const { savePeerCache, saveMessage } = require('./storage/queries')
 const { connectToPeer, disconnectFromPeer } = require('./peer/wsClient')
 const { importPublicKey } = require('./crypto/keyManager')
 const { deriveSharedSecret, decryptDM } = require('./crypto/encryption')
@@ -14,6 +14,7 @@ const { removePeerFromDiscovered } = require('./peer/discovery')
 const { getFilePort } = require('./peer/fileServer')
 const { writePeerDebugLog } = require('./utils/peerDebugLogger')
 const { adaptV1KeyExchangeToHello } = require('./peer/wire')
+const { dispatchInbound } = require('./peer/inbound')
 const {
   sendToRenderer,
   incrementBadge,
@@ -34,120 +35,9 @@ function createIncomingMessageHandler(ctx) {
   return function handleIncomingMessage(message, reply) {
     if (!ctx.state.database) return
 
-    // 파일 전송 요청 — HTTP가 막힌 환경(AP isolation)에서 WebSocket으로 파일 직접 전달
-    if (message.type === 'file-request') {
-      const { messageId, fileName } = message
-      const filePath = path.join(appDataPath, 'files', fileName)
-      if (!fileName || !fs.existsSync(filePath)) {
-        writePeerDebugLog('main.fileTransfer.notFound', { messageId, fileName })
-        return
-      }
-      try {
-        const data = fs.readFileSync(filePath).toString('base64')
-        const ext = path.extname(fileName)
-        sendPeerMessage(ctx, message.fromId, {
-          type: 'file-data',
-          fromId: ctx.state.peerId,
-          messageId,
-          fileName,
-          ext,
-          data,
-        })
-        writePeerDebugLog('main.fileTransfer.sent', { messageId, fileName, toId: message.fromId })
-      } catch (err) {
-        writePeerDebugLog('main.fileTransfer.sendError', { messageId, error: err.message })
-      }
-      return
-    }
-
-    // 파일 데이터 수신 — WebSocket 파일 전송 응답 처리
-    if (message.type === 'file-data') {
-      const { messageId, fileName, data } = message
-      if (!messageId || !fileName || !data) return
-      try {
-        const cacheDir = path.join(appDataPath, 'file_cache')
-        fs.mkdirSync(cacheDir, { recursive: true })
-        const ext = path.extname(fileName)
-        const cachedFileName = `${messageId}${ext}`
-        const cachedPath = path.join(cacheDir, cachedFileName)
-        fs.writeFileSync(cachedPath, Buffer.from(data, 'base64'))
-        try { saveFileCache(ctx.state.database, { messageId, cachedPath }) } catch {}
-        sendToRenderer(ctx, 'file-cached', { messageId, cachedPath })
-        writePeerDebugLog('main.fileTransfer.received', { messageId, fileName, cachedPath })
-      } catch (err) {
-        writePeerDebugLog('main.fileTransfer.receiveError', { messageId, error: err.message })
-      }
-      return
-    }
-
-    // 타이핑 이벤트 — DB 저장 없이 렌더러로 전달만
-    if (message.type === 'typing') {
-      sendToRenderer(ctx, 'typing-event', { fromId: message.fromId, from: message.from, to: message.to || null })
-      return
-    }
-
-    // 상태 변경 이벤트 — DB 저장 없이 렌더러로 전달
-    if (message.type === 'status-changed') {
-      sendToRenderer(ctx, 'peer-status-changed', {
-        peerId: message.fromId,
-        statusType: message.statusType,
-        statusMessage: message.statusMessage,
-      })
-      return
-    }
-
-    // 메시지 삭제 이벤트 — DB 삭제 후 렌더러로 전달
-    if (message.type === 'delete-message') {
-      try { deleteMessage(ctx.state.database, message.messageId, message.fromId) } catch { /* 무시 */ }
-      sendToRenderer(ctx, 'message-received', {
-        type: 'delete-message',
-        messageId: message.messageId,
-        fromId: message.fromId,
-        to: message.to || null,
-      })
-      return
-    }
-
-    // 메시지 수정 이벤트 — DB 업데이트 후 렌더러로 전달
-    if (message.type === 'edit-message') {
-      try {
-        editMessage(ctx.state.database, { messageId: message.messageId, fromId: message.fromId, newContent: message.newContent })
-        sendToRenderer(ctx, 'message-edited', {
-          messageId: message.messageId, fromId: message.fromId,
-          newContent: message.newContent, editedAt: message.editedAt, to: message.to || null,
-        })
-      } catch { /* 무시 */ }
-      return
-    }
-
-    // 읽음 확인 이벤트 — DB 업데이트 후 렌더러로 전달
-    if (message.type === 'read-receipt') {
-      try { markMessagesAsReadDB(ctx.state.database, message.messageIds) } catch { /* 무시 */ }
-      sendToRenderer(ctx, 'read-receipt', { fromId: message.fromId, messageIds: message.messageIds })
-      return
-    }
-
-    // 닉네임 변경 이벤트
-    if (message.type === 'nickname-changed') {
-      sendToRenderer(ctx, 'peer-nickname-changed', { peerId: message.fromId, nickname: message.nickname })
-      return
-    }
-
-    // 이모지 리액션 처리 — DB 저장 후 렌더러로 전달
-    if (message.type === 'reaction') {
-      try {
-        if (message.action === 'add') {
-          addReaction(ctx.state.database, { messageId: message.messageId, peerId: message.fromId, emoji: message.emoji })
-        } else if (message.action === 'remove') {
-          removeReaction(ctx.state.database, { messageId: message.messageId, peerId: message.fromId, emoji: message.emoji })
-        }
-        sendToRenderer(ctx, 'reaction-updated', {
-          messageId: message.messageId, peerId: message.fromId,
-          emoji: message.emoji, action: message.action,
-        })
-      } catch { /* 무시 */ }
-      return
-    }
+    // Phase 2: 분해된 핸들러로 우선 디스패치. 처리되면 조기 return.
+    // 아직 여기서 처리되지 않는 타입: key-exchange, dm, 전체채팅 message.
+    if (dispatchInbound({ message, ctx, reply })) return
 
     // 키 교환 처리 — 내 키 즉시 reply + 역방향 연결 (mDNS 단방향 문제 해결)
     if (message.type === 'key-exchange') {
