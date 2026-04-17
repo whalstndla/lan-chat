@@ -8,4 +8,5 @@ docs/
 *.db-journal
 
 .DS_Store
-.envlogs/
+.env
+logs/
