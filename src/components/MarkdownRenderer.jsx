@@ -1,10 +1,60 @@
 // src/components/MarkdownRenderer.jsx
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github-dark.css'
+
+// 접힘 기준 높이 (px). 이 값을 넘으면 기본 접힘 상태로 렌더하고 더보기 버튼 노출.
+const COLLAPSED_MAX_HEIGHT = 200
+
+// 긴 코드블록을 접기/펼치기로 보여주는 래퍼.
+// pre 내부 높이를 측정해 임계값을 넘으면 max-height 로 자르고 하단에 페이드 + 토글 버튼을 추가.
+function CollapsibleCodeBlock({ children }) {
+  const preRef = useRef(null)
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+
+  useEffect(() => {
+    const preElement = preRef.current
+    if (!preElement) return
+    const checkOverflow = () => {
+      setOverflowing(preElement.scrollHeight > COLLAPSED_MAX_HEIGHT + 16)
+    }
+    checkOverflow()
+    // 폰트/이미지 로드 등으로 높이가 나중에 변하는 경우 대응
+    const observer = new ResizeObserver(checkOverflow)
+    observer.observe(preElement)
+    return () => observer.disconnect()
+  }, [children])
+
+  const shouldCollapse = overflowing && !expanded
+  return (
+    <div className="relative my-1">
+      <pre
+        ref={preRef}
+        style={shouldCollapse ? { maxHeight: COLLAPSED_MAX_HEIGHT } : undefined}
+        className={`rounded text-[13px] font-mono [&>code.hljs]:block [&>code.hljs]:p-3 [&>code.hljs]:rounded [&>code.hljs]:whitespace-pre-wrap [&>code.hljs]:break-all ${shouldCollapse ? 'overflow-hidden' : ''}`}
+      >
+        {children}
+      </pre>
+      {shouldCollapse && (
+        // 하단 페이드 — github-dark 배경(#0d1117)으로 자연스럽게 사라지게
+        <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-14 rounded-b bg-gradient-to-t from-[#0d1117] to-transparent" />
+      )}
+      {overflowing && (
+        <button
+          type="button"
+          onClick={() => setExpanded(prev => !prev)}
+          className="mt-1 cursor-pointer text-xs text-vsc-accent hover:underline"
+        >
+          {expanded ? '접기 ↑' : '더 보기 ↓'}
+        </button>
+      )}
+    </div>
+  )
+}
 
 // 마크다운 렌더링 커스텀 컴포넌트 (보안 + 스타일링)
 const markdownComponents = {
@@ -39,14 +89,8 @@ const markdownComponents = {
       </code>
     )
   },
-  // 코드 블록 — pre > code 구조. highlight.js 테마가 code 요소에 배경/색상을 바르므로
-  // pre는 감싸는 컨테이너 역할만 하고 내부 code가 실제 스타일을 담당한다.
-  // whitespace-pre-wrap + break-all 로 가로 스크롤 대신 긴 줄을 래핑한다 (hljs 기본 white-space:pre 덮어씀).
-  pre: ({ children }) => (
-    <pre className="rounded my-1 text-[13px] font-mono [&>code.hljs]:block [&>code.hljs]:p-3 [&>code.hljs]:rounded [&>code.hljs]:whitespace-pre-wrap [&>code.hljs]:break-all">
-      {children}
-    </pre>
-  ),
+  // 코드 블록 — 긴 경우 접힘 상태로 렌더하는 래퍼 컴포넌트로 대체.
+  pre: ({ children }) => <CollapsibleCodeBlock>{children}</CollapsibleCodeBlock>,
   // 불릿 리스트 — list-outside + 좌측 패딩으로 래핑 시 들여쓰기 유지
   ul: ({ children }) => <ul className="list-disc list-outside pl-5 my-1 space-y-0.5">{children}</ul>,
   // 번호 리스트 — list-outside + 좌측 패딩
