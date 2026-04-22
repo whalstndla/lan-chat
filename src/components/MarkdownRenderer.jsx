@@ -41,8 +41,9 @@ const markdownComponents = {
   },
   // 코드 블록 — pre > code 구조. highlight.js 테마가 code 요소에 배경/색상을 바르므로
   // pre는 감싸는 컨테이너 역할만 하고 내부 code가 실제 스타일을 담당한다.
+  // whitespace-pre-wrap + break-all 로 가로 스크롤 대신 긴 줄을 래핑한다 (hljs 기본 white-space:pre 덮어씀).
   pre: ({ children }) => (
-    <pre className="rounded my-1 overflow-x-auto text-[13px] font-mono [&>code.hljs]:block [&>code.hljs]:p-3 [&>code.hljs]:rounded">
+    <pre className="rounded my-1 text-[13px] font-mono [&>code.hljs]:block [&>code.hljs]:p-3 [&>code.hljs]:rounded [&>code.hljs]:whitespace-pre-wrap [&>code.hljs]:break-all">
       {children}
     </pre>
   ),

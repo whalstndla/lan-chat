@@ -4,7 +4,8 @@
     "date": "2026-04-22",
     "changes": [
       { "type": "fix", "text": "마크다운 리스트 항목이 길어 줄바꿈될 때 다음 줄이 불릿/번호 아래로 파고들던 문제 수정 — list-outside + 좌측 패딩으로 전환" },
-      { "type": "feat", "text": "코드블록 syntax highlighting 적용 — rehype-highlight + highlight.js(github-dark 테마)로 언어 자동 감지 색상 입힘" }
+      { "type": "feat", "text": "코드블록 syntax highlighting 적용 — rehype-highlight + highlight.js(github-dark 테마)로 언어 자동 감지 색상 입힘" },
+      { "type": "fix", "text": "코드블록이 가로 스크롤 대신 자동 줄바꿈되도록 수정 — 긴 한 줄 코드도 메시지 말풍선 폭에 맞춰 표시" }
     ]
   },
   {
