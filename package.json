@@ -1,6 +1,6 @@
 {
   "name": "lan-chat",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "LAN 환경 전용 P2P 암호화 채팅 앱",
   "main": "electron/main.js",
   "scripts": {
@@ -110,10 +110,12 @@
     "electron-updater": "^6.8.3",
     "emoji-picker-react": "^4.18.0",
     "express": "^5.2.1",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "tiptap-markdown": "^0.9.0",
