@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import rehypeHighlight from 'rehype-highlight'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import 'highlight.js/styles/github-dark.css'
 
 // 접힘 기준 높이 (px). 이 값을 넘으면 기본 접힘 상태로 렌더하고 더보기 버튼 노출.
@@ -15,12 +16,20 @@ function CollapsibleCodeBlock({ children }) {
   const preRef = useRef(null)
   const [expanded, setExpanded] = useState(false)
   const [overflowing, setOverflowing] = useState(false)
+  const [hiddenLines, setHiddenLines] = useState(0)
 
   useEffect(() => {
     const preElement = preRef.current
     if (!preElement) return
     const checkOverflow = () => {
-      setOverflowing(preElement.scrollHeight > COLLAPSED_MAX_HEIGHT + 16)
+      const fullHeight = preElement.scrollHeight
+      setOverflowing(fullHeight > COLLAPSED_MAX_HEIGHT + 16)
+      // 숨겨진 줄 수 추정 — (전체높이 - 접힘높이) / 한 줄 높이
+      // 한 줄 높이는 fontSize 13px × lineHeight 1.5 ≈ 20px 로 근사
+      const codeEl = preElement.querySelector('code.hljs')
+      const lineHeight = codeEl ? parseFloat(getComputedStyle(codeEl).lineHeight) || 20 : 20
+      const hidden = Math.max(0, Math.round((fullHeight - COLLAPSED_MAX_HEIGHT) / lineHeight))
+      setHiddenLines(hidden)
     }
     checkOverflow()
     // 폰트/이미지 로드 등으로 높이가 나중에 변하는 경우 대응
@@ -31,25 +40,38 @@ function CollapsibleCodeBlock({ children }) {
 
   const shouldCollapse = overflowing && !expanded
   return (
-    <div className="relative my-1">
-      <pre
-        ref={preRef}
-        style={shouldCollapse ? { maxHeight: COLLAPSED_MAX_HEIGHT } : undefined}
-        className={`rounded text-[13px] font-mono [&>code.hljs]:block [&>code.hljs]:p-3 [&>code.hljs]:rounded [&>code.hljs]:whitespace-pre-wrap [&>code.hljs]:break-all ${shouldCollapse ? 'overflow-hidden' : ''}`}
-      >
-        {children}
-      </pre>
-      {shouldCollapse && (
-        // 하단 페이드 — github-dark 배경(#0d1117)으로 자연스럽게 사라지게
-        <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-14 rounded-b bg-gradient-to-t from-[#0d1117] to-transparent" />
-      )}
+    <div className="my-1">
+      <div className="relative">
+        <pre
+          ref={preRef}
+          style={shouldCollapse ? { maxHeight: COLLAPSED_MAX_HEIGHT } : undefined}
+          className={`rounded-t text-[13px] font-mono [&>code.hljs]:block [&>code.hljs]:p-3 [&>code.hljs]:rounded-t [&>code.hljs]:whitespace-pre-wrap [&>code.hljs]:break-all ${overflowing ? '' : 'rounded-b [&>code.hljs]:rounded-b'} ${shouldCollapse ? 'overflow-hidden' : ''}`}
+        >
+          {children}
+        </pre>
+        {shouldCollapse && (
+          // 하단 페이드 — 코드가 잘려있음을 시각적으로 암시
+          <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-12 bg-gradient-to-t from-[#0d1117] to-transparent" />
+        )}
+      </div>
       {overflowing && (
+        // 풀너비 토글 버튼 — 코드블록 하단에 바로 붙여 명확한 액션 영역 제공
         <button
           type="button"
           onClick={() => setExpanded(prev => !prev)}
-          className="mt-1 cursor-pointer text-xs text-vsc-accent hover:underline"
+          className="flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-b bg-[#161b22] border-t border-vsc-border text-xs font-medium text-vsc-accent hover:bg-vsc-hover hover:text-white transition-colors cursor-pointer"
         >
-          {expanded ? '접기 ↑' : '더 보기 ↓'}
+          {expanded ? (
+            <>
+              <ChevronUp size={14} />
+              <span>접기</span>
+            </>
+          ) : (
+            <>
+              <ChevronDown size={14} />
+              <span>더 보기{hiddenLines > 0 ? ` (${hiddenLines}줄)` : ''}</span>
+            </>
+          )}
         </button>
       )}
     </div>
