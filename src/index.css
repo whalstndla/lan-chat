@@ -71,8 +71,11 @@ body {
   color: #cccccc;
   display: block;
 }
-.tiptap-editor .ProseMirror ul { list-style: disc inside; margin: 4px 0; }
-.tiptap-editor .ProseMirror ol { list-style: decimal inside; margin: 4px 0; }
+/* 리스트: list-style:outside + 좌측 패딩 → 마커 바깥 배치, 래핑 시 들여쓰기 유지.
+   li > p 기본 마진 제거 — 마커와 본문이 같은 줄에 표시되도록(안 하면 p가 블록으로 밀려 다음 줄로 내려감). */
+.tiptap-editor .ProseMirror ul { list-style: disc outside; padding-left: 20px; margin: 4px 0; }
+.tiptap-editor .ProseMirror ol { list-style: decimal outside; padding-left: 20px; margin: 4px 0; }
+.tiptap-editor .ProseMirror li > p { margin: 0; }
 .tiptap-editor .ProseMirror blockquote {
   border-left: 2px solid rgba(78, 201, 176, 0.5);
   padding-left: 8px;

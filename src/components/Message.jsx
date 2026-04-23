@@ -1,6 +1,6 @@
 // src/components/Message.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil } from 'lucide-react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil, Loader2 } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -20,20 +20,50 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
-// 그룹 내 추가 이미지 썸네일 (캐시 URL 자동 해결)
+// 그룹 내 추가 이미지 썸네일 (캐시 URL 자동 해결 + 로딩 플레이스홀더)
 function ExtraImageThumb({ imageMessage, onClick }) {
   const rawUrl = imageMessage.fileUrl || imageMessage.file_url
-  const [url, setUrl] = useState(rawUrl)
+  const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[imageMessage.id])
+  const [url, setUrl] = useState(wsFileCachedUrl || rawUrl)
+  const [loaded, setLoaded] = useState(false)
+
+  // 마운트 시 DB 캐시 선조회 — 이미 캐시된 파일이면 HTTP 건너뛰고 바로 local 사용
   useEffect(() => {
-    if (!imageMessage.id) return
+    if (!imageMessage.id || wsFileCachedUrl) return
     window.electronAPI.getCachedFileUrl(imageMessage.id).then(cached => {
       if (cached) setUrl(cached)
     }).catch(() => {})
-  }, [imageMessage.id])
+  }, [imageMessage.id, wsFileCachedUrl])
+
+  // WebSocket 으로 캐시 도착하면 반영
+  useEffect(() => {
+    if (wsFileCachedUrl) setUrl(wsFileCachedUrl)
+  }, [wsFileCachedUrl])
+
+  // src 가 바뀌면 로딩 상태로 초기화 → 재시도
+  useEffect(() => { setLoaded(false) }, [url])
+
   if (!url) return null
   return (
-    <div className="rounded overflow-hidden border border-vsc-border cursor-pointer" onClick={() => onClick(url)}>
-      <img src={url} alt={imageMessage.fileName || imageMessage.file_name || '이미지'} className="w-32 h-32 object-cover bg-vsc-bg" onError={(e) => { e.target.style.display = 'none' }} />
+    <div className="relative rounded overflow-hidden border border-vsc-border cursor-pointer w-32 h-32 bg-vsc-bg" onClick={() => loaded && onClick(url)}>
+      {!loaded && (
+        <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
+          <Loader2 size={18} className="animate-spin" />
+        </div>
+      )}
+      <img
+        src={url}
+        alt={imageMessage.fileName || imageMessage.file_name || '이미지'}
+        className={`w-32 h-32 object-cover ${loaded ? 'block' : 'invisible'}`}
+        onLoad={() => setLoaded(true)}
+        onError={async () => {
+          // HTTP 실패 시 DB 캐시 시도 (최초 1회). 이후에는 ws 이벤트 대기.
+          if (url === rawUrl) {
+            const cached = await window.electronAPI.getCachedFileUrl(imageMessage.id).catch(() => null)
+            if (cached) setUrl(cached)
+          }
+        }}
+      />
     </div>
   )
 }
@@ -70,9 +100,31 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   // 캐시 URL 폴백 — 원본 URL 로드 실패 시 로컬 캐시로 전환 (WebSocket 수신 포함)
   const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[message.id])
   const [resolvedFileUrl, setResolvedFileUrl] = useState(wsFileCachedUrl || fileUrl)
-  useEffect(() => { setResolvedFileUrl(wsFileCachedUrl || fileUrl) }, [fileUrl, wsFileCachedUrl])
+  // 이미지 로드 상태 — 'loading' 동안에는 깨진 아이콘 대신 스피너를 표시.
+  // WebSocket 으로 캐시 도착 대기 중에도 로딩 상태를 유지해 "수신 직후 깨짐" 현상 방지.
+  const [imgLoaded, setImgLoaded] = useState(false)
+
+  // 마운트 시 DB 캐시 선조회 — 재시작 후 이미 캐시된 파일이면 HTTP 건너뛰고 바로 local 사용
+  useEffect(() => {
+    if (!message.id || wsFileCachedUrl) return
+    if (contentType !== 'image' && contentType !== 'video') return
+    window.electronAPI.getCachedFileUrl(message.id).then(cached => {
+      if (cached) setResolvedFileUrl(cached)
+    }).catch(() => {})
+  }, [message.id, wsFileCachedUrl, contentType])
+
+  // WebSocket 으로 캐시 도착하거나 원본 fileUrl 이 바뀌면 src 갱신
+  useEffect(() => {
+    if (wsFileCachedUrl) setResolvedFileUrl(wsFileCachedUrl)
+    else if (fileUrl) setResolvedFileUrl(prev => prev?.startsWith('file://') ? prev : fileUrl)
+  }, [fileUrl, wsFileCachedUrl])
+
+  // src 변경되면 로딩 상태 초기화 → 새 src 로 재시도
+  useEffect(() => { setImgLoaded(false) }, [resolvedFileUrl])
 
   async function handleFileError() {
+    // HTTP 원본 URL 이 실패한 경우에만 DB 캐시 시도. 캐시가 아직 없으면 wsFileCachedUrl 도착 대기.
+    if (resolvedFileUrl !== fileUrl) return
     const cachedUrl = await window.electronAPI.getCachedFileUrl(message.id)
     if (cachedUrl) setResolvedFileUrl(cachedUrl)
   }
@@ -191,17 +243,20 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
             {contentType === 'image' && resolvedFileUrl && (
               <div className="flex flex-wrap gap-1 max-w-md">
                 <div
-                  className="rounded overflow-hidden border border-vsc-border cursor-pointer"
-                  onClick={() => setLightboxUrl(resolvedFileUrl)}
+                  className={`relative rounded overflow-hidden border border-vsc-border bg-vsc-bg ${imgLoaded ? 'cursor-pointer' : ''} ${extraImages.length > 0 ? 'w-32 h-32' : 'min-w-[128px] min-h-[96px]'}`}
+                  onClick={() => imgLoaded && setLightboxUrl(resolvedFileUrl)}
                 >
+                  {!imgLoaded && (
+                    <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
+                      <Loader2 size={20} className="animate-spin" />
+                    </div>
+                  )}
                   <img
                     src={resolvedFileUrl}
                     alt={fileName || '이미지'}
-                    className={`object-cover bg-vsc-bg ${extraImages.length > 0 ? 'w-32 h-32' : 'max-w-xs max-h-64 object-contain'}`}
-                    onError={(event) => {
-                      if (resolvedFileUrl === fileUrl) handleFileError()
-                      else event.target.style.display = 'none'
-                    }}
+                    className={`${extraImages.length > 0 ? 'w-32 h-32 object-cover' : 'max-w-xs max-h-64 object-contain'} ${imgLoaded ? 'block' : 'invisible'}`}
+                    onLoad={() => setImgLoaded(true)}
+                    onError={handleFileError}
                   />
                 </div>
                 {extraImages.map(extra => (

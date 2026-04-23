@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.8.5",
+    "date": "2026-04-23",
+    "changes": [
+      { "type": "fix", "text": "이미지 수신 직후 '깨진 이미지' 아이콘이 순간 보이던 문제 수정 — 로드 완료 전에는 스피너 플레이스홀더 표시, WebSocket 캐시 도착 시 자동 재시도" },
+      { "type": "fix", "text": "입력창 리스트 마커가 다음 줄로 밀리는 문제 수정 — list-style outside + padding, li>p 마진 제거" },
+      { "type": "fix", "text": "리스트 작성 중 Enter 로 메시지가 전송되던 문제 수정 — 리스트 아이템/코드블록 안에서는 Enter 가 Tiptap 기본 동작(새 항목/개행) 유지, 빈 항목에서 Enter 로 리스트 탈출 가능" }
+    ]
+  },
+  {
     "version": "0.8.4",
     "date": "2026-04-22",
     "changes": [

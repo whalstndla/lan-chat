@@ -103,11 +103,21 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         view.dispatch(tr)
         return true
       },
-      // Enter = 전송, Shift+Enter = 줄바꿈 (위치 무관)
+      // Enter = 전송, Shift+Enter = 줄바꿈.
+      // 단, 커서가 리스트 아이템 / 코드블록 안에 있으면 Tiptap 기본 동작(새 항목 / 개행)을 유지.
+      // 리스트에서 빈 항목일 때 Enter 를 누르면 Tiptap 이 리스트에서 빠져나가 일반 문단으로 전환 → 다음 Enter 에서 전송됨.
       handleKeyDown: (view, event) => {
         // IME 조합 중(한국어 입력 등)에는 Enter를 전송으로 처리하지 않음
         if (event.isComposing || event.keyCode === 229) return false
         if (event.key === 'Enter' && !event.shiftKey) {
+          // 현재 선택 위치의 조상 노드에 리스트 아이템이나 코드블록이 있는지 확인
+          const { $from } = view.state.selection
+          for (let depth = $from.depth; depth > 0; depth -= 1) {
+            const nodeName = $from.node(depth).type.name
+            if (nodeName === 'listItem' || nodeName === 'codeBlock') {
+              return false
+            }
+          }
           event.preventDefault()
           sendMessageRef.current?.()
           return true
