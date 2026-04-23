@@ -1,5 +1,5 @@
 // src/components/Message.jsx
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil, Loader2 } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
@@ -20,50 +20,89 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
-// 그룹 내 추가 이미지 썸네일 (캐시 URL 자동 해결 + 로딩 플레이스홀더)
+// 이미지 소스 폴백 체인 관리 훅 — wsCache → DBCache → HTTP 순서로 시도하고,
+// 로드 실패하면 아직 시도하지 않은 다음 후보로 자동 전환한다.
+// 무한 루프 방지: 시도한 URL 을 ref 로 추적.
+function useImageSrcWithFallback(messageId, httpUrl, wsFileCachedUrl) {
+  const [src, setSrc] = useState(wsFileCachedUrl || httpUrl || null)
+  const [status, setStatus] = useState('loading') // 'loading' | 'loaded' | 'failed'
+  const attemptedRef = useRef(new Set())
+
+  // 메시지가 완전히 바뀌면 추적 초기화
+  useEffect(() => { attemptedRef.current = new Set() }, [messageId])
+
+  // ws 캐시가 도착하면 아직 시도 안 한 경우 우선 적용
+  useEffect(() => {
+    if (!wsFileCachedUrl) return
+    if (attemptedRef.current.has(wsFileCachedUrl)) return
+    setSrc(wsFileCachedUrl)
+    setStatus('loading')
+  }, [wsFileCachedUrl])
+
+  // 마운트 시 DB 캐시 선조회 — 재시작/재마운트 후 이미 캐시된 파일이면 HTTP 건너뛰기
+  useEffect(() => {
+    if (!messageId || wsFileCachedUrl) return
+    let cancelled = false
+    window.electronAPI.getCachedFileUrl(messageId).then(cached => {
+      if (cancelled || !cached) return
+      if (attemptedRef.current.has(cached)) return
+      setSrc(cached)
+      setStatus('loading')
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [messageId, wsFileCachedUrl])
+
+  // src 변경되면 로딩 상태로 초기화
+  useEffect(() => { if (src) setStatus('loading') }, [src])
+
+  const onLoad = () => setStatus('loaded')
+  const onError = async () => {
+    if (src) attemptedRef.current.add(src)
+    // 다음 후보 탐색 — HTTP 원본 → DB 캐시 순서로 아직 시도 안 한 것 사용
+    if (httpUrl && !attemptedRef.current.has(httpUrl)) {
+      setSrc(httpUrl)
+      return
+    }
+    const dbCached = await window.electronAPI.getCachedFileUrl(messageId).catch(() => null)
+    if (dbCached && !attemptedRef.current.has(dbCached)) {
+      setSrc(dbCached)
+      return
+    }
+    // 모든 후보 소진 — 실패 상태
+    setStatus('failed')
+  }
+
+  return { src, status, onLoad, onError }
+}
+
+// 그룹 내 추가 이미지 썸네일 — 폴백 체인 + 로딩/실패 상태 표시
 function ExtraImageThumb({ imageMessage, onClick }) {
   const rawUrl = imageMessage.fileUrl || imageMessage.file_url
   const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[imageMessage.id])
-  const [url, setUrl] = useState(wsFileCachedUrl || rawUrl)
-  const [loaded, setLoaded] = useState(false)
+  const { src, status, onLoad, onError } = useImageSrcWithFallback(imageMessage.id, rawUrl, wsFileCachedUrl)
 
-  // 마운트 시 DB 캐시 선조회 — 이미 캐시된 파일이면 HTTP 건너뛰고 바로 local 사용
-  useEffect(() => {
-    if (!imageMessage.id || wsFileCachedUrl) return
-    window.electronAPI.getCachedFileUrl(imageMessage.id).then(cached => {
-      if (cached) setUrl(cached)
-    }).catch(() => {})
-  }, [imageMessage.id, wsFileCachedUrl])
-
-  // WebSocket 으로 캐시 도착하면 반영
-  useEffect(() => {
-    if (wsFileCachedUrl) setUrl(wsFileCachedUrl)
-  }, [wsFileCachedUrl])
-
-  // src 가 바뀌면 로딩 상태로 초기화 → 재시도
-  useEffect(() => { setLoaded(false) }, [url])
-
-  if (!url) return null
+  if (!src && status !== 'failed') return null
   return (
-    <div className="relative rounded overflow-hidden border border-vsc-border cursor-pointer w-32 h-32 bg-vsc-bg" onClick={() => loaded && onClick(url)}>
-      {!loaded && (
+    <div className="relative rounded overflow-hidden border border-vsc-border w-32 h-32 bg-vsc-bg" onClick={() => status === 'loaded' && onClick(src)}>
+      {status === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
           <Loader2 size={18} className="animate-spin" />
         </div>
       )}
-      <img
-        src={url}
-        alt={imageMessage.fileName || imageMessage.file_name || '이미지'}
-        className={`w-32 h-32 object-cover ${loaded ? 'block' : 'invisible'}`}
-        onLoad={() => setLoaded(true)}
-        onError={async () => {
-          // HTTP 실패 시 DB 캐시 시도 (최초 1회). 이후에는 ws 이벤트 대기.
-          if (url === rawUrl) {
-            const cached = await window.electronAPI.getCachedFileUrl(imageMessage.id).catch(() => null)
-            if (cached) setUrl(cached)
-          }
-        }}
-      />
+      {status === 'failed' && (
+        <div className="absolute inset-0 flex items-center justify-center text-vsc-muted text-[10px] text-center px-1">
+          이미지<br />불러오기 실패
+        </div>
+      )}
+      {status !== 'failed' && src && (
+        <img
+          src={src}
+          alt={imageMessage.fileName || imageMessage.file_name || '이미지'}
+          className={`w-32 h-32 object-cover ${status === 'loaded' ? 'block cursor-pointer' : 'invisible'}`}
+          onLoad={onLoad}
+          onError={onError}
+        />
+      )}
     </div>
   )
 }
@@ -97,37 +136,10 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
     return extractFirstUrl(message.content)
   }, [message.content, contentType])
 
-  // 캐시 URL 폴백 — 원본 URL 로드 실패 시 로컬 캐시로 전환 (WebSocket 수신 포함)
+  // 이미지/비디오 URL — 폴백 체인 (ws 캐시 → DB 캐시 → HTTP 원본) 관리
   const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[message.id])
-  const [resolvedFileUrl, setResolvedFileUrl] = useState(wsFileCachedUrl || fileUrl)
-  // 이미지 로드 상태 — 'loading' 동안에는 깨진 아이콘 대신 스피너를 표시.
-  // WebSocket 으로 캐시 도착 대기 중에도 로딩 상태를 유지해 "수신 직후 깨짐" 현상 방지.
-  const [imgLoaded, setImgLoaded] = useState(false)
-
-  // 마운트 시 DB 캐시 선조회 — 재시작 후 이미 캐시된 파일이면 HTTP 건너뛰고 바로 local 사용
-  useEffect(() => {
-    if (!message.id || wsFileCachedUrl) return
-    if (contentType !== 'image' && contentType !== 'video') return
-    window.electronAPI.getCachedFileUrl(message.id).then(cached => {
-      if (cached) setResolvedFileUrl(cached)
-    }).catch(() => {})
-  }, [message.id, wsFileCachedUrl, contentType])
-
-  // WebSocket 으로 캐시 도착하거나 원본 fileUrl 이 바뀌면 src 갱신
-  useEffect(() => {
-    if (wsFileCachedUrl) setResolvedFileUrl(wsFileCachedUrl)
-    else if (fileUrl) setResolvedFileUrl(prev => prev?.startsWith('file://') ? prev : fileUrl)
-  }, [fileUrl, wsFileCachedUrl])
-
-  // src 변경되면 로딩 상태 초기화 → 새 src 로 재시도
-  useEffect(() => { setImgLoaded(false) }, [resolvedFileUrl])
-
-  async function handleFileError() {
-    // HTTP 원본 URL 이 실패한 경우에만 DB 캐시 시도. 캐시가 아직 없으면 wsFileCachedUrl 도착 대기.
-    if (resolvedFileUrl !== fileUrl) return
-    const cachedUrl = await window.electronAPI.getCachedFileUrl(message.id)
-    if (cachedUrl) setResolvedFileUrl(cachedUrl)
-  }
+  const { src: resolvedFileUrl, status: imgStatus, onLoad: onImgLoad, onError: onImgError } =
+    useImageSrcWithFallback(message.id, fileUrl, wsFileCachedUrl)
 
   // 발신자 아바타 URL 계산
   const senderPeer = onlinePeers.find(p => p.peerId === senderId)
@@ -240,24 +252,31 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
               </div>
             )}
 
-            {contentType === 'image' && resolvedFileUrl && (
+            {contentType === 'image' && (resolvedFileUrl || imgStatus === 'failed') && (
               <div className="flex flex-wrap gap-1 max-w-md">
                 <div
-                  className={`relative rounded overflow-hidden border border-vsc-border bg-vsc-bg ${imgLoaded ? 'cursor-pointer' : ''} ${extraImages.length > 0 ? 'w-32 h-32' : 'min-w-[128px] min-h-[96px]'}`}
-                  onClick={() => imgLoaded && setLightboxUrl(resolvedFileUrl)}
+                  className={`relative rounded overflow-hidden border border-vsc-border bg-vsc-bg ${imgStatus === 'loaded' ? 'cursor-pointer' : ''} ${extraImages.length > 0 ? 'w-32 h-32' : 'min-w-[128px] min-h-[96px]'}`}
+                  onClick={() => imgStatus === 'loaded' && setLightboxUrl(resolvedFileUrl)}
                 >
-                  {!imgLoaded && (
+                  {imgStatus === 'loading' && (
                     <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
                       <Loader2 size={20} className="animate-spin" />
                     </div>
                   )}
-                  <img
-                    src={resolvedFileUrl}
-                    alt={fileName || '이미지'}
-                    className={`${extraImages.length > 0 ? 'w-32 h-32 object-cover' : 'max-w-xs max-h-64 object-contain'} ${imgLoaded ? 'block' : 'invisible'}`}
-                    onLoad={() => setImgLoaded(true)}
-                    onError={handleFileError}
-                  />
+                  {imgStatus === 'failed' && (
+                    <div className="flex items-center justify-center text-vsc-muted text-xs p-4 w-32 h-32">
+                      이미지 불러오기 실패
+                    </div>
+                  )}
+                  {imgStatus !== 'failed' && resolvedFileUrl && (
+                    <img
+                      src={resolvedFileUrl}
+                      alt={fileName || '이미지'}
+                      className={`${extraImages.length > 0 ? 'w-32 h-32 object-cover' : 'max-w-xs max-h-64 object-contain'} ${imgStatus === 'loaded' ? 'block' : 'invisible'}`}
+                      onLoad={onImgLoad}
+                      onError={onImgError}
+                    />
+                  )}
                 </div>
                 {extraImages.map(extra => (
                   <ExtraImageThumb key={extra.id} imageMessage={extra} onClick={(url) => setLightboxUrl(url)} />
@@ -271,9 +290,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   src={resolvedFileUrl}
                   controls
                   className="max-w-xs max-h-64"
-                  onError={() => {
-                    if (resolvedFileUrl === fileUrl) handleFileError()
-                  }}
+                  onError={onImgError}
                 />
               </div>
             )}
