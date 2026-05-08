@@ -117,6 +117,32 @@ describe('migratePlaintextDbToEncrypted', () => {
     fs.rmSync(path.dirname(dbPath), { recursive: true, force: true })
   })
 
+  it('FTS5 가상 테이블이 있는 평문 DB 도 정상 변환 (보조 테이블 reserved 에러 없음)', () => {
+    const key = crypto.randomBytes(32)
+    const dbPath = tempDbPath()
+    {
+      const plain = new Database(dbPath)
+      plain.exec(`CREATE TABLE messages (id TEXT PRIMARY KEY, content TEXT, type TEXT, from_id TEXT, from_name TEXT, to_id TEXT, content_type TEXT, encrypted_payload TEXT, file_url TEXT, file_name TEXT, timestamp INTEGER, format TEXT)`)
+      plain.exec(`CREATE VIRTUAL TABLE messages_fts USING fts5(id UNINDEXED, content, from_name, content='messages', content_rowid='rowid')`)
+      plain.prepare('INSERT INTO messages (id, content, type, from_id, from_name, content_type, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run('m1', '검색 가능한 한국어', 'message', 'p1', '나', 'text', 1)
+      plain.exec(`INSERT INTO messages_fts(rowid, id, content, from_name) SELECT rowid, id, content, from_name FROM messages WHERE content IS NOT NULL`)
+      plain.close()
+    }
+
+    const result = migratePlaintextDbToEncrypted(dbPath, key)
+    expect(result.migrated).toBe(true)
+
+    const enc = initDatabase(dbPath, key)
+    const row = enc.prepare('SELECT id, content FROM messages WHERE id = ?').get('m1')
+    expect(row.content).toBe('검색 가능한 한국어')
+    // FTS 검색이 마이그레이션 후에도 동작
+    const found = enc.prepare(`SELECT id FROM messages_fts WHERE messages_fts MATCH ?`).all('검색')
+    expect(found.length).toBeGreaterThan(0)
+    closeDatabase(enc)
+    fs.rmSync(path.dirname(dbPath), { recursive: true, force: true })
+  })
+
   it('이미 암호화된 DB 면 마이그레이션하지 않음', () => {
     const key = crypto.randomBytes(32)
     const dbPath = tempDbPath()

@@ -24,31 +24,50 @@ function isPlaintextSqliteDb(dbPath) {
 }
 
 function copyTablesAndIndexes(srcDb, dstDb) {
+  // 가상 테이블 (FTS5 등) 본체 이름 — 보조 테이블 (xxx_data, xxx_idx, xxx_docsize,
+  // xxx_config, xxx_content) 은 SQLite 가 자동 생성하므로 명시 CREATE / INSERT 모두 거부됨.
+  const virtualTableNames = srcDb.prepare(`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'
+  `).all().map(r => r.name)
+
+  function isVirtualAuxiliary(name) {
+    for (const vt of virtualTableNames) {
+      if (name === vt) return false
+      if (name.startsWith(`${vt}_`)) {
+        const suffix = name.slice(vt.length + 1)
+        if (['data', 'idx', 'docsize', 'config', 'content'].includes(suffix)) return true
+      }
+    }
+    return false
+  }
+
   const items = srcDb.prepare(`
     SELECT type, name, sql FROM sqlite_master
     WHERE sql IS NOT NULL
       AND name NOT LIKE 'sqlite_%'
     ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, rowid
-  `).all()
+  `).all().filter(item => !isVirtualAuxiliary(item.name))
 
-  // 1) 스키마 재생성 (FTS5 같은 가상 테이블 포함)
+  // 1) 스키마 재생성 (FTS5 같은 가상 테이블 본체 포함, 보조 테이블은 자동 생성)
   for (const item of items) {
     try { dstDb.exec(item.sql) } catch (err) {
-      // FTS 컨텐츠 모드는 부모 테이블 생성 후 자동으로 동작 — 중복 생성 시 무시
       if (!String(err.message).includes('already exists')) throw err
     }
   }
 
-  // 2) 일반 테이블 데이터 복사 (rowid 포함). 가상 테이블 (FTS5) 은 콘텐츠 모드라 부모 테이블 복사로
-  //    자동 채워지지 않으므로 별도 INSERT 로 재구성한다.
+  // 2) 일반 테이블 데이터 복사 (rowid 포함). 가상 테이블 (FTS5) 본체와 그 보조 테이블
+  //    (xxx_fts_data, xxx_fts_idx, xxx_fts_docsize, xxx_fts_config, xxx_fts_content) 은
+  //    SQLite 가 직접 INSERT 를 거부 ("object name reserved") 하므로 제외한다.
+  //    보조 테이블은 sqlite_master 에서 sql IS NULL 로 식별 가능.
   const tables = srcDb.prepare(`
-    SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-  `).all().map(r => r.name)
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+  `).all().map(r => r.name).filter(name => !isVirtualAuxiliary(name))
 
   for (const tableName of tables) {
-    // 가상 테이블 (FTS5 등) 은 그대로 복사 불가 — 이름이 fts 로 끝나면 본 테이블 복사 후 재구성에 위임
-    const isFts = tableName.endsWith('_fts')
-    if (isFts) continue
+    // 가상 테이블 본체 (FTS5 등) 도 그대로 복사 불가 — 부모 테이블 복사 후 재구성에 위임
+    if (virtualTableNames.includes(tableName)) continue
 
     const cols = srcDb.prepare(`PRAGMA table_info("${tableName}")`).all().map(c => c.name)
     if (cols.length === 0) continue
@@ -113,6 +132,12 @@ function migratePlaintextDbToEncrypted(dbPath, masterKey) {
   fs.renameSync(tmpEncryptedPath, dbPath)
   try { fs.chmodSync(dbPath, 0o600) } catch {}
   try { fs.chmodSync(backupPath, 0o600) } catch {}
+
+  // 평문 시절의 WAL/SHM 부속 파일은 새 암호화 DB 와 매칭되지 않아
+  // SQLCipher 가 "file is not a database" 로 거부한다. 모두 정리.
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    try { fs.unlinkSync(dbPath + suffix) } catch {}
+  }
 
   return { migrated: true, backupPath }
 }

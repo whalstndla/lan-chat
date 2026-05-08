@@ -144,6 +144,7 @@ async function createWindow() {
   registerLanChatHandler(ctx)
 
   // 평문 DB 가 발견되면 1회 SQLCipher 암호화 DB 로 변환 (보안 6단계).
+  // 실패 시에는 평문 DB 를 잘못 cipher 로 열지 않도록 앱을 종료. 다음 실행 시 재시도.
   try {
     const result = migratePlaintextDbToEncrypted(dbPath, ctx.state.masterKey)
     if (result.migrated) {
@@ -151,6 +152,9 @@ async function createWindow() {
     }
   } catch (err) {
     writePeerDebugLog('main.dbMigration.error', { error: err.message })
+    console.error('[main] DB 마이그레이션 실패 — 평문 DB 보존 후 종료:', err.message)
+    app.quit()
+    return
   }
 
   // DB 초기화 (peerId 복원을 위해) — 마스터키로 복호화하여 열기
