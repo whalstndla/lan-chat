@@ -1,12 +1,35 @@
 // electron/storage/database.js
-const Database = require('better-sqlite3')
+// better-sqlite3-multiple-ciphers 기반 — SQLCipher 호환 암호화 DB.
+// 마스터키 (32바이트 Buffer) 를 hex 형태로 PRAGMA key 에 적용.
+// 메모리/임시 DB 는 SQLCipher 가 키 설정을 지원하지 않아 평문으로만 동작 (테스트 한정).
+
+const Database = require('better-sqlite3-multiple-ciphers')
 const fs = require('fs')
 
-function initDatabase(dbPath) {
+function bufferToHexKey(key) {
+  if (!Buffer.isBuffer(key) || key.length !== 32) {
+    throw new Error('마스터키는 32바이트 Buffer 여야 한다')
+  }
+  // SQLCipher 의 raw hex 키 표기 — `"x'<hex>'"` (PRAGMA key 가 SQL 문자열로 해석)
+  return `"x'${key.toString('hex')}'"`
+}
+
+function applyEncryption(db, masterKey) {
+  db.pragma(`cipher='sqlcipher'`)
+  db.pragma(`key=${bufferToHexKey(masterKey)}`)
+  // 키 적용 검증 — 키가 틀리면 다음 PRAGMA 또는 SELECT 가 실패
+  // (잘못된 키로는 sqlite_master 도 못 읽는다)
+}
+
+function initDatabase(dbPath, masterKey) {
+  const isMemory = dbPath === ':memory:' || dbPath === '' || dbPath.startsWith('file::memory:')
   const db = new Database(dbPath)
 
-  // DB 파일 권한 제한 — 소유자만 읽기/쓰기 (민감 정보 보호)
-  try { fs.chmodSync(dbPath, 0o600) } catch { /* 인메모리 DB 등에서는 무시 */ }
+  if (!isMemory) {
+    // 디스크 DB 파일 권한 제한 — 소유자만 읽기/쓰기
+    try { fs.chmodSync(dbPath, 0o600) } catch { /* 마이그레이션 직후엔 누락될 수 있어 무시 */ }
+    if (masterKey) applyEncryption(db, masterKey)
+  }
 
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
@@ -127,4 +150,4 @@ function closeDatabase(db) {
   db.close()
 }
 
-module.exports = { initDatabase, migrateDatabase, closeDatabase }
+module.exports = { initDatabase, migrateDatabase, closeDatabase, applyEncryption, bufferToHexKey }

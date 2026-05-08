@@ -24,6 +24,7 @@ const { sendToRenderer, clearBadge, checkAndNotifyUpdated } = require('./utils/a
 const { loadOrCreateMasterKey } = require('./crypto/masterKey')
 const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/lanchatProtocol')
 const { migratePlaintextFiles } = require('./storage/fileMigration')
+const { migratePlaintextDbToEncrypted } = require('./storage/dbMigration')
 
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
@@ -142,8 +143,18 @@ async function createWindow() {
   // lanchat:// 프로토콜 핸들러 등록 — 앱 BrowserWindow 안에서만 파일 접근.
   registerLanChatHandler(ctx)
 
-  // DB 먼저 초기화 (peerId 복원을 위해)
-  ctx.state.database = initDatabase(dbPath)
+  // 평문 DB 가 발견되면 1회 SQLCipher 암호화 DB 로 변환 (보안 6단계).
+  try {
+    const result = migratePlaintextDbToEncrypted(dbPath, ctx.state.masterKey)
+    if (result.migrated) {
+      writePeerDebugLog('main.dbMigration.completed', { backupPath: result.backupPath })
+    }
+  } catch (err) {
+    writePeerDebugLog('main.dbMigration.error', { error: err.message })
+  }
+
+  // DB 초기화 (peerId 복원을 위해) — 마스터키로 복호화하여 열기
+  ctx.state.database = initDatabase(dbPath, ctx.state.masterKey)
   try { migrateDatabase(ctx.state.database) } catch { /* 마이그레이션 부분 실패는 무시 — DB 자체는 유효 */ }
 
   // peerId 복원 또는 신규 생성
