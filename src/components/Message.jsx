@@ -20,36 +20,24 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
-// 이미지 소스 폴백 체인 — lanchat:// (앱 내부 캐시) → ws 캐시 → DB 캐시 → HTTP 원본
-// 순으로 후보를 만들고 현재 후보가 onError 일 때 다음으로 넘어간다.
-// 후보 배열 + 인덱스 방식이라 무한 루프나 race condition 이 발생하지 않는다.
+// 이미지 소스 폴백 체인 — lanchat:// (앱 내부 복호화 채널) 만 사용한다.
+// 디스크 파일이 모두 ciphertext 라 file:// 직접 표시는 무용. lanchat:// 는 main
+// 프로세스 핸들러가 메모리에서 복호화해 응답하므로 외부 노출 0.
 //
-// lanchat:// 은 앱 BrowserWindow 안에서만 동작하는 custom protocol — main 프로세스의
-// 핸들러가 디스크 캐시를 (필요 시 복호화 후) 응답한다. 외부 노출 0.
-function useImageSrcWithFallback(messageId, httpUrl, wsFileCachedUrl) {
-  const [dbCachedUrl, setDbCachedUrl] = useState(null)
+// 후보 순서:
+//   1) wsFileCachedUrl — file-cached 이벤트 도착 시 cache buster 포함 lanchat:// URL
+//      (첫 후보와 다른 string → React 가 새 fetch 강제)
+//   2) lanchat://file/<messageId> — 기본 표시 경로 (이미 캐시된 경우 즉시 200)
+function useImageSrcWithFallback(messageId, _httpUrl, wsFileCachedUrl) {
   const [index, setIndex] = useState(0)
   const [status, setStatus] = useState('loading') // 'loading' | 'loaded' | 'failed'
 
-  // 마운트 / 메시지 변경 시 DB 캐시 선조회. wsFileCachedUrl 이 이미 있으면 생략.
-  useEffect(() => {
-    if (!messageId || wsFileCachedUrl) { setDbCachedUrl(null); return }
-    let cancelled = false
-    window.electronAPI.getCachedFileUrl(messageId)
-      .then(cached => { if (!cancelled) setDbCachedUrl(cached || null) })
-      .catch(() => { if (!cancelled) setDbCachedUrl(null) })
-    return () => { cancelled = true }
-  }, [messageId, wsFileCachedUrl])
-
-  // 후보 배열 — 빈 값은 제거, 중복 제거. lanchat:// 가 있으면 최우선 (캐시 + 복호화 통합 경로).
   const candidates = useMemo(() => {
     const list = []
     if (messageId) list.push(`lanchat://file/${encodeURIComponent(messageId)}`)
     if (wsFileCachedUrl && !list.includes(wsFileCachedUrl)) list.push(wsFileCachedUrl)
-    if (dbCachedUrl && !list.includes(dbCachedUrl)) list.push(dbCachedUrl)
-    if (httpUrl && !list.includes(httpUrl)) list.push(httpUrl)
     return list
-  }, [messageId, wsFileCachedUrl, dbCachedUrl, httpUrl])
+  }, [messageId, wsFileCachedUrl])
 
   // 후보 배열이 바뀌면 인덱스/상태 초기화 (앞쪽에 더 우선순위 높은 후보가 추가되었을 수 있음)
   useEffect(() => {

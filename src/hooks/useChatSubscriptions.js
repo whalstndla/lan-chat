@@ -74,8 +74,12 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         useChatStore.getState().setTyping(data.fromId, data.from, data.to || null)
       })
 
-      window.electronAPI.onFileCached(({ messageId, cachedPath }) => {
-        useChatStore.getState().setCachedFileUrl(messageId, `file://${cachedPath}`)
+      window.electronAPI.onFileCached(({ messageId }) => {
+        // 디스크 파일은 ciphertext 라 file:// 직접 표시 불가. lanchat:// 핸들러를 통해
+        // 메모리에서 복호화해 응답한다. cache buster 로 첫 시도(lanchat://<id>) 와 다른
+        // string 을 만들어 React 가 새로 fetch 하도록 강제.
+        const url = `lanchat://file/${encodeURIComponent(messageId)}?ws=${Date.now()}`
+        useChatStore.getState().setCachedFileUrl(messageId, url)
       })
 
       window.electronAPI.onPeerNicknameChanged(({ peerId: changedPeerId, nickname: newNickname }) => {

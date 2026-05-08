@@ -30,12 +30,13 @@ function registerFileHandlers(ctx) {
     }
   })
 
-  // 캐시된 파일 URL 반환 — file_cache 의 ciphertext 경로가 존재하면 file:// 폴백 URL 반환.
-  // 단, file:// 직접 표시는 평문 디스크 접근이라 평문 시절 호환 용도로만 두고,
-  // 실 표시 경로는 lanchat:// (복호화 통합) 을 권장한다.
+  // 캐시된 파일 표시 URL 반환 — 디스크엔 ciphertext 만 저장되므로 lanchat:// 핸들러를 거쳐
+  // 메모리에서 복호화한 평문을 응답하도록 lanchat://file/<messageId> 형태로 반환.
   ipcMain.handle('get-cached-file-url', (_, messageId) => {
     const cachedPath = getFileCache(ctx.state.database, messageId)
-    if (cachedPath && fs.existsSync(cachedPath)) return `file://${cachedPath}`
+    if (cachedPath && fs.existsSync(cachedPath)) {
+      return `lanchat://file/${encodeURIComponent(messageId)}`
+    }
     return null
   })
 }

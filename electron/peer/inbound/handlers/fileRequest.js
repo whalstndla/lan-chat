@@ -8,13 +8,33 @@ const { sendPeerMessage } = require('../../../utils/appUtils')
 const { decryptBuffer, isEncryptedFile } = require('../../../crypto/fileEncryption')
 const { deriveSharedSecret } = require('../../../crypto/encryption')
 const { encryptFileForPeer } = require('../../../crypto/peerFileTransfer')
+const { getFileCache } = require('../../../storage/queries')
 const { writePeerDebugLog } = require('../../../utils/peerDebugLogger')
 
+// 디스크에서 messageId 또는 fileName 으로 파일 위치를 찾는다.
+// 우선순위:
+//   1) file_cache 의 messageId 매핑 — cacheOwnFile 로 저장된 영구 캐시 (확실)
+//   2) tempFilePath/files/<fileName> — 호환성 폴백 (saveFile 직후, 마이그레이션 전 등)
+//
+// 주의: 메시지의 fileName 필드는 사용자 원본 파일명("screenshot.png") 일 수 있는데,
+// saveFile 이 만든 디스크 파일은 uuid 기반 ("<uuid>.png") 이라 이름이 안 맞다.
+// 그래서 messageId 기반 file_cache 조회가 필수.
+function resolveFilePathOnDisk(ctx, messageId, fileName) {
+  try {
+    const cachedPath = getFileCache(ctx.state.database, messageId)
+    if (cachedPath && fs.existsSync(cachedPath)) return cachedPath
+  } catch { /* DB 조회 실패 시 폴백 */ }
+  if (fileName) {
+    const tryPath = path.join(ctx.config.appDataPath, 'files', fileName)
+    if (fs.existsSync(tryPath)) return tryPath
+  }
+  return null
+}
+
 module.exports = function handleFileRequest({ message, ctx }) {
-  const appDataPath = ctx.config.appDataPath
   const { messageId, fileName } = message
-  const filePath = path.join(appDataPath, 'files', fileName)
-  if (!fileName || !fs.existsSync(filePath)) {
+  const filePath = resolveFilePathOnDisk(ctx, messageId, fileName)
+  if (!filePath) {
     writePeerDebugLog('inbound.fileRequest.notFound', { messageId, fileName })
     return
   }

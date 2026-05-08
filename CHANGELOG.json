@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.9.1",
+    "date": "2026-05-08",
+    "changes": [
+      { "type": "fix", "text": "[수신측 이미지 미표시 핵심 수정] file-request 핸들러가 사용자 원본 파일명(screenshot.png)으로 디스크를 찾던 버그 수정 — saveFile 은 uuid 기반 이름으로 저장하므로 매칭 실패. messageId 기반 file_cache 조회로 우선 처리 + tempFilePath/files/<fileName> 폴백" },
+      { "type": "fix", "text": "file-cached 이벤트가 file://<ciphertext-path> 를 렌더러에 전달하던 버그 수정 — 디스크 파일은 ciphertext 라 <img> 직접 표시 불가. lanchat://file/<id>?ws=<timestamp> 형태로 변경해 메모리 복호화 응답을 받도록 함" },
+      { "type": "fix", "text": "get-cached-file-url IPC 도 lanchat:// 형태 반환하도록 수정 (file:// ciphertext 노출 제거)" },
+      { "type": "improve", "text": "이미지 폴백 후보 체인 단순화 — file://, http:// 후보 제거하고 lanchat:// 만 사용 (디스크가 모두 ciphertext 이므로). cache buster 로 첫 시도 후 file-cached 도착 시 React 가 새 fetch 강제" }
+    ]
+  },
+  {
     "version": "0.9.0",
     "date": "2026-05-08",
     "changes": [
