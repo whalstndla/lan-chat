@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.9.0",
+    "date": "2026-05-08",
+    "changes": [
+      { "type": "feat", "text": "[보안] 디스크 저장 데이터 전체 암호화 — 모든 첨부 파일(files/, file_cache/)과 SQLite DB(chat.db) 가 OS 키체인 기반 마스터키로 AES-256-GCM 암호화. 디스크 직접 접근 시 'SQLite format 3' 매직조차 보이지 않는 ciphertext만 노출" },
+      { "type": "feat", "text": "[보안] 앱 내부 전용 lanchat:// custom protocol — 사용자 송수신 파일은 BrowserWindow 안에서만 접근 가능. 외부 브라우저나 같은 LAN 의 다른 PC 가 GET 시도해도 차단" },
+      { "type": "feat", "text": "[보안] 피어 간 파일 전송 ECDH 암호화 — 파일 콘텐츠도 DM 텍스트와 별도 키 도출(HKDF info='lan-chat-file:')로 AES-256-GCM 암호화 송수신. LAN 도청 방어" },
+      { "type": "feat", "text": "[보안] HTTP /files 라우트 폐기 — 프로필 이미지(공개 정보)만 평문 인라인 노출 유지. 사용자 파일은 lanchat:// + ECDH ws 채널로만 접근" },
+      { "type": "feat", "text": "[보안] OS 키체인 기반 마스터키 — macOS Keychain / Windows DPAPI / Linux libsecret. 키체인 사용 불가 환경에서는 평문 폴백 없이 앱 시작 거부" },
+      { "type": "improve", "text": "[자동 마이그레이션] 첫 부팅 시 평문 chat.db / files/ / file_cache/ 자동 암호화. 평문 DB 는 chat.db.plaintext.bak 로 1회 백업 보존. FTS5 보조 테이블 / WAL·SHM 정리 포함" },
+      { "type": "fix", "text": "[이전 누적 버그 일괄 수정] 수신자가 history 로드할 때 fileUrl 의 host:port 가 자기 IP 로 잘못 덮어씌워져 이미지가 깨지던 문제 — rewriteFileUrl 을 자기 메시지에만 적용하도록 fromId 기반 분기" },
+      { "type": "fix", "text": "송신자 자기 파일이 영구 캐시에 저장되지 않아 7일 후 임시폴더 정리 / fileServer 포트 변경 시 자기 메시지 이미지가 깨지던 문제 — DM 오프라인·암호화실패 분기까지 모두 cacheOwnFile 호출" },
+      { "type": "fix", "text": "Content-Disposition: attachment 헤더가 미디어 표시를 차단할 수 있던 문제 — 이미지/비디오/오디오는 인라인, 그 외(html/svg/js 등)만 attachment" },
+      { "type": "improve", "text": "이미지 소스 폴백 훅을 후보 배열 + 인덱스 방식으로 단순화 — 4개 useEffect / Set 추적 / async onError 제거, race condition 해소. lanchat:// 가 최우선 후보" },
+      { "type": "improve", "text": "[호환성] wire v3 — 구버전 (v2 이하) 클라이언트와 파일 송수신 단절. 같은 LAN 의 v3 클라이언트끼리만 정상 동작" },
+      { "type": "improve", "text": "테스트 커버리지 대폭 강화 — 113 → 205 케이스 (마스터키, AES-256-GCM, ECDH 파일 전송, DB/파일 마이그레이션, fileServer 헤더 분기 등)" }
+    ]
+  },
+  {
     "version": "0.8.6",
     "date": "2026-04-23",
     "changes": [
