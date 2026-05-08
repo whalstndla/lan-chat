@@ -32,6 +32,8 @@ function createAppContext(config) {
       peerManager: null,
       // 현재 세션 ID — 앱 실행 중 고정 (프로세스 수명 동안)
       mySessionId: null,
+      // 디스크 저장 파일/DB 암호화에 쓰는 32바이트 마스터키 (safeStorage 로 보호된 키체인 기반)
+      masterKey: null,
     },
   }
 }

@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, Tray, nativeImage } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage } = require('electron')
 const path = require('path')
 const os = require('os')
 const { v4: uuidv4 } = require('uuid')
@@ -21,6 +21,11 @@ const { createAppContext } = require('./context')
 const { createIncomingMessageHandler } = require('./messageHandler')
 const { registerAllIpcHandlers } = require('./ipcHandlers/index')
 const { sendToRenderer, clearBadge, checkAndNotifyUpdated } = require('./utils/appUtils')
+const { loadOrCreateMasterKey } = require('./crypto/masterKey')
+const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/lanchatProtocol')
+
+// custom protocol 은 app.whenReady 이전에 등록해야 함
+registerLanChatScheme()
 
 const isDev = !app.isPackaged
 
@@ -112,6 +117,19 @@ async function initApp() {
 }
 
 async function createWindow() {
+  // 마스터키 로드 / 생성 — DB 초기화 / 파일 암호화의 기반이 되므로 가장 먼저 처리.
+  // safeStorage 사용 불가능한 환경에서는 의도적으로 throw → 앱 종료.
+  try {
+    ctx.state.masterKey = loadOrCreateMasterKey(appDataPath, safeStorage)
+  } catch (err) {
+    console.error('[main] 마스터키 초기화 실패:', err.message)
+    app.quit()
+    return
+  }
+
+  // lanchat:// 프로토콜 핸들러 등록 — 앱 BrowserWindow 안에서만 파일 접근.
+  registerLanChatHandler(ctx)
+
   // DB 먼저 초기화 (peerId 복원을 위해)
   ctx.state.database = initDatabase(dbPath)
   try { migrateDatabase(ctx.state.database) } catch { /* 마이그레이션 부분 실패는 무시 — DB 자체는 유효 */ }

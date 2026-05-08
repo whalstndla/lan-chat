@@ -20,9 +20,12 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
-// 이미지 소스 폴백 체인 — ws 캐시 → DB 캐시 → HTTP 원본 순으로 후보를 만들고
-// 현재 후보가 onError 일 때 다음으로 넘어간다.
+// 이미지 소스 폴백 체인 — lanchat:// (앱 내부 캐시) → ws 캐시 → DB 캐시 → HTTP 원본
+// 순으로 후보를 만들고 현재 후보가 onError 일 때 다음으로 넘어간다.
 // 후보 배열 + 인덱스 방식이라 무한 루프나 race condition 이 발생하지 않는다.
+//
+// lanchat:// 은 앱 BrowserWindow 안에서만 동작하는 custom protocol — main 프로세스의
+// 핸들러가 디스크 캐시를 (필요 시 복호화 후) 응답한다. 외부 노출 0.
 function useImageSrcWithFallback(messageId, httpUrl, wsFileCachedUrl) {
   const [dbCachedUrl, setDbCachedUrl] = useState(null)
   const [index, setIndex] = useState(0)
@@ -38,14 +41,15 @@ function useImageSrcWithFallback(messageId, httpUrl, wsFileCachedUrl) {
     return () => { cancelled = true }
   }, [messageId, wsFileCachedUrl])
 
-  // 후보 배열 — 빈 값은 제거, 중복 제거. 순서: ws 캐시 → DB 캐시 → HTTP 원본.
+  // 후보 배열 — 빈 값은 제거, 중복 제거. lanchat:// 가 있으면 최우선 (캐시 + 복호화 통합 경로).
   const candidates = useMemo(() => {
     const list = []
-    if (wsFileCachedUrl) list.push(wsFileCachedUrl)
+    if (messageId) list.push(`lanchat://file/${encodeURIComponent(messageId)}`)
+    if (wsFileCachedUrl && !list.includes(wsFileCachedUrl)) list.push(wsFileCachedUrl)
     if (dbCachedUrl && !list.includes(dbCachedUrl)) list.push(dbCachedUrl)
     if (httpUrl && !list.includes(httpUrl)) list.push(httpUrl)
     return list
-  }, [wsFileCachedUrl, dbCachedUrl, httpUrl])
+  }, [messageId, wsFileCachedUrl, dbCachedUrl, httpUrl])
 
   // 후보 배열이 바뀌면 인덱스/상태 초기화 (앞쪽에 더 우선순위 높은 후보가 추가되었을 수 있음)
   useEffect(() => {
