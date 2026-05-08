@@ -10,6 +10,7 @@ const { getProfile } = require('../storage/profile')
 const { saveFileCache } = require('../storage/queries')
 const { getPendingMessages, deletePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
+const { encryptBuffer, isEncryptedFile } = require('../crypto/fileEncryption')
 const { getFilePort } = require('../peer/fileServer')
 const { sendMessage, getConnections, disconnectFromPeer } = require('../peer/wsClient')
 const { getServerClientPeerIds, sendMessageToServerPeer } = require('../peer/wsServer')
@@ -320,6 +321,8 @@ function buildMyProfileImageUrl(ctx) {
 
 // 송신자 자기 메시지의 파일을 영구 캐시 (file_cache/) 로 복사하고 DB 매핑 저장.
 // 임시폴더(7일 정리)나 fileServer 포트 변경에도 표시가 유지되도록 한다.
+// tempFilePath 의 원본은 이미 암호화되어 있으므로 (save-file IPC 가 ciphertext 로 저장)
+// 단순 복사로 충분.
 function cacheOwnFile(ctx, messageId, fileName) {
   if (!fileName || !messageId) return
   try {
@@ -331,14 +334,18 @@ function cacheOwnFile(ctx, messageId, fileName) {
     const cachedPath = path.join(cacheDir, `${messageId}${ext}`)
     if (!fs.existsSync(cachedPath)) {
       fs.copyFileSync(sourcePath, cachedPath)
+      try { fs.chmodSync(cachedPath, 0o600) } catch {}
     }
     saveFileCache(ctx.state.database, { messageId, cachedPath })
   } catch { /* 캐시 실패 시 무시 — 표시는 tempFilePath 원본으로 폴백 */ }
 }
 
-// 수신된 파일을 로컬 캐시에 저장 — HTTP 실패 시 WebSocket으로 fallback
+// 수신된 파일을 로컬 캐시에 저장 — HTTP 실패 시 WebSocket으로 fallback.
+// 받은 평문(또는 송신자 측 ciphertext)을 자기 마스터키로 암호화해 디스크에 저장한다.
+// 디스크엔 절대 평문이 닿지 않는다.
 function cacheReceivedFile(ctx, messageId, fileUrl, fileName, fromId) {
   if (!fileUrl || !fileName) return
+  if (!ctx.state.masterKey) return
   const cacheDir = path.join(ctx.config.appDataPath, 'file_cache')
   fs.mkdirSync(cacheDir, { recursive: true })
   const ext = path.extname(fileName)
@@ -352,24 +359,37 @@ function cacheReceivedFile(ctx, messageId, fileUrl, fileName, fromId) {
   }
 
   const http = require('http')
-  const file = fs.createWriteStream(cachedPath)
   http.get(fileUrl, (response) => {
     if (response.statusCode !== 200) {
-      file.close()
-      try { fs.unlinkSync(cachedPath) } catch {}
       // HTTP 실패 → WebSocket으로 파일 요청
       requestFileViaWebSocket(ctx, messageId, fileName, fromId)
       return
     }
-    response.pipe(file)
-    file.on('finish', () => {
-      file.close()
-      try { saveFileCache(ctx.state.database, { messageId, cachedPath }) } catch {}
-      sendToRenderer(ctx, 'file-cached', { messageId, cachedPath })
+    const chunks = []
+    response.on('data', (chunk) => chunks.push(chunk))
+    response.on('end', () => {
+      try {
+        const received = Buffer.concat(chunks)
+        // 송신자 fileServer 가 ciphertext 를 그대로 응답한 경우 (3단계 적용된 동등 버전)
+        // → 자기 마스터키로 다시 암호화할 수 없으므로 그대로 저장은 의미 없음.
+        // 같은 LAN 다른 PC 의 마스터키는 다르기 때문이다. 4단계에서 ECDH 로 재설계.
+        // 현재는 평문으로 받은 경우에만 자기 마스터키로 암호화하여 저장.
+        const plaintext = isEncryptedFile(received) ? null : received
+        if (!plaintext) {
+          // ciphertext 받음 → ws 폴백으로 평문 받기 시도
+          requestFileViaWebSocket(ctx, messageId, fileName, fromId)
+          return
+        }
+        const encrypted = encryptBuffer(plaintext, ctx.state.masterKey)
+        fs.writeFileSync(cachedPath, encrypted, { mode: 0o600 })
+        try { saveFileCache(ctx.state.database, { messageId, cachedPath }) } catch {}
+        sendToRenderer(ctx, 'file-cached', { messageId, cachedPath })
+      } catch {
+        try { fs.unlinkSync(cachedPath) } catch {}
+        requestFileViaWebSocket(ctx, messageId, fileName, fromId)
+      }
     })
   }).on('error', () => {
-    file.close()
-    try { fs.unlinkSync(cachedPath) } catch {}
     // HTTP 오류 → WebSocket으로 파일 요청 (AP isolation 대응)
     requestFileViaWebSocket(ctx, messageId, fileName, fromId)
   })

@@ -23,6 +23,7 @@ const { registerAllIpcHandlers } = require('./ipcHandlers/index')
 const { sendToRenderer, clearBadge, checkAndNotifyUpdated } = require('./utils/appUtils')
 const { loadOrCreateMasterKey } = require('./crypto/masterKey')
 const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/lanchatProtocol')
+const { migratePlaintextFiles } = require('./storage/fileMigration')
 
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
@@ -79,6 +80,17 @@ async function initApp() {
       if (fs.statSync(filePath).mtimeMs < sevenDaysAgo) fs.unlinkSync(filePath)
     })
   } catch { /* 정리 실패 시 무시 */ }
+
+  // 평문으로 남아 있는 파일을 마스터키로 일괄 암호화 (1회 마이그레이션).
+  // "디스크 직접 접근 시 암호화 유지" 약속을 지키기 위함.
+  try {
+    const summary = migratePlaintextFiles(appDataPath, ctx.state.masterKey)
+    if (summary.converted > 0 || summary.failed > 0) {
+      writePeerDebugLog('main.fileMigration.summary', summary)
+    }
+  } catch (err) {
+    writePeerDebugLog('main.fileMigration.error', { error: err.message })
+  }
 
   // 만료된 pending 메시지 자동 정리 (7일 이상)
   try { deleteExpiredPendingMessages(ctx.state.database) } catch { /* 정리 실패 시 무시 */ }
