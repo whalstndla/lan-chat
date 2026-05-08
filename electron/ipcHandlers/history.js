@@ -14,7 +14,7 @@ function registerHistoryHandlers(ctx) {
     const history = getGlobalHistory(ctx.state.database, limit, offset)
     return history.map(msg => ({
       ...msg,
-      file_url: rewriteFileUrl(ctx, msg.file_url),
+      file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id),
     }))
   })
 
@@ -52,14 +52,14 @@ function registerHistoryHandlers(ctx) {
             read: readFlag,
             content: decryptedPayload.content,
             contentType: decryptedPayload.contentType || msg.content_type,
-            fileUrl: rewriteFileUrl(ctx, decryptedPayload.fileUrl || msg.file_url),
+            fileUrl: rewriteFileUrl(ctx, decryptedPayload.fileUrl || msg.file_url, msg.from_id),
             fileName: decryptedPayload.fileName || msg.file_name,
           }
         } catch (err) {
           console.warn(`[히스토리] sharedSecret 도출 실패: msgId=${msg.id}`, err.message)
         }
       }
-      return { ...msg, read: readFlag, file_url: rewriteFileUrl(ctx, msg.file_url) }
+      return { ...msg, read: readFlag, file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id) }
     })
   })
 
@@ -69,7 +69,7 @@ function registerHistoryHandlers(ctx) {
   // 메시지 전문 검색 (FTS5)
   ipcMain.handle('search-messages', (_, { query, type }) => {
     const results = searchMessages(ctx.state.database, { query, type })
-    return results.map(msg => ({ ...msg, file_url: rewriteFileUrl(ctx, msg.file_url) }))
+    return results.map(msg => ({ ...msg, file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id) }))
   })
 }
 

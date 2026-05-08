@@ -10,8 +10,11 @@ import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
 import useChatStore from '../store/useChatStore'
 
-// 파일 MIME 타입 → contentType 변환
+// 파일 MIME 타입 → contentType 변환.
+// SVG 는 XSS 위험으로 fileServer 가 attachment 강제 → 인라인 표시 불가.
+// 클라이언트에서도 'image' 가 아닌 'file' 로 분류해 다운로드 동작과 일관성 확보.
 function getFileContentType(file) {
+  if (file.type === 'image/svg+xml') return 'file'
   if (file.type.startsWith('image/')) return 'image'
   if (file.type.startsWith('video/')) return 'video'
   return 'file'

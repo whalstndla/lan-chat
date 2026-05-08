@@ -1,5 +1,5 @@
 // src/components/Message.jsx
-import React, { useState, useEffect, useMemo, useRef } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil, Loader2 } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
@@ -20,56 +20,48 @@ function formatTime(timestamp) {
 // 빠른 이모지 선택 목록
 const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
-// 이미지 소스 폴백 체인 관리 훅 — wsCache → DBCache → HTTP 순서로 시도하고,
-// 로드 실패하면 아직 시도하지 않은 다음 후보로 자동 전환한다.
-// 무한 루프 방지: 시도한 URL 을 ref 로 추적.
+// 이미지 소스 폴백 체인 — ws 캐시 → DB 캐시 → HTTP 원본 순으로 후보를 만들고
+// 현재 후보가 onError 일 때 다음으로 넘어간다.
+// 후보 배열 + 인덱스 방식이라 무한 루프나 race condition 이 발생하지 않는다.
 function useImageSrcWithFallback(messageId, httpUrl, wsFileCachedUrl) {
-  const [src, setSrc] = useState(wsFileCachedUrl || httpUrl || null)
+  const [dbCachedUrl, setDbCachedUrl] = useState(null)
+  const [index, setIndex] = useState(0)
   const [status, setStatus] = useState('loading') // 'loading' | 'loaded' | 'failed'
-  const attemptedRef = useRef(new Set())
 
-  // 메시지가 완전히 바뀌면 추적 초기화
-  useEffect(() => { attemptedRef.current = new Set() }, [messageId])
-
-  // ws 캐시가 도착하면 아직 시도 안 한 경우 우선 적용
+  // 마운트 / 메시지 변경 시 DB 캐시 선조회. wsFileCachedUrl 이 이미 있으면 생략.
   useEffect(() => {
-    if (!wsFileCachedUrl) return
-    if (attemptedRef.current.has(wsFileCachedUrl)) return
-    setSrc(wsFileCachedUrl)
-    setStatus('loading')
-  }, [wsFileCachedUrl])
-
-  // 마운트 시 DB 캐시 선조회 — 재시작/재마운트 후 이미 캐시된 파일이면 HTTP 건너뛰기
-  useEffect(() => {
-    if (!messageId || wsFileCachedUrl) return
+    if (!messageId || wsFileCachedUrl) { setDbCachedUrl(null); return }
     let cancelled = false
-    window.electronAPI.getCachedFileUrl(messageId).then(cached => {
-      if (cancelled || !cached) return
-      if (attemptedRef.current.has(cached)) return
-      setSrc(cached)
-      setStatus('loading')
-    }).catch(() => {})
+    window.electronAPI.getCachedFileUrl(messageId)
+      .then(cached => { if (!cancelled) setDbCachedUrl(cached || null) })
+      .catch(() => { if (!cancelled) setDbCachedUrl(null) })
     return () => { cancelled = true }
   }, [messageId, wsFileCachedUrl])
 
-  // src 변경되면 로딩 상태로 초기화
-  useEffect(() => { if (src) setStatus('loading') }, [src])
+  // 후보 배열 — 빈 값은 제거, 중복 제거. 순서: ws 캐시 → DB 캐시 → HTTP 원본.
+  const candidates = useMemo(() => {
+    const list = []
+    if (wsFileCachedUrl) list.push(wsFileCachedUrl)
+    if (dbCachedUrl && !list.includes(dbCachedUrl)) list.push(dbCachedUrl)
+    if (httpUrl && !list.includes(httpUrl)) list.push(httpUrl)
+    return list
+  }, [wsFileCachedUrl, dbCachedUrl, httpUrl])
 
+  // 후보 배열이 바뀌면 인덱스/상태 초기화 (앞쪽에 더 우선순위 높은 후보가 추가되었을 수 있음)
+  useEffect(() => {
+    setIndex(0)
+    setStatus(candidates.length > 0 ? 'loading' : 'failed')
+  }, [candidates])
+
+  const src = candidates[index] || null
   const onLoad = () => setStatus('loaded')
-  const onError = async () => {
-    if (src) attemptedRef.current.add(src)
-    // 다음 후보 탐색 — HTTP 원본 → DB 캐시 순서로 아직 시도 안 한 것 사용
-    if (httpUrl && !attemptedRef.current.has(httpUrl)) {
-      setSrc(httpUrl)
-      return
+  const onError = () => {
+    if (index + 1 < candidates.length) {
+      setIndex(index + 1)
+      setStatus('loading')
+    } else {
+      setStatus('failed')
     }
-    const dbCached = await window.electronAPI.getCachedFileUrl(messageId).catch(() => null)
-    if (dbCached && !attemptedRef.current.has(dbCached)) {
-      setSrc(dbCached)
-      return
-    }
-    // 모든 후보 소진 — 실패 상태
-    setStatus('failed')
   }
 
   return { src, status, onLoad, onError }

@@ -298,9 +298,12 @@ async function flushPendingMessages(ctx, targetPeerId, retryCount = 0) {
   }
 }
 
-// 파일 URL의 포트를 현재 파일 서버 포트로 재작성 (앱 재시작 후 포트 변경 대응)
-function rewriteFileUrl(ctx, url) {
+// 파일 URL 의 host:port 를 현재 파일 서버 주소로 재작성 (앱 재시작 후 포트 변경 대응).
+// 자기 메시지 (fromId === myPeerId) 에만 적용해야 한다.
+// 수신자 메시지의 URL 은 원본 송신자 IP/포트가 그대로 유지되어야 직접 GET 이 가능하다.
+function rewriteFileUrl(ctx, url, fromId) {
   if (!url || typeof url !== 'string') return url
+  if (fromId && fromId !== ctx.state.peerId) return url
   const fileUrlPattern = /^http:\/\/[^/]+\/files\//
   if (!fileUrlPattern.test(url)) return url
   const fileName = url.split('/files/')[1]
@@ -313,6 +316,24 @@ function buildMyProfileImageUrl(ctx) {
   const profile = getProfile(ctx.state.database)
   if (!profile?.profile_image) return null
   return `http://${ctx.state.localIP}:${getFilePort()}/profile/${profile.profile_image}`
+}
+
+// 송신자 자기 메시지의 파일을 영구 캐시 (file_cache/) 로 복사하고 DB 매핑 저장.
+// 임시폴더(7일 정리)나 fileServer 포트 변경에도 표시가 유지되도록 한다.
+function cacheOwnFile(ctx, messageId, fileName) {
+  if (!fileName || !messageId) return
+  try {
+    const sourcePath = path.join(ctx.config.appDataPath, 'files', fileName)
+    if (!fs.existsSync(sourcePath)) return
+    const cacheDir = path.join(ctx.config.appDataPath, 'file_cache')
+    fs.mkdirSync(cacheDir, { recursive: true })
+    const ext = path.extname(fileName)
+    const cachedPath = path.join(cacheDir, `${messageId}${ext}`)
+    if (!fs.existsSync(cachedPath)) {
+      fs.copyFileSync(sourcePath, cachedPath)
+    }
+    saveFileCache(ctx.state.database, { messageId, cachedPath })
+  } catch { /* 캐시 실패 시 무시 — 표시는 tempFilePath 원본으로 폴백 */ }
 }
 
 // 수신된 파일을 로컬 캐시에 저장 — HTTP 실패 시 WebSocket으로 fallback
@@ -392,5 +413,6 @@ module.exports = {
   rewriteFileUrl,
   buildMyProfileImageUrl,
   cacheReceivedFile,
+  cacheOwnFile,
   requestFileViaWebSocket,
 }

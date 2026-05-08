@@ -6,7 +6,7 @@ const { v4: uuidv4 } = require('uuid')
 const { saveMessage, deleteMessage, editMessage } = require('../storage/queries')
 const { savePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
-const { sendPeerMessage, broadcastPeerMessage, getCurrentNicknameSafely } = require('../utils/appUtils')
+const { sendPeerMessage, broadcastPeerMessage, getCurrentNicknameSafely, cacheOwnFile } = require('../utils/appUtils')
 
 // 허용 contentType/format 화이트리스트
 const ALLOWED_CONTENT_TYPES = ['text', 'image', 'video', 'file']
@@ -47,6 +47,11 @@ function registerMessageHandlers(ctx) {
         timestamp: message.timestamp,
       })
     } catch { /* DB 저장 실패 시 무시 */ }
+    // 자기가 보낸 파일을 영구 캐시로 복사 (재시작 / 임시폴더 정리 후에도 표시 유지)
+    if (message.fileUrl && message.fileName) {
+      const ownFileName = message.fileUrl.split('/files/')[1]
+      if (ownFileName) cacheOwnFile(ctx, message.id, ownFileName)
+    }
     return message
   })
 
@@ -59,6 +64,14 @@ function registerMessageHandlers(ctx) {
     const currentNickname = getCurrentNicknameSafely(ctx)
     const messageId = uuidv4()
     const timestamp = Date.now()
+
+    // 자기가 보낸 파일을 영구 캐시로 복사 — 오프라인/암호화실패/정상 모든 분기에서
+    // 동일하게 적용되어야 자기 이미지가 재시작 후에도 표시됨.
+    function cacheOwnFileIfAny() {
+      if (!fileUrl || !fileName) return
+      const ownFileName = fileUrl.split('/files/')[1]
+      if (ownFileName) cacheOwnFile(ctx, messageId, ownFileName)
+    }
 
     const recipientPublicKey = ctx.state.peerPublicKeyMap.get(recipientPeerId)
     if (!recipientPublicKey) {
@@ -78,6 +91,7 @@ function registerMessageHandlers(ctx) {
         file_url: fileUrl || null, file_name: fileName || null,
         timestamp,
       })
+      cacheOwnFileIfAny()
       return {
         id: messageId, type: 'dm', from: currentNickname, fromId: ctx.state.peerId,
         to: recipientPeerId, content: content || null, contentType, format: format || null,
@@ -111,6 +125,7 @@ function registerMessageHandlers(ctx) {
         file_url: fileUrl || null, file_name: fileName || null,
         timestamp,
       })
+      cacheOwnFileIfAny()
       return {
         id: messageId, type: 'dm', from: currentNickname, fromId: ctx.state.peerId,
         to: recipientPeerId, content: content || null, contentType, format: format || null,
@@ -147,6 +162,8 @@ function registerMessageHandlers(ctx) {
         timestamp: message.timestamp,
       })
     } catch { /* DB 저장 실패 시 무시 */ }
+
+    cacheOwnFileIfAny()
 
     // 렌더러에는 복호화된 내용으로 반환
     return {
