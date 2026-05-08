@@ -1,10 +1,9 @@
 // electron/main.js
 const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage } = require('electron')
+// safeStorage 는 v0.9.x 키체인 wrap 마스터키를 비밀번호 wrap 으로 마이그레이션할 때만 사용.
+// v0.10.0 부터는 OS 키체인 의존 없이 사용자 비밀번호 KDF 만으로 마스터키 보호.
 const path = require('path')
 const os = require('os')
-const { v4: uuidv4 } = require('uuid')
-const { initDatabase, migrateDatabase } = require('./storage/database')
-const { getProfile, updatePeerId } = require('./storage/profile')
 const { startWsServer, stopWsServer } = require('./peer/wsServer')
 const { disconnectAll } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
@@ -13,7 +12,6 @@ const { loadOrCreateKeyPair, exportPublicKey } = require('./crypto/keyManager')
 const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath } = require('./utils/peerDebugLogger')
 const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
 const { stopPeerDiscovery } = require('./peer/discovery')
-const { deleteExpiredPendingMessages } = require('./storage/pendingMessages')
 const { autoUpdater } = require('electron-updater')
 const fs = require('fs')
 
@@ -21,10 +19,7 @@ const { createAppContext } = require('./context')
 const { createIncomingMessageHandler } = require('./messageHandler')
 const { registerAllIpcHandlers } = require('./ipcHandlers/index')
 const { sendToRenderer, clearBadge, checkAndNotifyUpdated } = require('./utils/appUtils')
-const { loadOrCreateMasterKey } = require('./crypto/masterKey')
 const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/lanchatProtocol')
-const { migratePlaintextFiles } = require('./storage/fileMigration')
-const { migratePlaintextDbToEncrypted } = require('./storage/dbMigration')
 
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
@@ -35,7 +30,6 @@ const isDev = !app.isPackaged
 const appDataPath = app.getPath('userData')
 const tempFilePath = path.join(appDataPath, 'files')
 const profileFolderPath = path.join(appDataPath, 'profile')
-const dbPath = path.join(appDataPath, 'chat.db')
 const systemDefaultNickname = os.userInfo().username
 
 // AppContext 생성
@@ -82,19 +76,8 @@ async function initApp() {
     })
   } catch { /* 정리 실패 시 무시 */ }
 
-  // 평문으로 남아 있는 파일을 마스터키로 일괄 암호화 (1회 마이그레이션).
-  // "디스크 직접 접근 시 암호화 유지" 약속을 지키기 위함.
-  try {
-    const summary = migratePlaintextFiles(appDataPath, ctx.state.masterKey)
-    if (summary.converted > 0 || summary.failed > 0) {
-      writePeerDebugLog('main.fileMigration.summary', summary)
-    }
-  } catch (err) {
-    writePeerDebugLog('main.fileMigration.error', { error: err.message })
-  }
-
-  // 만료된 pending 메시지 자동 정리 (7일 이상)
-  try { deleteExpiredPendingMessages(ctx.state.database) } catch { /* 정리 실패 시 무시 */ }
+  // 파일 / DB 마이그레이션 + 만료 pending 정리는 register / login 시점
+  // (마스터키 unwrap + DB 오픈 이후) 에 수행한다.
 
   // 업데이트 후 첫 실행 감지
   checkAndNotifyUpdated(ctx)
@@ -130,49 +113,15 @@ async function initApp() {
 }
 
 async function createWindow() {
-  // 마스터키 로드 / 생성 — DB 초기화 / 파일 암호화의 기반이 되므로 가장 먼저 처리.
-  // safeStorage 사용 불가능한 환경에서는 의도적으로 throw → 앱 종료.
-  try {
-    ctx.state.masterKey = loadOrCreateMasterKey(appDataPath, safeStorage)
-  } catch (err) {
-    console.error('[main] 마스터키 초기화 실패:', err.message)
-    app.quit()
-    return
-  }
-
   // lanchat:// 프로토콜 핸들러 등록 — 앱 BrowserWindow 안에서만 파일 접근.
+  // ctx.state.masterKey 가 아직 null 이라 호출 시점에 핸들러가 분기 처리.
   registerLanChatHandler(ctx)
 
-  // 평문 DB 가 발견되면 1회 SQLCipher 암호화 DB 로 변환 (보안 6단계).
-  // 실패 시에는 평문 DB 를 잘못 cipher 로 열지 않도록 앱을 종료. 다음 실행 시 재시도.
-  try {
-    const result = migratePlaintextDbToEncrypted(dbPath, ctx.state.masterKey)
-    if (result.migrated) {
-      writePeerDebugLog('main.dbMigration.completed', { backupPath: result.backupPath })
-    }
-  } catch (err) {
-    writePeerDebugLog('main.dbMigration.error', { error: err.message })
-    console.error('[main] DB 마이그레이션 실패 — 평문 DB 보존 후 종료:', err.message)
-    app.quit()
-    return
-  }
+  // ctx.state.safeStorage — register/login IPC 가 v0.9.x 마이그레이션 시 사용.
+  ctx.state.safeStorage = safeStorage
 
-  // DB 초기화 (peerId 복원을 위해) — 마스터키로 복호화하여 열기
-  ctx.state.database = initDatabase(dbPath, ctx.state.masterKey)
-  try { migrateDatabase(ctx.state.database) } catch { /* 마이그레이션 부분 실패는 무시 — DB 자체는 유효 */ }
-
-  // peerId 복원 또는 신규 생성
-  const existingProfile = getProfile(ctx.state.database)
-  if (existingProfile?.peer_id) {
-    ctx.state.peerId = existingProfile.peer_id
-  } else {
-    ctx.state.peerId = uuidv4()
-    // 프로필이 있으면 즉시 저장, 없으면 register 시 저장
-    if (existingProfile) {
-      updatePeerId(ctx.state.database, ctx.state.peerId)
-    }
-  }
-
+  // 마스터키 / DB / peerId 는 register / login IPC 에서 처리한다 (비밀번호 입력 후).
+  // 부팅 시점엔 IPC 핸들러 등록 + fileServer / wsServer 만 시작.
   await initApp()
 
   // 모든 IPC 핸들러 등록

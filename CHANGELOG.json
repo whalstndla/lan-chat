@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.10.0",
+    "date": "2026-05-08",
+    "changes": [
+      { "type": "feat", "text": "[보안] OS 키체인 의존성 제거 — 마스터키를 사용자 비밀번호로 직접 wrap (PBKDF2-HMAC-SHA256, 310k iterations → KEK → AES-256-GCM). 외부 키 관리 시스템 없이 앱이 자체적으로 마스터키 보호" },
+      { "type": "feat", "text": "[보안] 부팅 시 DB 자동 오픈 폐기 — 비밀번호 입력 후에만 DB / 파일이 unlock. 다른 OS 계정에서 키체인을 풀어도 비밀번호 모르면 데이터 복호화 불가" },
+      { "type": "improve", "text": "자동 로그인 (24h 세션) 폐기 — 비밀번호 없이 마스터키를 unwrap 할 수 없으므로 매 실행마다 비밀번호 입력 필수. 보안 우선" },
+      { "type": "improve", "text": "[자동 마이그레이션] v0.9.x 키체인 wrap 마스터키 (master.key.enc) 를 첫 로그인 시 비밀번호 wrap (master.key) 으로 자동 변환 + 구 파일 삭제" },
+      { "type": "improve", "text": "비밀번호 변경 시 마스터키는 그대로 유지하고 KEK 만 새 비밀번호로 다시 wrap (rewrap) — 모든 데이터 재암호화 불필요, 즉시 적용" },
+      { "type": "improve", "text": "로그아웃 시 메모리의 마스터키를 0으로 덮어쓰고 DB 핸들 close — 메모리 잔재 최소화" }
+    ]
+  },
+  {
     "version": "0.9.1",
     "date": "2026-05-08",
     "changes": [
