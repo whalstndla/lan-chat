@@ -113,7 +113,7 @@ async function initApp() {
   ctx.state.myPublicKeyBase64 = exportPublicKey(publicKey)
 
   // 파일 서버 시작 (파일 + 프로필 이미지 제공)
-  await startFileServer(tempFilePath, profileFolderPath)
+  await startFileServer(profileFolderPath)
   writePeerDebugLog('main.fileServer.started', {
     filePort: getFilePort(),
     tempFilePath,
