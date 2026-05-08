@@ -10,7 +10,6 @@ const { getProfile } = require('../storage/profile')
 const { saveFileCache } = require('../storage/queries')
 const { getPendingMessages, deletePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
-const { encryptBuffer, isEncryptedFile } = require('../crypto/fileEncryption')
 const { getFilePort } = require('../peer/fileServer')
 const { sendMessage, getConnections, disconnectFromPeer } = require('../peer/wsClient')
 const { getServerClientPeerIds, sendMessageToServerPeer } = require('../peer/wsServer')
@@ -340,11 +339,11 @@ function cacheOwnFile(ctx, messageId, fileName) {
   } catch { /* 캐시 실패 시 무시 — 표시는 tempFilePath 원본으로 폴백 */ }
 }
 
-// 수신된 파일을 로컬 캐시에 저장 — HTTP 실패 시 WebSocket으로 fallback.
-// 받은 평문(또는 송신자 측 ciphertext)을 자기 마스터키로 암호화해 디스크에 저장한다.
-// 디스크엔 절대 평문이 닿지 않는다.
+// 수신된 파일 메타정보를 받아 ECDH 암호화 ws 채널로 직접 요청한다.
+// HTTP fileServer 경유는 LAN 도청 위험 + 다른 피어 마스터키 차이로 무용 → 4단계에서 제거.
+// 디스크엔 자기 마스터키로 다시 암호화한 ciphertext 만 저장된다.
 function cacheReceivedFile(ctx, messageId, fileUrl, fileName, fromId) {
-  if (!fileUrl || !fileName) return
+  if (!fileName) return
   if (!ctx.state.masterKey) return
   const cacheDir = path.join(ctx.config.appDataPath, 'file_cache')
   fs.mkdirSync(cacheDir, { recursive: true })
@@ -358,41 +357,8 @@ function cacheReceivedFile(ctx, messageId, fileUrl, fileName, fromId) {
     return
   }
 
-  const http = require('http')
-  http.get(fileUrl, (response) => {
-    if (response.statusCode !== 200) {
-      // HTTP 실패 → WebSocket으로 파일 요청
-      requestFileViaWebSocket(ctx, messageId, fileName, fromId)
-      return
-    }
-    const chunks = []
-    response.on('data', (chunk) => chunks.push(chunk))
-    response.on('end', () => {
-      try {
-        const received = Buffer.concat(chunks)
-        // 송신자 fileServer 가 ciphertext 를 그대로 응답한 경우 (3단계 적용된 동등 버전)
-        // → 자기 마스터키로 다시 암호화할 수 없으므로 그대로 저장은 의미 없음.
-        // 같은 LAN 다른 PC 의 마스터키는 다르기 때문이다. 4단계에서 ECDH 로 재설계.
-        // 현재는 평문으로 받은 경우에만 자기 마스터키로 암호화하여 저장.
-        const plaintext = isEncryptedFile(received) ? null : received
-        if (!plaintext) {
-          // ciphertext 받음 → ws 폴백으로 평문 받기 시도
-          requestFileViaWebSocket(ctx, messageId, fileName, fromId)
-          return
-        }
-        const encrypted = encryptBuffer(plaintext, ctx.state.masterKey)
-        fs.writeFileSync(cachedPath, encrypted, { mode: 0o600 })
-        try { saveFileCache(ctx.state.database, { messageId, cachedPath }) } catch {}
-        sendToRenderer(ctx, 'file-cached', { messageId, cachedPath })
-      } catch {
-        try { fs.unlinkSync(cachedPath) } catch {}
-        requestFileViaWebSocket(ctx, messageId, fileName, fromId)
-      }
-    })
-  }).on('error', () => {
-    // HTTP 오류 → WebSocket으로 파일 요청 (AP isolation 대응)
-    requestFileViaWebSocket(ctx, messageId, fileName, fromId)
-  })
+  // 항상 ECDH 기반 ws fallback 사용 — fileUrl 은 무시 (구버전 호환용 식별자).
+  requestFileViaWebSocket(ctx, messageId, fileName, fromId)
 }
 
 // WebSocket을 통해 파일 전송 요청 — HTTP가 막힌 네트워크 환경용
