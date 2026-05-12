@@ -24,6 +24,15 @@ const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/la
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
 
+// 단일 인스턴스 강제 — 트레이에 숨겨진 채로 사용자가 앱을 다시 실행했을 때
+// 두 번째 프로세스가 별도로 떠서 포트 / DB 락 충돌로 창이 안 뜨던 버그 방지.
+// 두 번째 인스턴스 시도는 즉시 종료하고, 첫 번째 인스턴스의 'second-instance'
+// 이벤트가 mainWindow 를 다시 띄워 준다.
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.quit()
+}
+
 const isDev = !app.isPackaged
 
 // 앱 데이터 경로
@@ -112,9 +121,12 @@ async function initApp() {
   writePeerDebugLog('main.wsServer.ready', { wsPort: ctx.state.wsServerInfo.port })
 }
 
-async function createWindow() {
+// 부팅 / 재실행 시 중복 호출 방지 플래그.
+let bootInitDone = false
+
+async function bootInitOnce() {
+  if (bootInitDone) return
   // lanchat:// 프로토콜 핸들러 등록 — 앱 BrowserWindow 안에서만 파일 접근.
-  // ctx.state.masterKey 가 아직 null 이라 호출 시점에 핸들러가 분기 처리.
   registerLanChatHandler(ctx)
 
   // ctx.state.safeStorage — register/login IPC 가 v0.9.x 마이그레이션 시 사용.
@@ -122,10 +134,27 @@ async function createWindow() {
 
   // 마스터키 / DB / peerId 는 register / login IPC 에서 처리한다 (비밀번호 입력 후).
   // 부팅 시점엔 IPC 핸들러 등록 + fileServer / wsServer 만 시작.
-  await initApp()
+  try {
+    await initApp()
+  } catch (err) {
+    console.error('[main] initApp 실패 — fileServer/wsServer 가 시작되지 않은 채로 창만 띄움:', err.message)
+    try { writePeerDebugLog('main.initApp.error', { error: err.message }) } catch {}
+  }
 
   // 모든 IPC 핸들러 등록
   registerAllIpcHandlers(ctx)
+  bootInitDone = true
+}
+
+async function createWindow() {
+  await bootInitOnce()
+
+  // 기존 창이 destroyed 가 아니면 그대로 띄워서 사용 (single instance second-instance / activate 경로)
+  if (ctx.state.mainWindow && !ctx.state.mainWindow.isDestroyed()) {
+    if (!ctx.state.mainWindow.isVisible()) ctx.state.mainWindow.show()
+    ctx.state.mainWindow.focus()
+    return
+  }
 
   ctx.state.mainWindow = new BrowserWindow({
     width: 1000,
@@ -277,7 +306,18 @@ function setupAutoUpdater() {
   })
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => createWindow().catch(err => {
+  console.error('[main] createWindow 실패:', err.message)
+}))
+
+// 사용자가 이미 실행 중인 앱을 또 실행하려고 시도 — 두 번째 프로세스는
+// requestSingleInstanceLock 으로 즉시 종료되고, 그 신호로 첫 번째 인스턴스가
+// 숨겨져 있던 창을 다시 띄운다.
+app.on('second-instance', () => {
+  createWindow().catch(err => {
+    console.error('[main] second-instance createWindow 실패:', err.message)
+  })
+})
 
 // cleanup 중복 실행 방지 플래그
 let hasCleanedUp = false
@@ -309,10 +349,15 @@ app.on('window-all-closed', () => {
   app.quit()
 })
 
-// macOS: Dock 클릭, Spotlight 재실행 등 표준 재활성화 시 숨긴 창 다시 표시
+// macOS: Dock 클릭, Spotlight 재실행 등 표준 재활성화 시 숨긴 창 다시 표시.
+// mainWindow 가 없거나 destroyed 된 경우엔 새로 만들어 준다 (창 안 뜨던 버그 방지).
 app.on('activate', () => {
-  if (ctx.state.mainWindow) {
-    ctx.state.mainWindow.show()
-    ctx.state.mainWindow.focus()
+  if (!ctx.state.mainWindow || ctx.state.mainWindow.isDestroyed()) {
+    createWindow().catch(err => {
+      console.error('[main] activate createWindow 실패:', err.message)
+    })
+    return
   }
+  if (!ctx.state.mainWindow.isVisible()) ctx.state.mainWindow.show()
+  ctx.state.mainWindow.focus()
 })

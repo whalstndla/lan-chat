@@ -1,5 +1,14 @@
 [
   {
+    "version": "0.10.1",
+    "date": "2026-05-12",
+    "changes": [
+      { "type": "fix", "text": "[창 안 뜨던 버그] 트레이에 숨겨진 채로 앱을 다시 실행하면 두 번째 프로세스가 별도로 떠 wsServer 포트 충돌로 BrowserWindow 가 생성되지 않던 문제 — requestSingleInstanceLock 으로 한 프로세스만 실행하고, 두 번째 시도는 즉시 종료되며 첫 번째 인스턴스가 second-instance 이벤트를 받아 숨겨진 창을 다시 띄움" },
+      { "type": "fix", "text": "macOS Dock 클릭 시 mainWindow 가 destroyed 인 경우 새로 만들지 않던 버그 — activate 핸들러에 isDestroyed 체크 + createWindow 재호출 추가" },
+      { "type": "fix", "text": "initApp 에서 throw 발생 시 createWindow 의 BrowserWindow 생성 코드에 도달 못 해 창이 안 뜨던 잠재 버그 — try-catch 로 감싸 로그 남기고 창은 계속 띄우도록" }
+    ]
+  },
+  {
     "version": "0.10.0",
     "date": "2026-05-08",
     "changes": [
