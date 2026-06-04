@@ -17,6 +17,8 @@ const { decryptBuffer, isEncryptedFile } = require('../crypto/fileEncryption')
 const SCHEME = 'lanchat'
 
 // 미디어 mime 추정 — fileServer 의 INLINE_SAFE_EXT 와 동일 정책.
+// HEIC / HEIF 는 송신측에서 JPEG 으로 변환하지만 변환 실패 / 구버전에서 넘어온 원본을
+// 폴백으로 처리하기 위해 매핑은 유지. Chromium 이 시스템 코덱으로 디코딩하면 그나마 표시됨.
 const MIME_BY_EXT = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -25,6 +27,7 @@ const MIME_BY_EXT = {
   '.bmp': 'image/bmp',
   '.avif': 'image/avif',
   '.ico': 'image/x-icon',
+  '.heic': 'image/heic', '.heif': 'image/heif',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',

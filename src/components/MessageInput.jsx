@@ -20,6 +20,35 @@ function getFileContentType(file) {
   return 'file'
 }
 
+// HEIC / HEIF 감지 — iPhone 기본 사진 포맷. Chromium 데스크톱은 시스템 코덱 의존이라
+// macOS 일부 버전 외에는 디코딩 불가. 송신 단계에서 JPEG 로 변환해 모든 수신측에서
+// 표시 가능하게 한다.
+function isHeicFile(file) {
+  if (!file) return false
+  const type = (file.type || '').toLowerCase()
+  if (type === 'image/heic' || type === 'image/heif') return true
+  // 일부 파일 시스템은 MIME 을 누락하고 확장자만 제공 (e.g., drag&drop on Linux)
+  const name = (file.name || '').toLowerCase()
+  return name.endsWith('.heic') || name.endsWith('.heif')
+}
+
+// HEIC blob → JPEG File. 변환 실패 시 null 반환 (호출부에서 원본 그대로 송신 폴백).
+// heic2any 는 libheif WASM 을 lazy 로드하므로 첫 호출 시 약간의 지연이 있을 수 있음.
+async function convertHeicToJpeg(file) {
+  try {
+    const { default: heic2any } = await import('heic2any')
+    const result = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 })
+    const blob = Array.isArray(result) ? result[0] : result
+    if (!blob) return null
+    // 확장자를 .jpg 로 교체. 원본 이름 보존 (User-friendly).
+    const baseName = (file.name || 'image').replace(/\.(heic|heif)$/i, '')
+    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg', lastModified: Date.now() })
+  } catch (err) {
+    console.warn('[HEIC 변환 실패]', err?.message || err)
+    return null
+  }
+}
+
 function isEditableElement(target) {
   if (!(target instanceof HTMLElement)) return false
   if (target.closest('[data-prevent-editor-autofocus="true"]')) return true
@@ -253,8 +282,22 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   // 단일 파일 전송 (isSending 상태는 호출부에서 관리).
   // saveFile 응답 형식: { ok: true, url, fileName } 또는 { ok: false, error, ... }.
   async function sendFile(file) {
-    const arrayBuffer = await file.arrayBuffer()
-    const saveResult = await window.electronAPI.saveFile(arrayBuffer, file.name)
+    // HEIC/HEIF 는 Chromium 디코딩이 플랫폼·버전마다 들쭉날쭉 → 송신 단계에서 JPEG 로
+    // 변환해 모든 수신측이 표시 가능하게 한다. 변환 실패 시 원본 그대로 보내고 (수신측이
+    // 가능하면 시도, 못하면 file-load failed 로 보임).
+    let uploadFile = file
+    if (isHeicFile(file)) {
+      const converted = await convertHeicToJpeg(file)
+      if (converted) {
+        uploadFile = converted
+      } else {
+        // 변환 실패 — file (다운로드 attachment) 로 보낸다. 적어도 손에 받을 수 있게.
+        // contentType 결정은 아래 getFileContentType 가 type 보고 처리.
+        uploadFile = new File([file], file.name, { type: 'application/octet-stream' })
+      }
+    }
+    const arrayBuffer = await uploadFile.arrayBuffer()
+    const saveResult = await window.electronAPI.saveFile(arrayBuffer, uploadFile.name)
     if (!saveResult || !saveResult.ok) {
       // 사이즈 초과 / 마스터키 미설정 / 디스크 에러 — 사용자에게 즉시 알림 + 송신 중단.
       if (saveResult?.error === 'tooLarge') {
@@ -268,8 +311,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       }
       return
     }
-    const contentType = getFileContentType(file)
-    const payload = { content: null, contentType, fileUrl: saveResult.url, fileName: file.name }
+    const contentType = getFileContentType(uploadFile)
+    const payload = { content: null, contentType, fileUrl: saveResult.url, fileName: uploadFile.name }
     let sentMessage
     if (currentRoom.type === 'global') {
       sentMessage = await window.electronAPI.sendGlobalMessage(payload)

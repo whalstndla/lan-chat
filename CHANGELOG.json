@@ -1,5 +1,13 @@
 [
   {
+    "version": "0.10.3",
+    "date": "2026-06-04",
+    "changes": [
+      { "type": "fix", "text": "[HEIC 이미지 업로드 표시 안 됨] iPhone 기본 사진 포맷(HEIC/HEIF)은 Chromium 데스크톱이 플랫폼·버전마다 디코딩 지원이 들쭉날쭉해 송수신 후 깨진 이미지로 보이던 문제 — 송신 단계에서 heic2any(libheif WASM)로 JPEG(quality 0.9)로 변환한 뒤 업로드. 변환 실패 시 file 첨부로 폴백 + lanchatProtocol MIME 매핑에 heic/heif 추가" },
+      { "type": "fix", "text": "[설정 닉네임 한 글자 입력 시마다 채팅창으로 포커스 이동] SettingsPanel 안의 ProfilePage / NotificationPage / DataPage / AppPage / MenuList / SubPageHeader 가 부모 함수 내부에 정의돼 매 렌더마다 새 컴포넌트 레퍼런스로 React 가 unmount→mount 사이클을 돌리던 문제 — 내부 컴포넌트를 모두 제거하고 JSX 를 직접 인라인. input DOM identity 가 유지돼 포커스 손실 없음" }
+    ]
+  },
+  {
     "version": "0.10.2",
     "date": "2026-06-04",
     "changes": [
