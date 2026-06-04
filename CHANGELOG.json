@@ -1,5 +1,19 @@
 [
   {
+    "version": "0.10.2",
+    "date": "2026-06-04",
+    "changes": [
+      { "type": "fix", "text": "[수신측 이미지·동영상 미표시 핵심 수정] wsServer maxPayload 가 10MB 라 base64 인코딩(1.33×) 고려 시 raw 7.5MB 만 넘어도 ws 라이브러리가 WebSocket 연결 자체를 끊어 file-data 가 수신측에 도달하지 못하던 문제 — maxPayload 를 200MB 로 상향(raw 약 150MB 까지 단발 전송)하고 wsClient 에도 동일 한도 명시" },
+      { "type": "fix", "text": "file-request 의 모든 silent return 분기(notFound / noPublicKey / noMasterKey / tooLarge / sendError)에서 명시적 file-request-error 응답 송신 — 수신측이 영원히 spinner 상태로 머무르지 않고 즉시 '이미지 불러오기 실패' 로 전환" },
+      { "type": "fix", "text": "수신측 파일 요청 자동 재시도 추가 — 3s / 6s / 12s 백오프로 최대 3회 재요청, 그래도 실패 시 timeout 통보. 임시 race condition(키 늦게 도착·연결 잠시 불안정)에서 자연 회복" },
+      { "type": "fix", "text": "save-file IPC 사이즈 사전 가드 — 150MB 초과 파일은 송신 단계에서 차단하고 사용자에게 즉시 안내. wsServer maxPayload 를 넘는 거대 파일이 silent 실패하지 않도록 함" },
+      { "type": "improve", "text": "save-file IPC 응답 형식을 {ok, url, error} 구조로 변경 — 실패 원인(noMasterKey / tooLarge / writeError)을 렌더러가 식별해 사용자에게 정확한 알림" },
+      { "type": "improve", "text": "로그아웃 / 세션 종료 시 진행 중인 파일 요청 타이머 일괄 정리 (clearAllPendingFileRequests) — 메모리 누수·재로그인 후 stale retry 방지" },
+      { "type": "improve", "text": "wsServer 소켓 에러 silent 처리를 로깅으로 전환 — maxPayload 초과(ws code 1009 'message too big') 등 향후 진단 가능" },
+      { "type": "improve", "text": "[IME 진단] 한국어 입력 첫 글자/자모 사라짐 추적용으로 Placeholder 확장 임시 비활성화 + 에디터 DOM 내부 keydown 에서 강제 focus('end') 호출 회피 가드 추가. 검증 후 영구 처리 결정 예정" }
+    ]
+  },
+  {
     "version": "0.10.1",
     "date": "2026-05-12",
     "changes": [

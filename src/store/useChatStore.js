@@ -30,6 +30,9 @@ const useChatStore = create((set, get) => ({
   typingUsers: {}, // { peerId: { nickname, timestamp } }
   mutedRooms: loadMutedRooms(), // { roomKey: boolean } — 채팅방별 알림 뮤트 상태
   cachedFileUrls: {}, // { messageId: 'file://...' } — WebSocket으로 수신한 파일 캐시 경로
+  // { messageId: 'notFound' | 'tooLarge' | 'timeout' | ... } — file-request 실패 통보.
+  // 렌더러가 'loading' 에서 'failed' 로 즉시 전환하기 위해 사용.
+  fileLoadErrors: {},
 
   // 채팅방 뮤트 토글 (roomKey: 'global' 또는 peerId)
   toggleRoomMute: (roomKey) =>
@@ -104,8 +107,22 @@ const useChatStore = create((set, get) => ({
     })),
 
   setCachedFileUrl: (messageId, localPath) =>
+    set((state) => {
+      // 캐시 URL 도착 시 같은 messageId 의 기존 실패 상태는 해제 (재시도 회복 케이스).
+      if (!state.fileLoadErrors[messageId]) {
+        return { cachedFileUrls: { ...state.cachedFileUrls, [messageId]: localPath } }
+      }
+      const updatedErrors = { ...state.fileLoadErrors }
+      delete updatedErrors[messageId]
+      return {
+        cachedFileUrls: { ...state.cachedFileUrls, [messageId]: localPath },
+        fileLoadErrors: updatedErrors,
+      }
+    }),
+
+  setFileLoadError: (messageId, reason) =>
     set((state) => ({
-      cachedFileUrls: { ...state.cachedFileUrls, [messageId]: localPath },
+      fileLoadErrors: { ...state.fileLoadErrors, [messageId]: reason || 'unknown' },
     })),
 
   setTyping: (peerId, nickname, to) =>

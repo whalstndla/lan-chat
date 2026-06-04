@@ -29,7 +29,7 @@ const { stopBroadcastDiscovery } = require('../peer/broadcastDiscovery')
 const { stopPeerDiscovery } = require('../peer/discovery')
 const { disconnectAll } = require('../peer/wsClient')
 const { closeAllServerClients } = require('../peer/wsServer')
-const { clearAllPeerConnectRetryState } = require('../utils/appUtils')
+const { clearAllPeerConnectRetryState, clearAllPendingFileRequests } = require('../utils/appUtils')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
 // 마스터키가 unlock 된 상태에서 DB 를 열고 마이그레이션 / 만료정리 수행.
@@ -181,6 +181,7 @@ function registerAuthHandlers(ctx) {
     if (ctx.state.wsServerInfo) closeAllServerClients(ctx.state.wsServerInfo)
     ctx.state.peerPublicKeyMap.clear()
     clearAllPeerConnectRetryState(ctx)
+    clearAllPendingFileRequests(ctx)
     ctx.state.discoveryEpoch++
     teardownSession(ctx)
   })

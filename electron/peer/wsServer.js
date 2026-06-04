@@ -6,13 +6,20 @@ const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 const ALLOWED_MESSAGE_TYPES = [
   'key-exchange', 'hello', 'typing', 'delete-message', 'nickname-changed',
   'read-receipt', 'message', 'dm', 'reaction', 'edit-message', 'status-changed',
-  'file-request', 'file-data',
+  'file-request', 'file-data', 'file-request-error',
 ]
 
 // IP별 연결 수 추적 (DoS 방지)
 const connectionCountByIP = new Map()
 const MAX_CONNECTIONS_PER_IP = 20
 const MAX_MESSAGES_PER_SECOND = 50
+
+// WebSocket 단일 메시지 최대 크기.
+// 10MB(v0.10.x 이전) 는 대부분 사진/스크린샷·모든 동영상 file-data 가 초과 → ws 라이브러리가
+// 메시지가 아니라 연결 자체를 끊어버려 수신측이 영원히 "이미지 불러오기 실패" 상태에 빠짐.
+// 200MB 까지 허용하면 base64 오버헤드(1.33x) 고려 시 raw 약 150MB 파일까지 단발 전송 가능.
+// 그 이상은 sender 측에서 사전 차단 (MAX_RAW_FILE_BYTES, save-file IPC).
+const MAX_PAYLOAD_BYTES = 200 * 1024 * 1024
 
 // 기본 heartbeat 주기 (ms)
 const DEFAULT_HEARTBEAT_INTERVAL = 10000
@@ -36,7 +43,7 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
 
     const attemptBind = (candidateIndex) => {
       const port = portCandidates[candidateIndex]
-      const server = new WebSocketServer({ port, maxPayload: 10 * 1024 * 1024 })
+      const server = new WebSocketServer({ port, maxPayload: MAX_PAYLOAD_BYTES })
       server._peerSocketMap = new Map()
 
       const onBindError = (err) => {
@@ -91,8 +98,17 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
           let messageCount = 0
           let lastResetTime = Date.now()
 
-          // maxPayload 초과 등 소켓 에러를 개별 처리 — 없으면 uncaughtException으로 번짐
-          socket.on('error', () => {})
+          // 소켓 에러를 개별 처리 — 없으면 uncaughtException 으로 번짐.
+          // maxPayload 초과 (ws code 1009 "message too big") 가 가장 흔한 케이스 — 그 경우
+          // ws 라이브러리가 연결을 끊으므로 파일 송수신 실패가 영구화될 수 있다. 진단 가능하도록 로깅.
+          socket.on('error', (err) => {
+            writePeerDebugLog('wsServer.socket.error', {
+              clientIP,
+              peerId: socket._peerId,
+              code: err?.code || null,
+              message: err?.message || null,
+            })
+          })
 
           socket.on('message', (data) => {
             // 메시지 빈도 체크
@@ -241,4 +257,5 @@ module.exports = {
   closeAllServerClients,
   getServerClientPeerIds,
   sendMessageToServerPeer,
+  MAX_PAYLOAD_BYTES,
 }

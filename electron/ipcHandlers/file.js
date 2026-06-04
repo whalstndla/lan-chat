@@ -9,24 +9,38 @@ const { v4: uuidv4 } = require('uuid')
 const { getFileCache } = require('../storage/queries')
 const { getFilePort } = require('../peer/fileServer')
 const { encryptBuffer } = require('../crypto/fileEncryption')
+const { MAX_RAW_FILE_BYTES } = require('../utils/appUtils')
 
 function registerFileHandlers(ctx) {
   const tempFilePath = path.join(ctx.config.appDataPath, 'files')
 
-  // 파일 임시 저장 후 URL 반환.
+  // 파일 임시 저장 후 결과 객체 반환 — { ok, url, fileName, error? }.
   // preload 에서 이미 Uint8Array 로 변환되어 들어오므로 추가 변환 불필요.
   // 디스크엔 항상 ciphertext 만 저장 — 평문 바이트는 결코 디스크에 닿지 않는다.
+  // 사이즈 초과 / 마스터키 미설정 등 실패 시 명시적 error 코드로 응답 → 렌더러가 토스트 표시.
   ipcMain.handle('save-file', (_, { fileBuffer, fileName }) => {
     try {
-      if (!ctx.state.masterKey) return null
+      if (!ctx.state.masterKey) {
+        return { ok: false, error: 'noMasterKey' }
+      }
+      // 사이즈 사전 차단 — wsServer maxPayload 를 초과할 거대 파일은 보내봐야 수신측 연결만
+      // 끊김. 사용자에게 즉시 알려서 송신 시도를 막는다.
+      const byteLength = fileBuffer?.byteLength ?? fileBuffer?.length ?? 0
+      if (byteLength > MAX_RAW_FILE_BYTES) {
+        return { ok: false, error: 'tooLarge', maxBytes: MAX_RAW_FILE_BYTES, size: byteLength }
+      }
       const ext = path.extname(fileName)
       const savedFileName = `${uuidv4()}${ext}`
       const savePath = path.join(tempFilePath, savedFileName)
       const ciphertext = encryptBuffer(Buffer.from(fileBuffer), ctx.state.masterKey)
       fs.writeFileSync(savePath, ciphertext, { mode: 0o600 })
-      return `http://${ctx.state.localIP}:${getFilePort()}/files/${savedFileName}`
-    } catch {
-      return null
+      return {
+        ok: true,
+        url: `http://${ctx.state.localIP}:${getFilePort()}/files/${savedFileName}`,
+        fileName: savedFileName,
+      }
+    } catch (err) {
+      return { ok: false, error: 'writeError', message: err.message }
     }
   })
 

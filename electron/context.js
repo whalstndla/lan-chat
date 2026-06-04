@@ -34,6 +34,10 @@ function createAppContext(config) {
       mySessionId: null,
       // 디스크 저장 파일/DB 암호화에 쓰는 32바이트 마스터키 (safeStorage 로 보호된 키체인 기반)
       masterKey: null,
+      // 진행 중인 파일 요청 추적용 — messageId → { fromId, fileName, attempt, timer }.
+      // cacheReceivedFile 이 file-request 를 송신할 때 등록하고, file-data 수신 또는
+      // file-request-error 수신 시 정리. 타임아웃 만료 시 백오프로 재요청.
+      pendingFileRequestMap: new Map(),
     },
   }
 }

@@ -16,6 +16,7 @@ const deleteMessageHandler = require('./handlers/delete')
 const editMessageHandler = require('./handlers/edit')
 const fileRequest = require('./handlers/fileRequest')
 const fileData = require('./handlers/fileData')
+const fileRequestError = require('./handlers/fileRequestError')
 const keyExchange = require('./handlers/keyExchange')
 const hello = require('./handlers/hello')
 const dm = require('./handlers/dm')
@@ -32,6 +33,7 @@ const HANDLERS = {
   'edit-message': editMessageHandler,
   'file-request': fileRequest,
   'file-data': fileData,
+  'file-request-error': fileRequestError,
   'key-exchange': keyExchange,       // v1 (현재 기본 전송 포맷)
   'hello': hello,                    // v2 (수신 지원만, 송신은 v0.9.0부터)
   'dm': dm,

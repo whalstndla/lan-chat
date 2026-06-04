@@ -1,6 +1,7 @@
 // electron/peer/wsClient.js
 const WebSocket = require('ws')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
+const { MAX_PAYLOAD_BYTES } = require('./wsServer')
 
 // 피어 ID → WebSocket 소켓 매핑
 const connectionMap = new Map()
@@ -70,7 +71,9 @@ function connectToPeer({
       existingSocket.close()
     }
 
-    const socket = new WebSocket(`ws://${host}:${wsPort}`)
+    // maxPayload — wsServer 와 동일 한도 명시. 기본값(client) 은 사실상 무제한이지만
+    // 양쪽 비대칭 시 한쪽만 연결을 끊는 일관성 없는 동작을 방지.
+    const socket = new WebSocket(`ws://${host}:${wsPort}`, { maxPayload: MAX_PAYLOAD_BYTES })
     // 연결 성공 여부 플래그 — 연결 실패 시 onClose가 오발되지 않도록 방지
     let connected = false
     // Promise settle 중복 방지

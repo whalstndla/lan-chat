@@ -28,7 +28,9 @@ const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 //   1) wsFileCachedUrl — file-cached 이벤트 도착 시 cache buster 포함 lanchat:// URL
 //      (첫 후보와 다른 string → React 가 새 fetch 강제)
 //   2) lanchat://file/<messageId> — 기본 표시 경로 (이미 캐시된 경우 즉시 200)
-function useImageSrcWithFallback(messageId, _httpUrl, wsFileCachedUrl) {
+//
+// loadError: main 에서 file-request-error 를 받으면 'failed' 로 즉시 전환 → spinner 무한 대기 방지.
+function useImageSrcWithFallback(messageId, _httpUrl, wsFileCachedUrl, loadError) {
   const [index, setIndex] = useState(0)
   const [status, setStatus] = useState('loading') // 'loading' | 'loaded' | 'failed'
 
@@ -39,11 +41,19 @@ function useImageSrcWithFallback(messageId, _httpUrl, wsFileCachedUrl) {
     return list
   }, [messageId, wsFileCachedUrl])
 
-  // 후보 배열이 바뀌면 인덱스/상태 초기화 (앞쪽에 더 우선순위 높은 후보가 추가되었을 수 있음)
+  // 후보 배열이 바뀌면 인덱스/상태 초기화 (앞쪽에 더 우선순위 높은 후보가 추가되었을 수 있음).
+  // 단, 이미 loaded 상태에서 wsFileCachedUrl 이 추가되더라도 (정상 표시 중) 강제 재로드 하지 않음.
   useEffect(() => {
     setIndex(0)
     setStatus(candidates.length > 0 ? 'loading' : 'failed')
   }, [candidates])
+
+  // 송신측에서 명시적 실패 통보를 받으면 spinner → failed 로 즉시 전환.
+  useEffect(() => {
+    if (loadError && status !== 'loaded') {
+      setStatus('failed')
+    }
+  }, [loadError, status])
 
   const src = candidates[index] || null
   const onLoad = () => setStatus('loaded')
@@ -63,7 +73,8 @@ function useImageSrcWithFallback(messageId, _httpUrl, wsFileCachedUrl) {
 function ExtraImageThumb({ imageMessage, onClick }) {
   const rawUrl = imageMessage.fileUrl || imageMessage.file_url
   const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[imageMessage.id])
-  const { src, status, onLoad, onError } = useImageSrcWithFallback(imageMessage.id, rawUrl, wsFileCachedUrl)
+  const loadError = useChatStore(state => state.fileLoadErrors[imageMessage.id])
+  const { src, status, onLoad, onError } = useImageSrcWithFallback(imageMessage.id, rawUrl, wsFileCachedUrl, loadError)
 
   if (!src && status !== 'failed') return null
   return (
@@ -122,8 +133,9 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
 
   // 이미지/비디오 URL — 폴백 체인 (ws 캐시 → DB 캐시 → HTTP 원본) 관리
   const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[message.id])
+  const loadError = useChatStore(state => state.fileLoadErrors[message.id])
   const { src: resolvedFileUrl, status: imgStatus, onLoad: onImgLoad, onError: onImgError } =
-    useImageSrcWithFallback(message.id, fileUrl, wsFileCachedUrl)
+    useImageSrcWithFallback(message.id, fileUrl, wsFileCachedUrl, loadError)
 
   // 발신자 아바타 URL 계산
   const senderPeer = onlinePeers.find(p => p.peerId === senderId)

@@ -339,12 +339,82 @@ function cacheOwnFile(ctx, messageId, fileName) {
   } catch { /* 캐시 실패 시 무시 — 표시는 tempFilePath 원본으로 폴백 */ }
 }
 
+// 파일 송수신 사이즈 한도 — wsServer.MAX_PAYLOAD_BYTES 와 base64 오버헤드(1.33x) 를
+// 고려해 raw 150MB 까지 단발 전송 허용. 그 이상은 send-file IPC 에서 사전 차단.
+const MAX_RAW_FILE_BYTES = 150 * 1024 * 1024
+
+// 파일 재요청 백오프 (ms). 메시지 손실·키 도착 지연·임시 연결 불안정에 대비.
+// 한 번에 끝내지 않고 점진적으로 retry → 사용자가 오래 기다리지 않으면서도
+// 짧은 race 에서 회복.
+const FILE_REQUEST_RETRY_DELAYS_MS = [3000, 6000, 12000]
+
+// 진행 중인 파일 요청 정리. file-data 수신 성공 / file-request-error 수신 / 영구 실패 시 호출.
+function clearPendingFileRequest(ctx, messageId) {
+  const pending = ctx.state.pendingFileRequestMap.get(messageId)
+  if (!pending) return
+  if (pending.timer) clearTimeout(pending.timer)
+  ctx.state.pendingFileRequestMap.delete(messageId)
+}
+
+// 모든 진행 중인 파일 요청 일괄 정리 (로그아웃/세션 종료용)
+function clearAllPendingFileRequests(ctx) {
+  if (!ctx.state.pendingFileRequestMap) return
+  ctx.state.pendingFileRequestMap.forEach((pending) => {
+    if (pending?.timer) clearTimeout(pending.timer)
+  })
+  ctx.state.pendingFileRequestMap.clear()
+}
+
+// 다음 백오프 step 으로 재요청 스케줄. attempt 가 한도 초과면 영구 실패로 처리.
+function scheduleFileRequestRetry(ctx, messageId, fileName, fromId) {
+  const pending = ctx.state.pendingFileRequestMap.get(messageId)
+  if (!pending) return
+  const nextDelay = FILE_REQUEST_RETRY_DELAYS_MS[pending.attempt]
+  if (nextDelay === undefined) {
+    // 모든 재시도 소진 — 렌더러에 실패 통보 (사용자가 영원히 spinner 보지 않도록)
+    writePeerDebugLog('main.fileTransfer.giveUp', { messageId, fileName, fromId, attempts: pending.attempt })
+    sendToRenderer(ctx, 'file-request-error', { messageId, reason: 'timeout' })
+    clearPendingFileRequest(ctx, messageId)
+    return
+  }
+  pending.timer = setTimeout(() => {
+    // 타이머 만료 시점에 이미 캐시됐을 수 있음 — DB 확인
+    try {
+      if (ctx.state.database) {
+        const cachedPath = require('../storage/queries').getFileCache(ctx.state.database, messageId)
+        if (cachedPath && fs.existsSync(cachedPath)) {
+          clearPendingFileRequest(ctx, messageId)
+          return
+        }
+      }
+    } catch { /* DB 조회 실패 시 진행 */ }
+    pending.attempt += 1
+    writePeerDebugLog('main.fileTransfer.retry', { messageId, fileName, fromId, attempt: pending.attempt })
+    sendPeerMessage(ctx, fromId, {
+      type: 'file-request',
+      fromId: ctx.state.peerId,
+      messageId,
+      fileName,
+    })
+    scheduleFileRequestRetry(ctx, messageId, fileName, fromId)
+  }, nextDelay)
+  if (pending.timer.unref) pending.timer.unref()
+}
+
 // 수신된 파일 메타정보를 받아 ECDH 암호화 ws 채널로 직접 요청한다.
 // HTTP fileServer 경유는 LAN 도청 위험 + 다른 피어 마스터키 차이로 무용 → 4단계에서 제거.
 // 디스크엔 자기 마스터키로 다시 암호화한 ciphertext 만 저장된다.
 function cacheReceivedFile(ctx, messageId, fileUrl, fileName, fromId) {
-  if (!fileName) return
-  if (!ctx.state.masterKey) return
+  if (!fileName) {
+    // fileName 누락 — 렌더러는 표시 시도조차 무의미하므로 즉시 실패 통보
+    sendToRenderer(ctx, 'file-request-error', { messageId, reason: 'missingFileName' })
+    return
+  }
+  if (!ctx.state.masterKey) {
+    // 마스터키 미설정 시 캐시 디렉토리 권한이나 암호화 자체가 불가 — 즉시 실패 통보
+    sendToRenderer(ctx, 'file-request-error', { messageId, reason: 'noMasterKey' })
+    return
+  }
   const cacheDir = path.join(ctx.config.appDataPath, 'file_cache')
   fs.mkdirSync(cacheDir, { recursive: true })
   const ext = path.extname(fileName)
@@ -361,9 +431,15 @@ function cacheReceivedFile(ctx, messageId, fileUrl, fileName, fromId) {
   requestFileViaWebSocket(ctx, messageId, fileName, fromId)
 }
 
-// WebSocket을 통해 파일 전송 요청 — HTTP가 막힌 네트워크 환경용
+// WebSocket을 통해 파일 전송 요청 — HTTP가 막힌 네트워크 환경용.
+// 동일 messageId 의 진행 중 요청이 있으면 중복 송신하지 않고 기존 타이머 유지.
 function requestFileViaWebSocket(ctx, messageId, fileName, fromId) {
   if (!fromId) return
+  // 이미 진행 중이면 중복 송신 방지
+  if (ctx.state.pendingFileRequestMap.has(messageId)) {
+    writePeerDebugLog('main.fileTransfer.requestSkippedInFlight', { messageId, fileName, fromId })
+    return
+  }
   writePeerDebugLog('main.fileTransfer.request', { messageId, fileName, fromId })
   sendPeerMessage(ctx, fromId, {
     type: 'file-request',
@@ -371,6 +447,13 @@ function requestFileViaWebSocket(ctx, messageId, fileName, fromId) {
     messageId,
     fileName,
   })
+  ctx.state.pendingFileRequestMap.set(messageId, {
+    fromId,
+    fileName,
+    attempt: 0,
+    timer: null,
+  })
+  scheduleFileRequestRetry(ctx, messageId, fileName, fromId)
 }
 
 module.exports = {
@@ -401,4 +484,8 @@ module.exports = {
   cacheReceivedFile,
   cacheOwnFile,
   requestFileViaWebSocket,
+  clearPendingFileRequest,
+  clearAllPendingFileRequests,
+  MAX_RAW_FILE_BYTES,
+  FILE_REQUEST_RETRY_DELAYS_MS,
 }

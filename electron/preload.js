@@ -90,6 +90,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('file-cached')
     ipcRenderer.on('file-cached', (_, data) => callback(data))
   },
+  // 파일 요청 실패 통보 — 송신측에서 명시적 error 응답을 받았거나 retry 가 모두 소진된 경우.
+  // 렌더러는 loading → failed 로 즉시 전환.
+  onFileRequestError: (callback) => {
+    ipcRenderer.removeAllListeners('file-request-error')
+    ipcRenderer.on('file-request-error', (_, data) => callback(data))
+  },
   subscribeToPeerLeft: (callback) => {
     ipcRenderer.removeAllListeners('peer-left')
     ipcRenderer.on('peer-left', (_, peerId) => callback(peerId))
@@ -136,6 +142,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('pending-messages-flushed')
     ipcRenderer.removeAllListeners('peer-connecting')
     ipcRenderer.removeAllListeners('file-cached')
+    ipcRenderer.removeAllListeners('file-request-error')
     ipcRenderer.removeAllListeners('read-receipt')
     ipcRenderer.removeAllListeners('navigate-to-room')
     ipcRenderer.removeAllListeners('reaction-updated')

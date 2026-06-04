@@ -46,9 +46,12 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         heading: false,
         horizontalRule: false,
       }),
-      Placeholder.configure({
-        placeholder: `${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`,
-      }),
+      // [IME 진단 v0.10.2] Placeholder 확장이 한국어 composition transition 중 빈 노드 ↔
+      // 채워진 노드 토글로 ProseMirror DOM observer를 흔들어 첫 글자/자모가 사라지는지
+      // 확인용으로 임시 비활성화. 검증 후 영구 처리 결정 (옵션 조정 또는 CSS 직접 처리).
+      // Placeholder.configure({
+      //   placeholder: `${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`,
+      // }),
       Markdown.configure({
         // 마크다운 붙여넣기 → 리치 텍스트 변환
         transformPastedText: true,
@@ -146,23 +149,17 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     })
   }, [editor])
 
-  // placeholder 업데이트 (방 변경 시)
-  useEffect(() => {
-    if (!editor) return
-    editor.extensionManager.extensions
-      .find(ext => ext.name === 'placeholder')
-      ?.options && editor.setOptions({
-        editorProps: {
-          ...editor.options.editorProps,
-        },
-      })
-  }, [currentRoom, editor])
-
   // 창 포커스 복귀 시 키 입력으로 에디터 자동 포커스
   useEffect(() => {
     if (!editor) return
     const handleKeyDown = (event) => {
       if (event.isComposing || event.keyCode === 229) return
+      // 에디터 DOM 내부에서 발생한 키 입력은 절대 강제 focus() 호출 대상이 아니어야 함.
+      // 한국어 IME composition 종료/시작 transition 사이 짧은 순간에는 editor.isFocused가
+      // 일시적으로 false로 보고되는 경우가 있는데, 그때 focus('end')가 호출되면 ProseMirror
+      // selection이 흔들리며 다음 글자 조합이 깨질 수 있음 → 안전 가드.
+      const editorDom = editor.view?.dom
+      if (editorDom && event.target instanceof Node && editorDom.contains(event.target)) return
       // 에디터에 이미 포커스가 있으면 무시
       if (editor.isFocused) return
       // 이벤트 대상이나 현재 포커스가 편집 가능한 요소면 무시
@@ -253,12 +250,26 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     sendMessageRef.current = sendMessage
   }, [sendMessage])
 
-  // 단일 파일 전송 (isSending 상태는 호출부에서 관리)
+  // 단일 파일 전송 (isSending 상태는 호출부에서 관리).
+  // saveFile 응답 형식: { ok: true, url, fileName } 또는 { ok: false, error, ... }.
   async function sendFile(file) {
     const arrayBuffer = await file.arrayBuffer()
-    const fileUrl = await window.electronAPI.saveFile(arrayBuffer, file.name)
+    const saveResult = await window.electronAPI.saveFile(arrayBuffer, file.name)
+    if (!saveResult || !saveResult.ok) {
+      // 사이즈 초과 / 마스터키 미설정 / 디스크 에러 — 사용자에게 즉시 알림 + 송신 중단.
+      if (saveResult?.error === 'tooLarge') {
+        const maxMb = Math.floor(saveResult.maxBytes / (1024 * 1024))
+        const sizeMb = (saveResult.size / (1024 * 1024)).toFixed(1)
+        window.alert(`파일이 너무 큽니다 (${sizeMb}MB). 최대 ${maxMb}MB 까지 전송 가능합니다.`)
+      } else if (saveResult?.error === 'noMasterKey') {
+        window.alert('파일 전송 준비가 안 됐습니다. 다시 로그인 후 시도해 주세요.')
+      } else {
+        window.alert('파일 저장에 실패했습니다.')
+      }
+      return
+    }
     const contentType = getFileContentType(file)
-    const payload = { content: null, contentType, fileUrl, fileName: file.name }
+    const payload = { content: null, contentType, fileUrl: saveResult.url, fileName: file.name }
     let sentMessage
     if (currentRoom.type === 'global') {
       sentMessage = await window.electronAPI.sendGlobalMessage(payload)

@@ -82,6 +82,11 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         useChatStore.getState().setCachedFileUrl(messageId, url)
       })
 
+      // 파일 요청 실패 (송신측 명시적 에러 또는 retry 소진) → 렌더러 즉시 failed 전환.
+      window.electronAPI.onFileRequestError(({ messageId, reason }) => {
+        useChatStore.getState().setFileLoadError(messageId, reason)
+      })
+
       window.electronAPI.onPeerNicknameChanged(({ peerId: changedPeerId, nickname: newNickname }) => {
         usePeerStore.getState().updatePeerNickname(changedPeerId, newNickname)
         const { currentRoom, setCurrentRoom } = useChatStore.getState()

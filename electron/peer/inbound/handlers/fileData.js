@@ -5,7 +5,7 @@
 const path = require('path')
 const fs = require('fs')
 const { saveFileCache } = require('../../../storage/queries')
-const { sendToRenderer } = require('../../../utils/appUtils')
+const { sendToRenderer, clearPendingFileRequest } = require('../../../utils/appUtils')
 const { encryptBuffer } = require('../../../crypto/fileEncryption')
 const { deriveSharedSecret } = require('../../../crypto/encryption')
 const { decryptFileFromPeer } = require('../../../crypto/peerFileTransfer')
@@ -41,6 +41,8 @@ module.exports = function handleFileData({ message, ctx }) {
     const encrypted = encryptBuffer(plaintext, ctx.state.masterKey)
     fs.writeFileSync(cachedPath, encrypted, { mode: 0o600 })
     try { saveFileCache(ctx.state.database, { messageId, cachedPath }) } catch {}
+    // 진행 중인 재요청 타이머 취소 — 성공했으므로 retry 불필요
+    clearPendingFileRequest(ctx, messageId)
     sendToRenderer(ctx, 'file-cached', { messageId, cachedPath })
     writePeerDebugLog('inbound.fileData.received', { messageId, fileName, cachedPath })
   } catch (err) {
