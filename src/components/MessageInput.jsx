@@ -143,7 +143,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       // 리스트에서 빈 항목일 때 Enter 를 누르면 Tiptap 이 리스트에서 빠져나가 일반 문단으로 전환 → 다음 Enter 에서 전송됨.
       handleKeyDown: (view, event) => {
         // IME 조합 중(한국어 입력 등)에는 Enter를 전송으로 처리하지 않음
-        if (event.isComposing || event.keyCode === 229) return false
+        if (view.composing || event.isComposing || event.keyCode === 229) return false
         if (event.key === 'Enter' && !event.shiftKey) {
           // 현재 선택 위치의 조상 노드에 리스트 아이템이나 코드블록이 있는지 확인
           const { $from } = view.state.selection
@@ -174,6 +174,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const keepEditorFocus = useCallback(() => {
     if (!editor) return
     requestAnimationFrame(() => {
+      const editorDom = editor.view?.dom
+      if (editorDom && editorDom.contains(document.activeElement)) return
       editor.commands.focus('end')
     })
   }, [editor])
@@ -248,6 +250,11 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     const content = markdown.trim()
     if (!content) return
 
+    // IPC 응답을 기다린 뒤 초기화하면 사용자가 시작한 다음 한글 조합까지 지워질 수 있다.
+    // 전송할 내용을 먼저 보관하고 에디터는 즉시 비워 이전 전송의 후처리가 새 입력을 건드리지 않게 한다.
+    editor.commands.clearContent()
+    keepEditorFocus()
+
     setIsSending(true)
     try {
       let sentMessage
@@ -267,8 +274,6 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         })
         useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
-      editor.commands.clearContent()
-      keepEditorFocus()
     } finally {
       setIsSending(false)
     }
