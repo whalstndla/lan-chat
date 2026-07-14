@@ -223,3 +223,80 @@ describe('search-dm-messages — DM 전체 기간 검색', () => {
     expect(handler(null, { peerId: 'peer2', query: '  ' })).toHaveLength(0)
   })
 })
+
+// 검색 결과 점프용 rank 조회 핸들러 테스트(#36).
+describe('get-global-message-rank / get-dm-message-rank — 검색 결과 점프', () => {
+  let db
+  const peer1 = generateKeyPair()
+  const peer2 = generateKeyPair()
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    __handlers.clear()
+  })
+
+  afterEach(() => closeDatabase(db))
+
+  function buildCtx() {
+    return {
+      state: {
+        database: db,
+        peerId: 'peer1',
+        myPrivateKey: peer1.privateKey,
+        peerPublicKeyMap: new Map([['peer2', peer2.publicKey]]),
+        localIP: 'localhost',
+      },
+    }
+  }
+
+  it('전체채팅 — 대상 타임스탬프보다 최신인 메시지 개수를 반환한다', () => {
+    const ctx = buildCtx()
+    saveMessage(db, {
+      id: 'g-1', type: 'message', from_id: 'peer1', from_name: '홍길동', to_id: null,
+      content: '첫번째', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 1000,
+    })
+    saveMessage(db, {
+      id: 'g-2', type: 'message', from_id: 'peer1', from_name: '홍길동', to_id: null,
+      content: '두번째', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 2000,
+    })
+    saveMessage(db, {
+      id: 'g-3', type: 'message', from_id: 'peer1', from_name: '홍길동', to_id: null,
+      content: '세번째', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 3000,
+    })
+
+    registerHistoryHandlers(ctx)
+    const handler = __handlers.get('get-global-message-rank')
+    // g-1 (timestamp=1000) 보다 최신인 메시지는 g-2, g-3 두 개
+    expect(handler(null, { timestamp: 1000 })).toBe(2)
+    // 가장 최신 메시지보다 최신인 메시지는 없음
+    expect(handler(null, { timestamp: 3000 })).toBe(0)
+  })
+
+  it('DM — 상대와 나눈 대화 내에서만 rank 를 계산한다', () => {
+    const ctx = buildCtx()
+    saveMessage(db, {
+      id: 'dm-1', type: 'dm', from_id: 'peer1', from_name: '나', to_id: 'peer2',
+      content: '오래된 DM', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 1000,
+    })
+    saveMessage(db, {
+      id: 'dm-2', type: 'dm', from_id: 'peer2', from_name: '상대', to_id: 'peer1',
+      content: '최근 DM', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 2000,
+    })
+    // 다른 상대와의 DM — rank 계산에 섞이면 안 됨
+    saveMessage(db, {
+      id: 'dm-other', type: 'dm', from_id: 'peer1', from_name: '나', to_id: 'peer3',
+      content: '다른 상대와의 DM', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 1500,
+    })
+
+    registerHistoryHandlers(ctx)
+    const handler = __handlers.get('get-dm-message-rank')
+    expect(handler(null, { peerId: 'peer2', timestamp: 1000 })).toBe(1)
+  })
+})

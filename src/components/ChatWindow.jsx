@@ -24,6 +24,9 @@ export default function ChatWindow() {
   // 커져도 "중간에 멈춤" 현상 방지 (여러 번 재스크롤 + ResizeObserver)
   const pendingInitialScrollRef = useRef(false)
   const resizeObserverRef = useRef(null)
+  // 검색 결과 점프(#36)로 히스토리를 일괄 로드하는 동안, 자동 스크롤 스냅/무한스크롤
+  // 트리거가 우리가 계산한 목표 스크롤 위치와 경쟁하지 않도록 억제하는 플래그
+  const pendingJumpScrollRef = useRef(false)
   // 읽지 않은 메시지 구분선 기준 타임스탬프 (로컬 ref — 스토어 구독 없음)
   const lastReadTimestampsRef = useRef({})
 
@@ -69,8 +72,8 @@ export default function ChatWindow() {
     isNearBottomRef.current = nearBottom
     if (nearBottom) setNewMessageToast(null)
 
-    // 무한 스크롤 — 상단 도달 시 이전 메시지 로드
-    if (scrollTop < 50 && !loadingMore && hasMore) {
+    // 무한 스크롤 — 상단 도달 시 이전 메시지 로드 (검색 결과 점프 로딩 중에는 건너뜀, #36)
+    if (scrollTop < 50 && !loadingMore && hasMore && !pendingJumpScrollRef.current) {
       loadOlderMessages()
     }
   }
@@ -191,6 +194,51 @@ export default function ChatWindow() {
     setTimeout(() => setHighlightedMessageId(null), 3000)
   }
 
+  // 검색 결과 클릭 처리(#36) — 이미 화면(DOM)에 로드되어 있으면 바로 스크롤하고,
+  // 스크롤로 로드하지 않아 아직 없는 과거 결과라면 해당 타임스탬프까지 히스토리를
+  // 한 번에 불러온 뒤(전체 교체) 점프한다.
+  async function handleResultClick(result) {
+    const messageId = result.id
+    const existingElement = messagesContainerRef.current?.querySelector(`[data-message-id="${messageId}"]`)
+    if (existingElement) {
+      scrollToMessage(messageId)
+      return
+    }
+
+    pendingJumpScrollRef.current = true
+    setLoadingMore(true)
+    try {
+      let history = []
+      if (currentRoom.type === 'global') {
+        const rank = await window.electronAPI.getGlobalMessageRank(result.timestamp)
+        history = await window.electronAPI.getGlobalHistory({ limit: rank + 1, offset: 0 })
+        prevMessageCountRef.current = history.length
+        useChatStore.getState().setGlobalHistory(history)
+        setHasMore(history.length === rank + 1)
+      } else {
+        const rank = await window.electronAPI.getDMMessageRank(currentRoom.peerId, result.timestamp)
+        history = await window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId, rank + 1, 0)
+        prevMessageCountRef.current = history.length
+        useChatStore.getState().setDMHistory(currentRoom.peerId, history)
+        setHasMore(history.length === rank + 1)
+      }
+      if (history.length > 0) {
+        const reactionRows = await window.electronAPI.getReactions(history.map(m => m.id))
+        useChatStore.getState().setReactions(reactionRows)
+      }
+    } catch { /* 로드 실패 시 무시 */ }
+    setLoadingMore(false)
+
+    // React 커밋 + 브라우저 페인트 이후에 스크롤해야 대상 메시지 DOM 이 실제로 존재한다.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToMessage(messageId)
+        // 점프 스크롤 애니메이션이 끝날 때까지 자동 스크롤 로직을 잠시 더 억제
+        setTimeout(() => { pendingJumpScrollRef.current = false }, 500)
+      })
+    })
+  }
+
   async function handleSearch(query) {
     setSearchQuery(query)
     if (!query.trim()) {
@@ -260,6 +308,10 @@ export default function ChatWindow() {
 
   // 새 메시지 처리 + 초기 로드 시 맨 아래 스냅
   useEffect(() => {
+    // 검색 결과 점프(#36)로 히스토리를 일괄 교체하는 동안에는 이 효과의 자동 스크롤 로직을
+    // 건너뛴다 — handleResultClick 이 직접 목표 메시지로 스크롤을 처리한다.
+    if (pendingJumpScrollRef.current) return
+
     const roomKey = currentRoom.type === 'global' ? 'global' : currentRoom.peerId
     const isRoomChange = currentRoomKeyRef.current !== roomKey
 
@@ -361,7 +413,7 @@ export default function ChatWindow() {
             searchResults={searchResults}
             isSearching={isSearching}
             onSearch={handleSearch}
-            onResultClick={scrollToMessage}
+            onResultClick={handleResultClick}
           />
         )}
       </div>

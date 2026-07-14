@@ -131,3 +131,55 @@ describe('FTS5 트리거 동기화', () => {
     expect(searchMessages(db, { query: '회의', type: 'message' })).toHaveLength(1)
   })
 })
+
+// 파일명 검색(#36) — content 가 null 인 이미지/비디오/파일 메시지도 file_name 으로
+// 검색되어야 한다. 과거엔 messages_fts 트리거 WHEN 절이 content IS NOT NULL 만 확인해
+// 파일 메시지가 아예 인덱싱되지 않았다 (검색 안 되고 결과 목록에 빈 줄만 남는 문제).
+describe('파일명 검색(#36)', () => {
+  let db
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    saveMessage(db, {
+      id: 'file-1', type: 'message', from_id: 'peer1', from_name: '홍길동', to_id: null,
+      content: null, content_type: 'file', encrypted_payload: null,
+      file_url: 'http://localhost:1234/files/abc', file_name: '2025년_정산내역.xlsx', timestamp: 1000,
+    })
+    saveMessage(db, {
+      id: 'image-1', type: 'message', from_id: 'peer2', from_name: '김철수', to_id: null,
+      content: null, content_type: 'image', encrypted_payload: null,
+      file_url: 'http://localhost:1234/files/def', file_name: 'screenshot.png', timestamp: 2000,
+    })
+    saveMessage(db, {
+      id: 'text-1', type: 'message', from_id: 'peer1', from_name: '홍길동', to_id: null,
+      content: '정산 관련 문의드립니다', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 3000,
+    })
+  })
+
+  afterEach(() => closeDatabase(db))
+
+  it('파일 메시지를 파일명으로 검색할 수 있다', () => {
+    const results = searchMessages(db, { query: '정산내역', type: 'message' })
+    expect(results).toHaveLength(1)
+    expect(results[0].id).toBe('file-1')
+  })
+
+  it('파일명 검색은 본문 검색과 함께 매칭된다 (정산 검색 시 텍스트 메시지와 파일명 모두 포함)', () => {
+    const results = searchMessages(db, { query: '정산', type: 'message' })
+    const ids = results.map(r => r.id).sort()
+    expect(ids).toEqual(['file-1', 'text-1'])
+  })
+
+  it('이미지 메시지도 파일명으로 검색된다', () => {
+    const results = searchMessages(db, { query: 'screenshot', type: 'message' })
+    expect(results).toHaveLength(1)
+    expect(results[0].id).toBe('image-1')
+  })
+
+  it('파일 메시지 삭제 후에는 파일명으로 검색되지 않는다', () => {
+    deleteMessage(db, 'file-1', 'peer1')
+    expect(searchMessages(db, { query: '정산내역', type: 'message' })).toHaveLength(0)
+  })
+})

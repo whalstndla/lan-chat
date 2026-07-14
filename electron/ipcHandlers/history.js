@@ -2,7 +2,10 @@
 // 채팅 기록 조회 관련 IPC 핸들러 — 전체채팅, DM, DM 상대 목록, 메시지 검색
 
 const { ipcMain } = require('electron')
-const { getGlobalHistory, getDMHistory, getDMPeers, searchMessages, getAllDMMessagesForSearch } = require('../storage/queries')
+const {
+  getGlobalHistory, getDMHistory, getDMPeers, searchMessages,
+  getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank,
+} = require('../storage/queries')
 const { deriveSharedSecret, decryptDM } = require('../crypto/encryption')
 const { rewriteFileUrl } = require('../utils/appUtils')
 
@@ -119,6 +122,13 @@ function registerHistoryHandlers(ctx) {
     }
     return results
   })
+
+  // 검색 결과 점프(#36) — 아직 화면에 로드되지 않은 과거 결과를 클릭했을 때, 해당 타임스탬프
+  // 보다 최신인 메시지 개수(rank)를 반환한다. 렌더러는 (rank + 1)을 limit 으로 삼아 히스토리를
+  // 한 번에 불러와 대상 메시지를 포함시킨다.
+  ipcMain.handle('get-global-message-rank', (_, { timestamp }) => getGlobalMessageRank(ctx.state.database, timestamp))
+  ipcMain.handle('get-dm-message-rank', (_, { peerId, timestamp }) =>
+    getDMMessageRank(ctx.state.database, ctx.state.peerId, peerId, timestamp))
 }
 
 module.exports = { registerHistoryHandlers }

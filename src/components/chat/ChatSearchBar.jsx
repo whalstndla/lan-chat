@@ -44,7 +44,7 @@ export default function ChatSearchBar({
             <div
               key={result.id}
               className="px-3 py-2 hover:bg-vsc-hover border-b border-vsc-border last:border-b-0 cursor-pointer"
-              onClick={() => onResultClick(result.id)}
+              onClick={() => onResultClick(result)}
             >
               <div className="flex items-baseline gap-2 mb-0.5">
                 <span className="text-xs font-semibold text-vsc-text">

@@ -188,6 +188,26 @@ function getAllDMMessagesForSearch(db, peerId1, peerId2, limit = DM_SEARCH_FETCH
   `).all(peerId1, peerId2, peerId2, peerId1, limit)
 }
 
+// 검색 결과 점프용 — 특정 타임스탬프보다 최신인 메시지 개수를 반환한다(#36).
+// 이 값 + 1 을 limit 으로 getGlobalHistory/getDMHistory 를 호출하면, 오프셋 계산 없이
+// 한 번에 해당 메시지가 포함되는 지점까지의 히스토리를 정확히 불러올 수 있다.
+function getGlobalMessageRank(db, timestamp) {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count FROM messages WHERE type = 'message' AND timestamp > ?
+  `).get(timestamp)
+  return row.count
+}
+
+function getDMMessageRank(db, peerId1, peerId2, timestamp) {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count FROM messages
+    WHERE type = 'dm'
+      AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
+      AND timestamp > ?
+  `).get(peerId1, peerId2, peerId2, peerId1, timestamp)
+  return row.count
+}
+
 // 파일 캐시 경로 저장 — 수신된 파일을 로컬에 캐시한 경로를 메시지에 연결
 function saveFileCache(db, { messageId, cachedPath }) {
   db.prepare('UPDATE messages SET cached_file_path = ? WHERE id = ?').run(cachedPath, messageId)
@@ -235,4 +255,4 @@ function deletePeerCache(db, peerId) {
   db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }

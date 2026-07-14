@@ -140,30 +140,45 @@ function migrateDatabase(db) {
     // 가 인덱스를 거치지 않고 원본 messages 테이블을 그대로 스캔하므로, count(*) 결과가
     // 항상 messages 테이블의 행 수와 같아진다 — 즉 "FTS 인덱스에 실제로 백필됐는지"를
     // 전혀 반영하지 못하는 값이라 가드로 쓸 수 없다.
-    const ftsTableExistedBefore = !!db.prepare(
-      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`
+    const existingFtsRow = db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`
     ).get()
+
+    // 구버전 스키마(#36 이전 — file_name 컬럼 없음) 감지 시 DROP 후 재생성한다.
+    // FTS5 external-content 테이블은 컬럼 추가를 위한 ALTER TABLE 을 지원하지 않으므로,
+    // 기존 사용자 DB 에 이미 2컬럼(content, from_name) 짜리 messages_fts 가 있다면
+    // DROP + CREATE + 전체 재백필이 유일한 안전한 마이그레이션 경로다.
+    // DROP TABLE 은 messages_fts 의 shadow 테이블(_data/_idx/_docsize/_config)도 함께 정리한다.
+    const isLegacyFtsSchema = !!existingFtsRow && !existingFtsRow.sql.includes('file_name')
+    if (isLegacyFtsSchema) {
+      db.exec('DROP TABLE messages_fts')
+    }
+
+    const ftsTableExistedBefore = !isLegacyFtsSchema && !!existingFtsRow
 
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-        id UNINDEXED, content, from_name,
+        id UNINDEXED, content, from_name, file_name,
         content='messages', content_rowid='rowid'
       );
     `)
 
     // 기존 messages 데이터를 FTS 인덱스로 백필 — 테이블을 이번 호출에서 새로 만든
-    // 경우(=최초 1회, 신규 프로필이거나 FTS5 도입 이전 DB 의 첫 로그인)에만 수행한다.
-    // migrateDatabase() 는 로그인/등록마다 호출되는데, 가드 없이 매번 INSERT 하면
+    // 경우(=최초 1회, 신규 프로필이거나 FTS5 도입 이전/구버전 스키마 DB 의 첫 로그인)에만
+    // 수행한다. migrateDatabase() 는 로그인/등록마다 호출되는데, 가드 없이 매번 INSERT 하면
     // 동일 rowid 가 반복 삽입 시도되어 검색 중복·인덱스 증가로 이어진다(#7).
     // 이후 신규/수정/삭제 메시지는 트리거가 전담하므로 두 번째 로그인부터는 건너뛴다.
+    // 파일 메시지(content가 null인 이미지/비디오/파일)도 file_name 으로 검색 가능해야
+    // 하므로(#36) content IS NOT NULL 조건뿐 아니라 file_name IS NOT NULL 도 포함한다.
     if (!ftsTableExistedBefore) {
       // content='messages' 모드에서는 FTS rowid가 messages 테이블 rowid와 반드시 일치해야 함.
       // rowid를 명시하지 않으면 FTS rowid가 자동 할당되어 실제 messages rowid와 어긋나고,
       // 엉뚱한 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생함.
       // 따라서 rowid를 SELECT rowid FROM messages 로 명시적으로 지정함.
       db.exec(`
-        INSERT INTO messages_fts(rowid, id, content, from_name)
-        SELECT rowid, id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
+        INSERT INTO messages_fts(rowid, id, content, from_name, file_name)
+        SELECT rowid, id, content, from_name, file_name FROM messages
+        WHERE type = 'message' AND (content IS NOT NULL OR file_name IS NOT NULL);
       `)
     }
 
@@ -173,29 +188,38 @@ function migrateDatabase(db) {
     // (삭제된 메시지의 토큰이 남거나, 수정 전 텍스트로 검색되는) 문제가 있었다.
     // 표준 external-content FTS5 트리거로 일원화해 INSERT/UPDATE/DELETE 모두
     // 자동으로 반영되도록 한다 (전역 메시지만 대상 — DM 은 암호화되어 제외).
+    //
+    // 트리거는 "CREATE TRIGGER IF NOT EXISTS" 대신 매번 DROP 후 재생성한다 — file_name
+    // 컬럼 추가처럼 트리거 본문 자체가 바뀌는 마이그레이션에서 IF NOT EXISTS 를 쓰면
+    // 기존 사용자 DB 에 이미 등록된 구버전 트리거 정의가 영구히 남아, 로그인해도 새
+    // 컬럼(file_name)이 절대 채워지지 않는 문제가 생긴다(#36).
     db.exec(`
-      CREATE TRIGGER IF NOT EXISTS messages_fts_after_insert AFTER INSERT ON messages
-      WHEN new.type = 'message' AND new.content IS NOT NULL
+      DROP TRIGGER IF EXISTS messages_fts_after_insert;
+      DROP TRIGGER IF EXISTS messages_fts_after_delete;
+      DROP TRIGGER IF EXISTS messages_fts_after_update;
+
+      CREATE TRIGGER messages_fts_after_insert AFTER INSERT ON messages
+      WHEN new.type = 'message' AND (new.content IS NOT NULL OR new.file_name IS NOT NULL)
       BEGIN
-        INSERT INTO messages_fts(rowid, id, content, from_name)
-        VALUES (new.rowid, new.id, new.content, new.from_name);
+        INSERT INTO messages_fts(rowid, id, content, from_name, file_name)
+        VALUES (new.rowid, new.id, new.content, new.from_name, new.file_name);
       END;
 
-      CREATE TRIGGER IF NOT EXISTS messages_fts_after_delete AFTER DELETE ON messages
-      WHEN old.type = 'message' AND old.content IS NOT NULL
+      CREATE TRIGGER messages_fts_after_delete AFTER DELETE ON messages
+      WHEN old.type = 'message' AND (old.content IS NOT NULL OR old.file_name IS NOT NULL)
       BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name)
-        VALUES ('delete', old.rowid, old.id, old.content, old.from_name);
+        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name, file_name)
+        VALUES ('delete', old.rowid, old.id, old.content, old.from_name, old.file_name);
       END;
 
-      CREATE TRIGGER IF NOT EXISTS messages_fts_after_update AFTER UPDATE OF content, from_name ON messages
+      CREATE TRIGGER messages_fts_after_update AFTER UPDATE OF content, from_name, file_name ON messages
       BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name)
-          SELECT 'delete', old.rowid, old.id, old.content, old.from_name
-          WHERE old.type = 'message' AND old.content IS NOT NULL;
-        INSERT INTO messages_fts(rowid, id, content, from_name)
-          SELECT new.rowid, new.id, new.content, new.from_name
-          WHERE new.type = 'message' AND new.content IS NOT NULL;
+        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name, file_name)
+          SELECT 'delete', old.rowid, old.id, old.content, old.from_name, old.file_name
+          WHERE old.type = 'message' AND (old.content IS NOT NULL OR old.file_name IS NOT NULL);
+        INSERT INTO messages_fts(rowid, id, content, from_name, file_name)
+          SELECT new.rowid, new.id, new.content, new.from_name, new.file_name
+          WHERE new.type = 'message' AND (new.content IS NOT NULL OR new.file_name IS NOT NULL);
       END;
     `)
   } catch { /* FTS5 미지원 환경 무시 */ }
