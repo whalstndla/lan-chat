@@ -20,6 +20,25 @@ function saveMutedRooms(mutedRooms) {
   }
 }
 
+// localStorage에서 북마크 상태 복원 — 피어 전파 없는 로컬 전용 기능(#34)
+function loadBookmarks() {
+  try {
+    const saved = localStorage.getItem('bookmarks')
+    return saved ? JSON.parse(saved) : {}
+  } catch {
+    return {}
+  }
+}
+
+// localStorage에 북마크 상태 저장
+function saveBookmarksToStorage(bookmarks) {
+  try {
+    localStorage.setItem('bookmarks', JSON.stringify(bookmarks))
+  } catch {
+    // localStorage 접근 실패 시 무시
+  }
+}
+
 // 채팅방 식별 키 계산 — mutedRooms/ChatWindow 에서 쓰는 규약과 동일(전체 채팅은 'global',
 // DM 은 peerId 그대로). 방별 draft 저장/복원 키로 재사용.
 export function getRoomKey(room) {
@@ -44,6 +63,12 @@ const useChatStore = create((set, get) => ({
   // { messageId: { emoji: [peerId, ...] } } — 메시지별 이모지 리액션. 히스토리 로드 시
   // 배치 하이드레이션(setReactions) 되고, 실시간 토글/수신은 updateReaction 으로 반영.
   reactions: {},
+  // { messageId: { savedAt, roomKey, preview } } — 로컬 전용 북마크(#34). 피어에게 전파되지
+  // 않고 이 기기에만 저장되며 localStorage 로 재시작 후에도 유지된다.
+  bookmarks: loadBookmarks(),
+  // 북마크 목록에서 메시지를 열었을 때, 해당 방으로 전환 후 화면에 이미 로드돼 있으면
+  // 스크롤+하이라이트할 대상 messageId. ChatWindow 가 구독해 처리하고 나면 다시 null 로 비운다.
+  pendingScrollMessageId: null,
 
   // 채팅방 뮤트 토글 (roomKey: 'global' 또는 peerId)
   toggleRoomMute: (roomKey) =>
@@ -199,6 +224,26 @@ const useChatStore = create((set, get) => ({
       return { reactions: { ...state.reactions, [messageId]: messageReactions } }
     }),
 
+  // 메시지 북마크 토글(#34) — 이미 북마크돼 있으면 제거, 아니면 추가. roomKey/preview 는
+  // 추가할 때만 사용되고(목록에서 방/미리보기 표시용), 제거 시에는 무시해도 안전하다.
+  toggleBookmark: (messageId, roomKey, preview) =>
+    set((state) => {
+      const updated = { ...state.bookmarks }
+      if (updated[messageId]) {
+        delete updated[messageId]
+      } else {
+        updated[messageId] = { savedAt: Date.now(), roomKey, preview }
+      }
+      saveBookmarksToStorage(updated)
+      return { bookmarks: updated }
+    }),
+
+  isBookmarked: (messageId) => !!get().bookmarks[messageId],
+
+  setPendingScrollMessageId: (messageId) => set({ pendingScrollMessageId: messageId }),
+
+  clearPendingScrollMessageId: () => set({ pendingScrollMessageId: null }),
+
   setTyping: (peerId, nickname, to) =>
     set((state) => ({
       typingUsers: {
@@ -285,16 +330,24 @@ const useChatStore = create((set, get) => ({
       },
     })),
 
-  // 로그아웃 시 채팅 상태 초기화
-  resetAll: () => set({
-    currentRoom: { type: 'global' },
-    globalMessages: [],
-    dmMessages: {},
-    unreadCounts: {},
-    typingUsers: {},
-    reactions: {},
-    drafts: {},
-  }),
+  // 로그아웃 시 채팅 상태 초기화. 북마크는 메시지 히스토리(globalMessages/dmMessages)와 함께
+  // 사라지는 로컬 데이터로 취급해 localStorage 도 함께 비운다 — 그렇지 않으면 이미 사라진
+  // 메시지를 가리키는 북마크가 남거나, 같은 기기에서 다른 계정으로 재로그인 시 이전 사용자의
+  // 북마크가 그대로 노출되는 문제가 생긴다.
+  resetAll: () => {
+    saveBookmarksToStorage({})
+    set({
+      currentRoom: { type: 'global' },
+      globalMessages: [],
+      dmMessages: {},
+      unreadCounts: {},
+      typingUsers: {},
+      reactions: {},
+      drafts: {},
+      bookmarks: {},
+      pendingScrollMessageId: null,
+    })
+  },
 }))
 
 export default useChatStore

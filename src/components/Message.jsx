@@ -1,6 +1,6 @@
 // src/components/Message.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil, Loader2, Download, FolderOpen } from 'lucide-react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, SmilePlus, Pencil, Loader2, Download, FolderOpen } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -113,12 +113,27 @@ function extractFirstUrl(text) {
   return match ? match[0] : null
 }
 
+// 북마크 목록(#34)에 표시할 미리보기 문자열 계산 — 첨부 타입은 텍스트 대신 안내 문구.
+const BOOKMARK_PREVIEW_MAX_LENGTH = 100
+function getBookmarkPreview(message, contentType, fileName) {
+  if (contentType === 'image') return '사진'
+  if (contentType === 'video') return '동영상'
+  if (contentType === 'file') return `📎 ${fileName || '파일'}`
+  const content = message.content || ''
+  return content.length > BOOKMARK_PREVIEW_MAX_LENGTH
+    ? `${content.slice(0, BOOKMARK_PREVIEW_MAX_LENGTH)}…`
+    : content
+}
+
 export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   // 리액션 — 스토어의 reactions 맵을 구독 (하이드레이션 + 실시간 갱신 반영)
   const reactions = useChatStore(state => state.reactions[message.id]) || {}
+  // 북마크(#34) 여부 — 스토어의 bookmarks 맵을 구독
+  const isBookmarked = useChatStore(state => !!state.bookmarks[message.id])
   const onlinePeers = usePeerStore(state => state.onlinePeers)
+  const pastDMPeers = usePeerStore(state => state.pastDMPeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
   const [lightboxData, setLightboxData] = useState(null) // { url, messageId }
   const { downloadFile, savedPath, revealInFolder } = useFileDownload()
@@ -176,6 +191,16 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
       ? (isMyMessage ? (message.to || message.to_id) : senderId) : null
     const result = await window.electronAPI.toggleReaction({ messageId: message.id, emoji, targetPeerId })
     useChatStore.getState().updateReaction(message.id, emoji, myPeerId, result.action)
+  }
+
+  // 북마크 토글(#34) — 피어 전파 없이 이 기기에만 로컬로 저장. roomKey 는 북마크 목록에서
+  // "어느 방의 메시지인지" 표시/이동에 사용된다(전체 채팅은 'global', DM 은 상대 peerId).
+  function handleToggleBookmark() {
+    const roomKey = (message.type === 'dm')
+      ? (isMyMessage ? (message.to || message.to_id) : senderId)
+      : 'global'
+    const preview = getBookmarkPreview(message, contentType, fileName)
+    useChatStore.getState().toggleBookmark(message.id, roomKey, preview)
   }
 
   return (
@@ -347,6 +372,21 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-red-400 hover:bg-vsc-hover"
                 >
                   <Trash2 size={12} />
+                </button>
+              )}
+              {/* 북마크 토글 버튼(#34) — 로컬 전용, 활성 시 채워진 아이콘으로 표시 */}
+              {!message.decryptionFailed && (
+                <button
+                  onClick={handleToggleBookmark}
+                  aria-label={isBookmarked ? '북마크 해제' : '북마크'}
+                  title={isBookmarked ? '북마크 해제' : '북마크'}
+                  className={`p-0.5 rounded cursor-pointer transition-opacity hover:bg-vsc-hover ${
+                    isBookmarked
+                      ? 'opacity-100 text-vsc-accent'
+                      : 'opacity-0 group-hover:opacity-100 text-vsc-muted hover:text-vsc-accent'
+                  }`}
+                >
+                  <Bookmark size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
                 </button>
               )}
               {/* 리액션 추가 버튼 */}

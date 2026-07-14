@@ -44,6 +44,8 @@ export default function ChatWindow() {
 
   const mutedRooms = useChatStore(state => state.mutedRooms)
   const toggleRoomMute = useChatStore(state => state.toggleRoomMute)
+  // 북마크(#34) 목록에서 메시지를 열었을 때 스크롤해야 할 대상 — BookmarksPanel 이 설정한다.
+  const pendingScrollMessageId = useChatStore(state => state.pendingScrollMessageId)
 
   const currentMessages = currentRoom.type === 'global'
     ? globalMessages
@@ -380,6 +382,22 @@ export default function ChatWindow() {
       resizeObserverRef.current = null
     }
   }, [currentRoom])
+
+  // 북마크(#34) 목록에서 메시지를 열었을 때: 이미 화면(DOM)에 로드돼 있으면 스크롤+하이라이트.
+  // 방을 막 전환한 직후라 히스토리가 아직 로드 중일 수 있으므로 currentMessages 가 바뀔 때마다
+  // 재시도하고, 너무 오래된(아직 무한스크롤로 불러오지 않은) 메시지라면 일정 시간 후 조용히
+  // 포기한다 — 기존 검색 점프 로직(#36)의 방/스크롤 레이스 처리는 건드리지 않는 순수 추가 effect.
+  useEffect(() => {
+    if (!pendingScrollMessageId) return
+    const element = messagesContainerRef.current?.querySelector(`[data-message-id="${pendingScrollMessageId}"]`)
+    if (element) {
+      scrollToMessage(pendingScrollMessageId)
+      useChatStore.getState().clearPendingScrollMessageId()
+      return
+    }
+    const timer = setTimeout(() => useChatStore.getState().clearPendingScrollMessageId(), 4000)
+    return () => clearTimeout(timer)
+  }, [pendingScrollMessageId, currentMessages])
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>

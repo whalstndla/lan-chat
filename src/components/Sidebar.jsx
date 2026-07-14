@@ -1,10 +1,11 @@
 // src/components/Sidebar.jsx
 import React, { useState, useEffect } from 'react'
-import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw } from 'lucide-react'
+import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import SettingsPanel from './SettingsPanel'
+import BookmarksPanel from './BookmarksPanel'
 
 // 상태 타입 → dot 색상 클래스 매핑
 const statusColors = {
@@ -73,6 +74,7 @@ function ConnectionStatusBar({ onlinePeers, connectingCount }) {
 export default function Sidebar({ onShowPatchNotes }) {
   const [collapsed, setCollapsed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showBookmarks, setShowBookmarks] = useState(false)
   const [connectingCount, setConnectingCount] = useState(0)
   const onlinePeers = usePeerStore(state => state.onlinePeers)
 
@@ -143,9 +145,16 @@ export default function Sidebar({ onShowPatchNotes }) {
         })}
 
         <button
+          onClick={() => { setCollapsed(false); setShowBookmarks(true) }}
+          title="북마크"
+          className="cursor-pointer mt-auto p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
+        >
+          <Bookmark size={14} />
+        </button>
+        <button
           onClick={() => { setCollapsed(false); setShowSettings(true) }}
           title="설정"
-          className="cursor-pointer mt-auto p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
+          className="cursor-pointer p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
         >
           <Settings size={14} />
         </button>
@@ -157,6 +166,8 @@ export default function Sidebar({ onShowPatchNotes }) {
     <div className="w-52 bg-vsc-sidebar border-r border-vsc-border flex flex-col shrink-0">
       {showSettings ? (
         <SettingsPanel onClose={() => setShowSettings(false)} />
+      ) : showBookmarks ? (
+        <BookmarksPanel onClose={() => setShowBookmarks(false)} />
       ) : (
         <>
           <div className="px-2 py-2">
@@ -258,6 +269,13 @@ export default function Sidebar({ onShowPatchNotes }) {
               >
                 <FileText size={13} />
                 <span className="text-xs">패치노트</span>
+              </button>
+              <button
+                onClick={() => setShowBookmarks(true)}
+                className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
+              >
+                <Bookmark size={13} />
+                <span className="text-xs">북마크</span>
               </button>
               <button
                 onClick={() => setShowSettings(true)}
