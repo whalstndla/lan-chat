@@ -1,16 +1,18 @@
 // src/components/Message.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, SmilePlus, Pencil, Loader2, Download, FolderOpen } from 'lucide-react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, Pencil, Loader2, Download, FolderOpen } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
 import ImageLightbox from './message/ImageLightbox'
 import CopyButton from './message/CopyButton'
+import ReactionPicker from './message/ReactionPicker'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
 import useFileDownload from '../hooks/useFileDownload'
 import { highlightText } from '../utils/highlightText'
+import { resolvePeerNickname } from '../utils/resolvePeerNickname'
 
 // timestamp → "오후 2:30" 형식
 function formatTime(timestamp) {
@@ -19,9 +21,6 @@ function formatTime(timestamp) {
     minute: '2-digit',
   })
 }
-
-// 빠른 이모지 선택 목록
-const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
 
 // 이미지 소스 폴백 체인 — lanchat:// (앱 내부 복호화 채널) 만 사용한다.
 // 디스크 파일이 모두 ciphertext 라 file:// 직접 표시는 무용. lanchat:// 는 main
@@ -389,19 +388,8 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   <Bookmark size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
                 </button>
               )}
-              {/* 리액션 추가 버튼 */}
-              <div className="relative group/reaction">
-                <button className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-vsc-muted hover:text-vsc-accent cursor-pointer" aria-label="리액션 추가">
-                  <SmilePlus size={14} />
-                </button>
-                <div className={`hidden group-hover/reaction:flex absolute bottom-full pb-2 z-10 ${isMyMessage ? 'right-0' : 'left-0'}`}>
-                  <div className="flex bg-vsc-sidebar border border-vsc-border rounded-lg shadow-lg p-1 gap-0.5">
-                    {quickEmojis.map(e => (
-                      <button key={e} onClick={() => handleReaction(e)} className="p-1 hover:bg-vsc-hover rounded cursor-pointer text-sm">{e}</button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {/* 리액션 추가 버튼 — 퀵 이모지 + 더보기(전체 피커, #38) */}
+              <ReactionPicker onSelect={handleReaction} alignRight={isMyMessage} />
             </div>
 
             {/* 그룹된 메시지 시간 (액션버튼 반대쪽) */}
@@ -417,17 +405,20 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
             <LinkPreviewCard url={firstUrl} />
           )}
 
-          {/* 리액션 배지 표시 */}
+          {/* 리액션 배지 표시 — hover 시 반응자 닉네임 툴팁(#38) */}
           {Object.keys(reactions).length > 0 && (
             <div className="flex items-center gap-1 flex-wrap">
               {Object.entries(reactions).map(([emoji, peerIds]) => (
                 <button key={emoji} onClick={() => handleReaction(emoji)}
-                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border cursor-pointer transition-colors ${
+                  className={`relative group/reaction-badge inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border cursor-pointer transition-colors ${
                     peerIds.includes(myPeerId)
                       ? 'bg-vsc-accent/20 border-vsc-accent text-vsc-accent'
                       : 'bg-vsc-panel border-vsc-border text-vsc-muted hover:border-vsc-accent'
                   }`}>
                   <span>{emoji}</span><span>{peerIds.length}</span>
+                  <span className="hidden group-hover/reaction-badge:block absolute bottom-full mb-1 left-1/2 -translate-x-1/2 whitespace-nowrap bg-vsc-sidebar border border-vsc-border rounded px-2 py-1 text-[11px] text-vsc-text shadow-lg z-20">
+                    {peerIds.map(peerId => resolvePeerNickname(peerId, { myPeerId, onlinePeers, pastDMPeers })).join(', ')}
+                  </span>
                 </button>
               ))}
             </div>
