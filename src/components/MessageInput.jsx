@@ -8,7 +8,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
 import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
-import useChatStore from '../store/useChatStore'
+import useChatStore, { getRoomKey } from '../store/useChatStore'
 
 // 메시지 최대 길이 — electron/ipcHandlers/message.js 의 MAX_CONTENT_LENGTH 와 동일 값을 유지.
 // 전송 전 클라이언트에서 미리 검증해, 초과 시 IPC 실패 응답을 기다리지 않고 즉시 안내한다.
@@ -71,6 +71,12 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
   const currentRoom = useChatStore(state => state.currentRoom)
+  // 방별 draft 보존용 — 매 키 입력마다 store 에 쓰지 않고, 최신 마크다운을 ref 에만 저장해뒀다가
+  // 방 전환/blur 시점에만 store.setDraft 로 flush 한다(IME 안전: 순수 ref 대입이라 조합에 영향 없음).
+  const latestMarkdownRef = useRef('')
+  // effect 클린업/onBlur 시점에 "수정 모드 중이었는지"를 정확히 알기 위한 ref.
+  // (edit 중인 내용은 draft 가 아니므로 draft 로 저장하면 안 됨)
+  const editingMessageRef = useRef(null)
 
   // Tiptap 에디터 설정
   const editor = useEditor({
@@ -164,8 +170,20 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         return false
       },
     },
+    // 방 전환/최초 마운트로 새 에디터 인스턴스가 생성될 때, 저장된 draft 가 있으면 복원.
+    // (조합 로직과 무관 — 조합 도중이 아니라 에디터가 새로 생성되는 시점에만 1회 실행됨)
+    onCreate: ({ editor: ed }) => {
+      const roomKey = getRoomKey(currentRoom)
+      const draftMarkdown = useChatStore.getState().drafts[roomKey]
+      if (draftMarkdown) {
+        ed.commands.setContent(draftMarkdown)
+      }
+    },
     // 타이핑 인디케이터
     onUpdate: ({ editor: ed }) => {
+      // draft 추적용 — store 에는 쓰지 않고 ref 에만 최신 마크다운을 보관해둔다(순수 대입이라 IME 영향 없음).
+      latestMarkdownRef.current = ed.storage.markdown.getMarkdown()
+
       const now = Date.now()
       if (!ed.isEmpty && now - lastTypingSentAtRef.current > 2000) {
         lastTypingSentAtRef.current = now
@@ -173,6 +191,30 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         window.electronAPI.sendTyping(targetPeerId).catch(() => {})
       }
     },
+    // 창 포커스 이탈(blur) 시에도 draft 를 flush — 방 전환 없이 앱을 벗어나는 경우 대비.
+    onBlur: () => {
+      if (editingMessageRef.current) return
+      const roomKey = getRoomKey(currentRoom)
+      useChatStore.getState().setDraft(roomKey, latestMarkdownRef.current)
+    },
+  }, [currentRoom])
+
+  // editingMessage 최신값을 ref 에도 반영 — draft 저장 시점(effect cleanup/blur)에서
+  // "수정 모드였는지"를 정확히 판단하기 위함 (edit 중인 내용을 draft 로 오인해 저장하지 않도록).
+  useEffect(() => {
+    editingMessageRef.current = editingMessage
+  }, [editingMessage])
+
+  // 방을 떠날 때(전환 직전) 작성 중이던 내용을 해당 방의 draft 로 저장.
+  // cleanup 클로저가 "이전" currentRoom 을 캡처하므로 정확히 떠나는 방의 roomKey 로 저장된다.
+  // latestMarkdownRef 는 에디터 인스턴스와 무관한 순수 ref 라, useEditor 내부 effect(에디터 파괴)와의
+  // 실행 순서에 의존하지 않고 항상 안전하게 마지막 값을 읽을 수 있다.
+  useEffect(() => {
+    return () => {
+      if (editingMessageRef.current) return
+      const roomKey = getRoomKey(currentRoom)
+      useChatStore.getState().setDraft(roomKey, latestMarkdownRef.current)
+    }
   }, [currentRoom])
 
   const keepEditorFocus = useCallback(() => {
@@ -265,6 +307,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     // 전송할 내용을 먼저 보관하고 에디터는 즉시 비워 이전 전송의 후처리가 새 입력을 건드리지 않게 한다.
     editor.commands.clearContent()
     keepEditorFocus()
+    // 에디터를 비운 시점에 맞춰 해당 방의 draft 도 함께 비운다(전송 중인 내용이 draft 로 남지 않도록).
+    useChatStore.getState().clearDraft(getRoomKey(currentRoom))
 
     setIsSending(true)
     try {

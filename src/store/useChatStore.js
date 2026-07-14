@@ -20,6 +20,13 @@ function saveMutedRooms(mutedRooms) {
   }
 }
 
+// 채팅방 식별 키 계산 — mutedRooms/ChatWindow 에서 쓰는 규약과 동일(전체 채팅은 'global',
+// DM 은 peerId 그대로). 방별 draft 저장/복원 키로 재사용.
+export function getRoomKey(room) {
+  if (!room) return 'global'
+  return room.type === 'global' ? 'global' : room.peerId
+}
+
 // 현재 보고 있는 채팅방 타입
 // { type: 'global' } 또는 { type: 'dm', peerId: 'xxx', nickname: '홍길동' }
 const useChatStore = create((set, get) => ({
@@ -29,6 +36,7 @@ const useChatStore = create((set, get) => ({
   unreadCounts: {}, // { peerId: 숫자 }
   typingUsers: {}, // { peerId: { nickname, timestamp } }
   mutedRooms: loadMutedRooms(), // { roomKey: boolean } — 채팅방별 알림 뮤트 상태
+  drafts: {}, // { roomKey: markdown } — 방 전환 시 작성 중이던 메시지를 보존하기 위한 임시 저장소
   cachedFileUrls: {}, // { messageId: 'file://...' } — WebSocket으로 수신한 파일 캐시 경로
   // { messageId: 'notFound' | 'tooLarge' | 'timeout' | ... } — file-request 실패 통보.
   // 렌더러가 'loading' 에서 'failed' 로 즉시 전환하기 위해 사용.
@@ -49,6 +57,30 @@ const useChatStore = create((set, get) => ({
   isRoomMuted: (roomKey) => !!get().mutedRooms[roomKey],
 
   setCurrentRoom: (room) => set({ currentRoom: room }),
+
+  // 방 전환/blur 시점에 작성 중이던 마크다운을 draft 로 저장. 빈 문자열이면 기존 draft 항목을
+  // 제거해(에디터를 비운 채로 방을 떠난 경우) 다음 진입 시 빈 draft 가 복원되지 않게 한다.
+  setDraft: (roomKey, markdown) =>
+    set((state) => {
+      if (!roomKey) return state
+      if (!markdown) {
+        if (!(roomKey in state.drafts)) return state
+        const updated = { ...state.drafts }
+        delete updated[roomKey]
+        return { drafts: updated }
+      }
+      if (state.drafts[roomKey] === markdown) return state
+      return { drafts: { ...state.drafts, [roomKey]: markdown } }
+    }),
+
+  // 전송 성공 시 해당 방의 draft 제거
+  clearDraft: (roomKey) =>
+    set((state) => {
+      if (!roomKey || !(roomKey in state.drafts)) return state
+      const updated = { ...state.drafts }
+      delete updated[roomKey]
+      return { drafts: updated }
+    }),
 
   setGlobalHistory: (messages) => set({ globalMessages: messages }),
 
@@ -261,6 +293,7 @@ const useChatStore = create((set, get) => ({
     unreadCounts: {},
     typingUsers: {},
     reactions: {},
+    drafts: {},
   }),
 }))
 
