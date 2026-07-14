@@ -9,7 +9,7 @@ const { disconnectAll } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { collectLocalIpv4Addresses, selectPrimaryLocalIpv4 } = require('./peer/networkUtils')
 const { loadOrCreateKeyPair, exportPublicKey } = require('./crypto/keyManager')
-const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath } = require('./utils/peerDebugLogger')
+const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath, flushPeerDebugLogNow } = require('./utils/peerDebugLogger')
 const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
 const { stopPeerDiscovery } = require('./peer/discovery')
 const { autoUpdater } = require('electron-updater')
@@ -350,6 +350,8 @@ async function performCleanup() {
   try { stopFileServer() } catch { /* 무시 */ }
   try { if (ctx.state.wsServerInfo) stopWsServer(ctx.state.wsServerInfo) } catch { /* 무시 */ }
   try { if (ctx.state.database) ctx.state.database.close() } catch { /* 무시 */ }
+  // 버퍼링된(비동기) 디버그 로그가 종료 시점에 유실되지 않도록 마지막으로 강제 flush.
+  try { await flushPeerDebugLogNow() } catch { /* 무시 */ }
 }
 
 // before-quit: app.quit()가 어디서 호출되든 cleanup 실행 (async 처리로 goodbye 전파 보장)
