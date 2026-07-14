@@ -137,6 +137,16 @@ function migrateDatabase(db) {
     );
   `)
 
+  // 방별 마지막 읽은 지점(타임스탬프) — 안읽음 구분선을 재시작 후에도 유지하기 위한 영속
+  // 저장소(#39). room_key 는 전체채팅이면 'global', DM 이면 상대 peerId — 렌더러의
+  // getRoomKey() 규약과 동일하게 맞춰 별도 매핑 없이 그대로 키로 사용한다.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS room_read_state (
+      room_key            TEXT PRIMARY KEY,
+      last_read_timestamp INTEGER
+    );
+  `)
+
   // FTS5 전문 검색 (글로벌 메시지만 — DM은 암호화되어 인덱싱 불가)
   try {
     // 백필 여부 판단은 반드시 "이번 호출 전에 messages_fts 테이블이 이미 존재했는가"로

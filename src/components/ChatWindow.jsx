@@ -1,11 +1,12 @@
 // src/components/ChatWindow.jsx
 import React, { useEffect, useRef, useState } from 'react'
 import { Bell, BellOff, ChevronDown, Search } from 'lucide-react'
-import useChatStore from '../store/useChatStore'
+import useChatStore, { getRoomKey } from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import Message from './Message'
 import MessageInput from './MessageInput'
 import ChatSearchBar from './chat/ChatSearchBar'
+import { isFirstUnreadMessage, getUnreadMessages } from '../utils/unreadDivider'
 
 export default function ChatWindow() {
   const currentRoom = useChatStore(state => state.currentRoom)
@@ -27,11 +28,11 @@ export default function ChatWindow() {
   // 검색 결과 점프(#36)로 히스토리를 일괄 로드하는 동안, 자동 스크롤 스냅/무한스크롤
   // 트리거가 우리가 계산한 목표 스크롤 위치와 경쟁하지 않도록 억제하는 플래그
   const pendingJumpScrollRef = useRef(false)
-  // 읽지 않은 메시지 구분선 기준 타임스탬프 (로컬 ref — 스토어 구독 없음)
-  const lastReadTimestampsRef = useRef({})
 
   const [newMessageToast, setNewMessageToast] = useState(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  // 스크롤이 맨 아래에서 벗어나 있는지(#39 안읽음 점프 버튼 표시 조건) — handleScroll 에서 갱신.
+  const [isAwayFromBottom, setIsAwayFromBottom] = useState(false)
   // 검색 상태 (로컬 — 스토어 구독 없음)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -46,14 +47,19 @@ export default function ChatWindow() {
   const toggleRoomMute = useChatStore(state => state.toggleRoomMute)
   // 북마크(#34) 목록에서 메시지를 열었을 때 스크롤해야 할 대상 — BookmarksPanel 이 설정한다.
   const pendingScrollMessageId = useChatStore(state => state.pendingScrollMessageId)
+  // 방별 마지막 읽은 지점(#39) — DB 에 영속되어 재시작 후에도 유지된다.
+  const lastReadTimestamps = useChatStore(state => state.lastReadTimestamps)
 
   const currentMessages = currentRoom.type === 'global'
     ? globalMessages
     : (dmMessages[currentRoom.peerId] || [])
 
-  const roomKey = currentRoom.type === 'global' ? 'global' : currentRoom.peerId
+  const roomKey = getRoomKey(currentRoom)
   const isMuted = !!mutedRooms[roomKey]
-  const lastReadTimestamp = lastReadTimestampsRef.current[roomKey]
+  const lastReadTimestamp = lastReadTimestamps[roomKey]
+  // 안읽음 점프 버튼(#39)용 — 구분선 렌더링과 동일한 순수 함수로 계산해 기준이 어긋나지 않게 한다.
+  const unreadMessages = getUnreadMessages(currentMessages, lastReadTimestamp, myPeerId)
+  const firstUnreadMessageId = unreadMessages[0]?.id || null
 
   const chatTitle = currentRoom.type === 'global'
     ? '전체 채팅'
@@ -73,6 +79,8 @@ export default function ChatWindow() {
     const nearBottom = scrollHeight - scrollTop - clientHeight <= 50
     isNearBottomRef.current = nearBottom
     if (nearBottom) setNewMessageToast(null)
+    // 안읽음 점프 버튼(#39) 표시 조건 — 맨 아래에 있으면 안읽음 메시지도 이미 화면에 보이므로 숨긴다.
+    setIsAwayFromBottom(!nearBottom)
 
     // 무한 스크롤 — 상단 도달 시 이전 메시지 로드 (검색 결과 점프 로딩 중에는 건너뜀, #36)
     if (scrollTop < 50 && !loadingMore && hasMore && !pendingJumpScrollRef.current) {
@@ -265,19 +273,27 @@ export default function ChatWindow() {
     setIsSearching(false)
   }
 
-  // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화 + 읽음 확인 전송
+  // 방 진입 시 처리 — 전체채팅·DM 공용(#39). 이 방을 DB 에 영속된 lastRead 기록이 아직
+  // 없는 상태로 처음 진입하는 경우에만 현재 마지막 메시지 타임스탬프를 lastRead 로 캡처해
+  // 구분선 위치를 정한다(이미 DB 값이 있으면 그 값을 그대로 사용 — 재시작 후 위치 유지).
+  // DM 은 추가로 히스토리 재조회 + 읽음 확인 전송을 수행한다(기존 DM 전용 로직 유지).
   useEffect(() => {
-    if (currentRoom.type === 'dm' && myPeerId) {
-      const roomKey = currentRoom.peerId
+    if (!myPeerId) return
+    const key = getRoomKey(currentRoom)
 
-      // 처음 진입하는 방인 경우에만 현재 마지막 메시지 타임스탬프를 lastRead로 기록
-      if (lastReadTimestampsRef.current[roomKey] === undefined) {
-        const currentDmMessages = useChatStore.getState().dmMessages[roomKey] || []
-        const lastMessage = currentDmMessages[currentDmMessages.length - 1]
-        lastReadTimestampsRef.current[roomKey] = lastMessage ? lastMessage.timestamp : null
-      }
+    if (useChatStore.getState().lastReadTimestamps[key] === undefined) {
+      const messagesInRoom = currentRoom.type === 'global'
+        ? useChatStore.getState().globalMessages
+        : (useChatStore.getState().dmMessages[currentRoom.peerId] || [])
+      const lastMessage = messagesInRoom[messagesInRoom.length - 1]
+      const timestamp = lastMessage ? lastMessage.timestamp : null
+      useChatStore.getState().setLastReadTimestamp(key, timestamp)
+      window.electronAPI.setRoomReadTimestamp(key, timestamp).catch(() => {})
+    }
 
-      useChatStore.getState().resetUnread(currentRoom.peerId)
+    useChatStore.getState().resetUnread(key)
+
+    if (currentRoom.type === 'dm') {
       window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId)
         .then(async (history) => {
           useChatStore.getState().setDMHistory(currentRoom.peerId, history)
@@ -296,15 +312,18 @@ export default function ChatWindow() {
     }
   }, [currentRoom, myPeerId])
 
-  // DM 채팅방 이탈 시 lastRead 업데이트
+  // 방 이탈 시 lastRead 갱신 + 영속화(#39) — 과거엔 DM 전용 in-memory ref 였으나, 전체채팅도
+  // 동일하게 적용하고 DB(room_read_state)에 저장해 재시작 후에도 구분선 위치가 유지되게 한다.
   useEffect(() => {
     return () => {
-      if (currentRoom.type === 'dm') {
-        const roomKey = currentRoom.peerId
-        const currentDmMessages = useChatStore.getState().dmMessages[roomKey] || []
-        const lastMessage = currentDmMessages[currentDmMessages.length - 1]
-        lastReadTimestampsRef.current[roomKey] = lastMessage ? lastMessage.timestamp : null
-      }
+      const key = getRoomKey(currentRoom)
+      const messagesInRoom = currentRoom.type === 'global'
+        ? useChatStore.getState().globalMessages
+        : (useChatStore.getState().dmMessages[currentRoom.peerId] || [])
+      const lastMessage = messagesInRoom[messagesInRoom.length - 1]
+      const timestamp = lastMessage ? lastMessage.timestamp : null
+      useChatStore.getState().setLastReadTimestamp(key, timestamp)
+      window.electronAPI.setRoomReadTimestamp(key, timestamp).catch(() => {})
     }
   }, [currentRoom])
 
@@ -363,6 +382,7 @@ export default function ChatWindow() {
     setNewMessageToast(null)
     setHasMore(true)
     setLoadingMore(false)
+    setIsAwayFromBottom(false)
   }, [currentRoom])
 
   // 컨테이너 크기 변화 감지 — 초기 스크롤 snap 기간 동안 이미지/비디오가 로드되어
@@ -491,11 +511,7 @@ export default function ChatWindow() {
                   )
                 }
 
-                const shouldShowDivider =
-                  lastReadTimestamp != null &&
-                  message.timestamp > lastReadTimestamp &&
-                  (prevMessage === null || prevMessage.timestamp <= lastReadTimestamp) &&
-                  !isMyMessage
+                const shouldShowDivider = isFirstUnreadMessage(message, prevMessage, lastReadTimestamp, isMyMessage)
 
                 if (shouldShowDivider) {
                   elements.push(
@@ -574,6 +590,19 @@ export default function ChatWindow() {
 
           <div ref={scrollEndRef} />
         </div>
+
+        {/* 안읽음 점프 버튼(#39) — 구분선이 있는데(=안읽음 존재) 맨 아래에서 벗어나 있을 때만 표시.
+            newMessageToast 와 동시에 뜨면 하단 pill 이 겹치므로 그 동안은 숨긴다(순수 추가, 기존
+            새 메시지 토스트/scrollToMessage 로직은 그대로 재사용만 한다). */}
+        {firstUnreadMessageId && isAwayFromBottom && !newMessageToast && (
+          <button
+            onClick={() => scrollToMessage(firstUnreadMessageId)}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-vsc-accent text-white shadow-lg cursor-pointer hover:opacity-90 transition-opacity max-w-[80%]"
+          >
+            <ChevronDown size={14} className="shrink-0" />
+            <span className="text-xs font-semibold">새 메시지 {unreadMessages.length}개</span>
+          </button>
+        )}
 
         {newMessageToast && (
           <button

@@ -42,6 +42,13 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
 
     const initChat = async () => {
       const { peerId, nickname, profileImageUrl } = await window.electronAPI.getMyInfo()
+
+      // 방별 마지막 읽은 지점 복원(#39) — myPeerId 를 설정(initialize)하기 전에 먼저
+      // 하이드레이션해야 한다. ChatWindow 의 "첫 진입 시 lastRead 캡처" 로직이 myPeerId
+      // 변경으로 재실행될 때, 이미 스토어에 DB 값이 채워져 있어야 null 로 덮어쓰지 않는다.
+      const roomReadState = await window.electronAPI.getRoomReadState()
+      useChatStore.getState().setLastReadTimestamps(roomReadState)
+
       useUserStore.getState().initialize(peerId, nickname, profileImageUrl)
 
       const history = await window.electronAPI.getGlobalHistory()
@@ -81,6 +88,16 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       window.electronAPI.subscribeToMessages((message) => {
         if (message.type === 'message') {
           useChatStore.getState().addGlobalMessage(message)
+
+          // 전체채팅 안읽음 배지(#39) — DM 과 동일한 판정: 지금 전체채팅을 보고 있고
+          // 창이 포커스 상태면 이미 읽은 것으로 간주해 배지를 증가시키지 않는다.
+          // (내가 보낸 메시지는 send-global-message 응답으로만 반영되고 이 이벤트로
+          // 되돌아오지 않으므로 별도의 isMyMessage 체크는 필요 없다.)
+          const { currentRoom } = useChatStore.getState()
+          const isActivelyViewingGlobal = currentRoom.type === 'global' && document.hasFocus()
+          if (!isActivelyViewingGlobal) {
+            useChatStore.getState().incrementUnread('global')
+          }
         } else if (message.type === 'dm') {
           const senderId = message.fromId === peerId
             ? (message.to || message.to_id)

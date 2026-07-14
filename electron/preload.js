@@ -57,6 +57,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 상대별 안읽은 DM 개수 일괄 조회 — 부팅 시 사이드바 배지 복원용
   getUnreadCounts: () => ipcRenderer.invoke('get-unread-counts'),
   sendReadReceipt: (targetPeerId, messageIds) => ipcRenderer.invoke('send-read-receipt', { targetPeerId, messageIds }),
+  // 방별 마지막 읽은 지점(#39) — 안읽음 구분선을 재시작 후에도 유지하기 위한 영속 저장
+  getRoomReadState: () => ipcRenderer.invoke('get-room-read-state'),
+  setRoomReadTimestamp: (roomKey, timestamp) => ipcRenderer.invoke('set-room-read-timestamp', { roomKey, timestamp }),
 
   // 읽음 확인 수신 이벤트
   onReadReceipt: (callback) => {

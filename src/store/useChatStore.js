@@ -53,6 +53,10 @@ const useChatStore = create((set, get) => ({
   globalMessages: [],
   dmMessages: {}, // { peerId: [메시지...] }
   unreadCounts: {}, // { peerId: 숫자 }
+  // { roomKey: timestamp | null } — 방(전체채팅='global', DM=peerId)별 마지막으로 읽은
+  // 지점. 안읽음 구분선 위치 계산에 사용되며, DB(room_read_state 테이블)에 영속돼
+  // 재시작 후에도 유지된다(#39). 부팅 시 get-room-read-state IPC 응답으로 하이드레이션.
+  lastReadTimestamps: {},
   typingUsers: {}, // { peerId: { nickname, timestamp } }
   mutedRooms: loadMutedRooms(), // { roomKey: boolean } — 채팅방별 알림 뮤트 상태
   drafts: {}, // { roomKey: markdown } — 방 전환 시 작성 중이던 메시지를 보존하기 위한 임시 저장소
@@ -170,6 +174,20 @@ const useChatStore = create((set, get) => ({
         ...state.unreadCounts,
         [peerId]: 0,
       },
+    })),
+
+  // 부팅 시 DB(room_read_state)에서 조회한 방별 마지막 읽은 지점을 일괄 반영(#39).
+  // 기존 값과 병합 — 이미 이번 세션에서 계산된 값(예: 처음 방 진입 캡처)을 덮어쓰지 않도록
+  // 호출 시점(로그인 초기, initialize 이전)에 주의해야 한다.
+  setLastReadTimestamps: (timestamps) =>
+    set((state) => ({
+      lastReadTimestamps: { ...state.lastReadTimestamps, ...timestamps },
+    })),
+
+  // 방 진입/이탈 시 마지막 읽은 지점 하나를 갱신 — 호출자가 동시에 DB 에도 영속화한다.
+  setLastReadTimestamp: (roomKey, timestamp) =>
+    set((state) => ({
+      lastReadTimestamps: { ...state.lastReadTimestamps, [roomKey]: timestamp },
     })),
 
   setCachedFileUrl: (messageId, localPath) =>
@@ -341,6 +359,7 @@ const useChatStore = create((set, get) => ({
       globalMessages: [],
       dmMessages: {},
       unreadCounts: {},
+      lastReadTimestamps: {},
       typingUsers: {},
       reactions: {},
       drafts: {},

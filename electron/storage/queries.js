@@ -227,6 +227,22 @@ function getFileForDownload(db, messageId) {
   return { fileName: row.file_name, cachedFilePath: row.cached_file_path }
 }
 
+// 방별 마지막 읽은 지점(타임스탬프) 전체 조회 — { roomKey: timestamp } 형태로 반환.
+// 부팅 시 안읽음 구분선 위치를 복원하는 데 사용된다(#39).
+function getRoomReadState(db) {
+  const rows = db.prepare('SELECT room_key, last_read_timestamp FROM room_read_state').all()
+  return Object.fromEntries(rows.map(row => [row.room_key, row.last_read_timestamp]))
+}
+
+// 방별 마지막 읽은 지점 갱신(upsert) — 방 진입/이탈 시 호출되어 재시작 후에도 안읽음
+// 구분선 위치가 유지되도록 영속화한다. timestamp 는 해당 방에 메시지가 아직 없으면 null.
+function setRoomReadTimestamp(db, roomKey, timestamp) {
+  db.prepare(`
+    INSERT INTO room_read_state (room_key, last_read_timestamp) VALUES (?, ?)
+    ON CONFLICT(room_key) DO UPDATE SET last_read_timestamp = excluded.last_read_timestamp
+  `).run(roomKey, timestamp)
+}
+
 // 피어 캐시 저장 — key-exchange 성공 시 IP·포트 기록 (mDNS 없이도 재연결 가능)
 function savePeerCache(db, { peerId, ip, wsPort, nickname }) {
   db.prepare(`
@@ -255,4 +271,4 @@ function deletePeerCache(db, peerId) {
   db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }

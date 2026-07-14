@@ -114,6 +114,8 @@ export default function Sidebar({ onShowPatchNotes }) {
   const offlinePastPeers = pastDMPeers.filter(p => !onlinePeerIds.has(p.peerId))
   const currentRoom = useChatStore(state => state.currentRoom)
   const unreadCounts = useChatStore(state => state.unreadCounts)
+  // 전체채팅 안읽음 배지(#39) — DM 배지와 동일한 unreadCounts 맵을 'global' 키로 재사용한다.
+  const globalUnreadCount = unreadCounts.global || 0
 
   const isGlobalSelected = currentRoom.type === 'global'
 
@@ -131,11 +133,14 @@ export default function Sidebar({ onShowPatchNotes }) {
         <button
           onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
           title="전체 채팅"
-          className={`cursor-pointer p-1.5 rounded transition-colors ${
+          className={`cursor-pointer relative p-1.5 rounded transition-colors ${
             isGlobalSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
           }`}
         >
           <Hash size={14} />
+          {globalUnreadCount > 0 && (
+            <span className="absolute top-0 right-0 w-2 h-2 bg-vsc-accent rounded-full" />
+          )}
         </button>
 
         {[...onlinePeers, ...offlinePastPeers].map((peer) => {
@@ -215,6 +220,11 @@ export default function Sidebar({ onShowPatchNotes }) {
             >
               <Hash size={14} className="shrink-0" />
               전체 채팅
+              {globalUnreadCount > 0 && (
+                <span className="ml-auto bg-vsc-accent text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center leading-none">
+                  {globalUnreadCount}
+                </span>
+              )}
             </button>
           </div>
 
