@@ -47,10 +47,17 @@ function registerHistoryHandlers(ctx) {
             }
           }
 
+          // 수정된 메시지는 encrypted_payload 가 수정 전 원문 그대로 남아있다 (수정은
+          // editMessage 가 평문 content 컬럼만 갱신하고 payload 재암호화는 하지 않기 때문 —
+          // 재암호화는 상대 마스터키 접근이 필요해 불가능). 여기서 복호화 결과로 content 를
+          // 덮어쓰면 재시작 후 수정 전 내용으로 롤백되어 보이므로, edited_at 이 있으면
+          // 이미 정확한 값이 저장돼 있는 content 컬럼을 그대로 사용한다.
+          const displayContent = msg.edited_at ? msg.content : decryptedPayload.content
+
           return {
             ...msg,
             read: readFlag,
-            content: decryptedPayload.content,
+            content: displayContent,
             contentType: decryptedPayload.contentType || msg.content_type,
             fileUrl: rewriteFileUrl(ctx, decryptedPayload.fileUrl || msg.file_url, msg.from_id),
             fileName: decryptedPayload.fileName || msg.file_name,
