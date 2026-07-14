@@ -1,7 +1,7 @@
 // 인증 완료 후 채팅/피어 관련 모든 IPC 이벤트 구독을 모은 hook.
 // App.jsx 의 거대한 useEffect 에서 분리 (Phase 3).
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
 import useUserStore from '../store/useUserStore'
@@ -11,6 +11,14 @@ import useNotificationSound from './useNotificationSound'
 // 반환값: cleanup 함수 (App 에서 useEffect cleanup 으로 사용)
 export default function useChatSubscriptions({ authStatus, authenticatedNickname, setPatchNotesHighlight, setShowPatchNotes }) {
   const { play: playNotification } = useNotificationSound()
+  // playNotification 은 알림 볼륨(notificationVolume)이 바뀔 때마다 재생성되는 함수라
+  // 아래 구독 useEffect의 의존성에 그대로 넣으면 볼륨 슬라이더 조작만으로 effect가
+  // 재실행되어 initChat()이 다시 돌며 P2P 연결 전체가 종료·재탐색된다. ref로 최신 함수만
+  // 참조하고 effect 의존성에서는 제외한다.
+  const playNotificationRef = useRef(playNotification)
+  useEffect(() => {
+    playNotificationRef.current = playNotification
+  }, [playNotification])
 
   useEffect(() => {
     if (authStatus !== 'authenticated' || !authenticatedNickname) return
@@ -128,7 +136,7 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       })
 
       window.electronAPI.onPlayNotificationSound(() => {
-        playNotification()
+        playNotificationRef.current()
       })
 
       window.electronAPI.onNavigateToRoom((room) => {
@@ -160,5 +168,5 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       window.electronAPI.unsubscribeAll()
       clearInterval(typingCleanupInterval)
     }
-  }, [authStatus, authenticatedNickname, playNotification, setPatchNotesHighlight, setShowPatchNotes])
+  }, [authStatus, authenticatedNickname, setPatchNotesHighlight, setShowPatchNotes])
 }
