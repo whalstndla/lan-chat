@@ -470,7 +470,13 @@ export default function ChatWindow() {
             <p className="text-vsc-accent text-sm font-semibold">파일을 여기에 놓으세요</p>
           </div>
         )}
-        <div ref={messagesContainerRef} onScroll={handleScroll} className="h-full overflow-y-auto py-2">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          role="log"
+          aria-live="polite"
+          className="h-full overflow-y-auto py-2"
+        >
           {currentMessages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>

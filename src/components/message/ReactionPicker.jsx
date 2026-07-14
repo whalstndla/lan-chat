@@ -28,7 +28,7 @@ export default function ReactionPicker({ onSelect, alignRight = false }) {
       // 전체 피커를 열어둔 채 popover 밖으로 나가면 다음에 다시 열 때는 퀵 이모지부터 보이도록 초기화
       onMouseLeave={() => setShowFullPicker(false)}
     >
-      <button className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-vsc-muted hover:text-vsc-accent cursor-pointer" aria-label="리액션 추가">
+      <button className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity p-0.5 rounded text-vsc-muted hover:text-vsc-accent cursor-pointer" aria-label="리액션 추가">
         <SmilePlus size={14} />
       </button>
       <div className={`hidden group-hover/reaction:flex absolute bottom-full pb-2 z-10 flex-col gap-1 ${alignRight ? 'right-0 items-end' : 'left-0 items-start'}`}>

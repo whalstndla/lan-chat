@@ -1,11 +1,12 @@
 // src/components/Sidebar.jsx
-import React, { useState, useEffect } from 'react'
-import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark, Search } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import SettingsPanel from './SettingsPanel'
 import BookmarksPanel from './BookmarksPanel'
+import { comparePeersForSidebar, matchesPeerFilter } from '../utils/comparePeers'
 
 // 상태 타입 → dot 색상 클래스 매핑
 const statusColors = {
@@ -76,6 +77,8 @@ export default function Sidebar({ onShowPatchNotes }) {
   const [showSettings, setShowSettings] = useState(false)
   const [showBookmarks, setShowBookmarks] = useState(false)
   const [connectingCount, setConnectingCount] = useState(0)
+  // DM/피어 목록 필터(#43) — 닉네임 부분일치. 사이드바를 접었다 펴도 값은 유지된다.
+  const [peerFilterQuery, setPeerFilterQuery] = useState('')
   const onlinePeers = usePeerStore(state => state.onlinePeers)
 
   // peer-connecting 이벤트로 연결 시도 중 상태 추적
@@ -119,6 +122,25 @@ export default function Sidebar({ onShowPatchNotes }) {
 
   const isGlobalSelected = currentRoom.type === 'global'
 
+  // 그룹(온라인/오프라인) 내부 정렬(#43) — 안읽음 있는 피어 우선, 그 다음 닉네임 가나다순.
+  // 발견 순서에 따른 불안정한 정렬을 방지한다. 필터는 검색어 부분일치로 걸러낸다.
+  const sortedOnlinePeers = useMemo(
+    () => [...onlinePeers].sort((a, b) => comparePeersForSidebar(a, b, unreadCounts)),
+    [onlinePeers, unreadCounts]
+  )
+  const sortedOfflinePastPeers = useMemo(
+    () => [...offlinePastPeers].sort((a, b) => comparePeersForSidebar(a, b, unreadCounts)),
+    [offlinePastPeers, unreadCounts]
+  )
+  const filteredOnlinePeers = useMemo(
+    () => sortedOnlinePeers.filter(peer => matchesPeerFilter(peer, peerFilterQuery)),
+    [sortedOnlinePeers, peerFilterQuery]
+  )
+  const filteredOfflinePastPeers = useMemo(
+    () => sortedOfflinePastPeers.filter(peer => matchesPeerFilter(peer, peerFilterQuery)),
+    [sortedOfflinePastPeers, peerFilterQuery]
+  )
+
   if (collapsed) {
     return (
       <div className="w-10 bg-vsc-sidebar border-r border-vsc-border flex flex-col items-center py-2 gap-1 shrink-0">
@@ -143,7 +165,7 @@ export default function Sidebar({ onShowPatchNotes }) {
           )}
         </button>
 
-        {[...onlinePeers, ...offlinePastPeers].map((peer) => {
+        {[...filteredOnlinePeers, ...filteredOfflinePastPeers].map((peer) => {
           const isSelected = currentRoom.type === 'dm' && currentRoom.peerId === peer.peerId
           const hasUnread = unreadCounts[peer.peerId] > 0
           const isOnline = onlinePeerIds.has(peer.peerId)
@@ -232,13 +254,27 @@ export default function Sidebar({ onShowPatchNotes }) {
             <p className="text-vsc-muted text-xs px-2 py-1 mb-1 uppercase tracking-wider">
               DM ({onlinePeers.length}/{onlinePeers.length + offlinePastPeers.length})
             </p>
-            {onlinePeers.length === 0 && offlinePastPeers.length === 0 ? (
+            {/* DM/피어 검색 필터(#43) — 닉네임 부분일치 */}
+            {(onlinePeers.length > 0 || offlinePastPeers.length > 0) && (
+              <div className="relative mb-1.5 px-0.5">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-vsc-muted pointer-events-none" />
+                <input
+                  type="text"
+                  value={peerFilterQuery}
+                  onChange={(e) => setPeerFilterQuery(e.target.value)}
+                  placeholder="이름으로 검색..."
+                  aria-label="DM 상대 검색"
+                  className="w-full bg-vsc-bg border border-vsc-border rounded pl-7 pr-2 py-1 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+                />
+              </div>
+            )}
+            {filteredOnlinePeers.length === 0 && filteredOfflinePastPeers.length === 0 ? (
               <div className="flex items-center gap-2 px-3 py-1.5 text-vsc-muted">
                 <Wifi size={13} className="opacity-40" />
-                <span className="text-xs">대기 중...</span>
+                <span className="text-xs">{peerFilterQuery.trim() ? '검색 결과가 없습니다.' : '대기 중...'}</span>
               </div>
             ) : (
-              [...onlinePeers, ...offlinePastPeers].map((peer) => {
+              [...filteredOnlinePeers, ...filteredOfflinePastPeers].map((peer) => {
                 const isSelected = currentRoom.type === 'dm' && currentRoom.peerId === peer.peerId
                 const isOnline = onlinePeerIds.has(peer.peerId)
                 return (

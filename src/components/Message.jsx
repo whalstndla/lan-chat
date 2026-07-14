@@ -22,6 +22,19 @@ function formatTime(timestamp) {
   })
 }
 
+// timestamp → "2026년 7월 14일 오후 2:30:15" 형식 — hover 시에만 보이던 시간 표시를
+// title 속성으로도 제공해(#43) 스크린리더/키보드 사용자도 전체 날짜시간을 확인할 수 있게 한다.
+function formatFullDateTime(timestamp) {
+  return new Date(timestamp).toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
 // 이미지 소스 폴백 체인 — lanchat:// (앱 내부 복호화 채널) 만 사용한다.
 // 디스크 파일이 모두 ciphertext 라 file:// 직접 표시는 무용. lanchat:// 는 main
 // 프로세스 핸들러가 메모리에서 복호화해 응답하므로 외부 노출 0.
@@ -234,7 +247,10 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
             <span className={`text-xs font-semibold ${isMyMessage ? 'text-vsc-accent' : 'text-vsc-text'}`}>
               {isMyMessage ? '나' : sender}
             </span>
-            <span className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+            <span
+              className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+              title={formatFullDateTime(message.timestamp)}
+            >
               {formatTime(message.timestamp)}
             </span>
             {/* 수정된 메시지 표시 */}
@@ -348,7 +364,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   getText={() => message.content || ''}
                   title="메시지 복사"
                   copiedTitle="복사됨"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
                 />
               )}
               {/* 수정 버튼 */}
@@ -357,7 +373,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   onClick={() => onStartEdit?.(message)}
                   aria-label="메시지 수정"
                   title="메시지 수정"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
                 >
                   <Pencil size={12} />
                 </button>
@@ -368,7 +384,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   onClick={handleDelete}
                   aria-label="메시지 삭제"
                   title="메시지 삭제"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-red-400 hover:bg-vsc-hover"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-red-400 hover:bg-vsc-hover"
                 >
                   <Trash2 size={12} />
                 </button>
@@ -382,7 +398,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   className={`p-0.5 rounded cursor-pointer transition-opacity hover:bg-vsc-hover ${
                     isBookmarked
                       ? 'opacity-100 text-vsc-accent'
-                      : 'opacity-0 group-hover:opacity-100 text-vsc-muted hover:text-vsc-accent'
+                      : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-vsc-muted hover:text-vsc-accent'
                   }`}
                 >
                   <Bookmark size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
@@ -394,7 +410,10 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
 
             {/* 그룹된 메시지 시간 (액션버튼 반대쪽) */}
             {isGrouped && (
-              <span className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              <span
+                className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0"
+                title={formatFullDateTime(message.timestamp)}
+              >
                 {formatTime(message.timestamp)}
               </span>
             )}
