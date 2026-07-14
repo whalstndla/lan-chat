@@ -79,8 +79,10 @@ export default function Sidebar({ onShowPatchNotes }) {
   // peer-connecting 이벤트로 연결 시도 중 상태 추적
   useEffect(() => {
     const handleConnecting = () => setConnectingCount(c => c + 1)
-    window.electronAPI.onPeerConnecting(handleConnecting)
-    return () => {}
+    const unsubscribe = window.electronAPI.onPeerConnecting(handleConnecting)
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
   }, [])
 
   // 연결 완료/해제 시 connectingCount 리셋

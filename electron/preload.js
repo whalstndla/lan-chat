@@ -91,6 +91,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onPeerConnecting: (callback) => {
     ipcRenderer.removeAllListeners('peer-connecting')
     ipcRenderer.on('peer-connecting', (_, peerId) => callback(peerId))
+    // 구독 해제 함수 반환 — 호출부(Sidebar.jsx)가 언마운트 시 실제로 리스너를 정리할 수 있도록
+    return () => ipcRenderer.removeAllListeners('peer-connecting')
   },
   onFileCached: (callback) => {
     ipcRenderer.removeAllListeners('file-cached')
