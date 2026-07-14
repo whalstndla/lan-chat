@@ -110,6 +110,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('typing-event')
     ipcRenderer.on('typing-event', (_, data) => callback(data))
   },
+  // 타이핑 정지 — 상대가 메시지를 실제로 전송하면 즉시 정지 신호를 보내
+  // 최대 3초간 남아있던 "입력 중" 유령 표시를 바로 지운다.
+  onTypingStop: (callback) => {
+    ipcRenderer.removeAllListeners('typing-stop')
+    ipcRenderer.on('typing-stop', (_, data) => callback(data))
+  },
   onPeerNicknameChanged: (callback) => {
     ipcRenderer.removeAllListeners('peer-nickname-changed')
     ipcRenderer.on('peer-nickname-changed', (_, data) => callback(data))
@@ -145,6 +151,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-discovered')
     ipcRenderer.removeAllListeners('peer-left')
     ipcRenderer.removeAllListeners('typing-event')
+    ipcRenderer.removeAllListeners('typing-stop')
     ipcRenderer.removeAllListeners('peer-nickname-changed')
     ipcRenderer.removeAllListeners('peer-profile-updated')
     ipcRenderer.removeAllListeners('pending-messages-flushed')

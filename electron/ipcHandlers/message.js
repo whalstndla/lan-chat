@@ -35,6 +35,9 @@ function registerMessageHandlers(ctx) {
       timestamp: Date.now(),
     }
     broadcastPeerMessage(ctx, message)
+    // 메시지 전송 완료 시점에 typing-stop 을 브로드캐스트 — 수신측에 최대 3초간
+    // 남아있던 "입력 중" 유령 표시를 즉시 지운다.
+    broadcastPeerMessage(ctx, { type: 'typing-stop', fromId: ctx.state.peerId, to: null, timestamp: Date.now() })
     // 내 메시지도 로컬 저장 — 저장 실패 시에도 메시지 반환은 계속
     try {
       saveMessage(ctx.state.database, {
@@ -64,6 +67,10 @@ function registerMessageHandlers(ctx) {
     const currentNickname = getCurrentNicknameSafely(ctx)
     const messageId = uuidv4()
     const timestamp = Date.now()
+
+    // 메시지 전송 시점에 즉시 typing-stop 신호 전송 — 상대가 연결되어 있지 않으면
+    // sendPeerMessage 가 조용히 false 를 반환할 뿐이라 오프라인/pending 분기에서도 안전.
+    sendPeerMessage(ctx, recipientPeerId, { type: 'typing-stop', fromId: ctx.state.peerId, to: recipientPeerId, timestamp: Date.now() })
 
     // 자기가 보낸 파일을 영구 캐시로 복사 — 오프라인/암호화실패/정상 모든 분기에서
     // 동일하게 적용되어야 자기 이미지가 재시작 후에도 표시됨.

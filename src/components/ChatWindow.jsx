@@ -54,9 +54,12 @@ export default function ChatWindow() {
     ? '전체 채팅'
     : `${currentRoom.nickname} (DM)`
 
+  // typingUsers 는 발신자 peerId 를 키로 저장되며 to 필드로 대상(전체채팅=null, DM=수신자 peerId)을 구분.
+  // DM 방에서는 상대가 "나에게" 보낸 typing(to === myPeerId) 인 경우에만 표시해야 한다.
+  // 그렇지 않으면 상대가 전체채팅에 입력 중인데도 DM 방에 "입력 중"이 잘못 표시된다.
   const typingUserList = currentRoom.type === 'global'
     ? Object.values(typingUsers).filter(u => u.to === null)
-    : (typingUsers[currentRoom.peerId] ? [typingUsers[currentRoom.peerId]] : [])
+    : (typingUsers[currentRoom.peerId]?.to === myPeerId ? [typingUsers[currentRoom.peerId]] : [])
 
   function handleScroll() {
     const container = messagesContainerRef.current

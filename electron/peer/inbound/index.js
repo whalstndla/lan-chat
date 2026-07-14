@@ -8,6 +8,7 @@
 // Phase 2b/1c 에서 순차 이관.
 
 const typing = require('./handlers/typing')
+const typingStop = require('./handlers/typingStop')
 const status = require('./handlers/status')
 const nickname = require('./handlers/nickname')
 const readReceipt = require('./handlers/readReceipt')
@@ -25,6 +26,7 @@ const globalMessage = require('./handlers/message')
 // type → handler 매핑. 알려지지 않은 type 은 무시됨.
 const HANDLERS = {
   'typing': typing,
+  'typing-stop': typingStop,
   'status-changed': status,
   'nickname-changed': nickname,
   'read-receipt': readReceipt,

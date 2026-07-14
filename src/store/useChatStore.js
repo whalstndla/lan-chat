@@ -170,6 +170,16 @@ const useChatStore = create((set, get) => ({
       },
     })),
 
+  // 특정 발신자의 typing 상태를 즉시 제거 — 상대가 메시지를 전송해 typing-stop 신호를
+  // 보내온 경우, 3초 만료를 기다리지 않고 즉시 "입력 중" 표시를 지우기 위해 사용
+  clearTyping: (peerId) =>
+    set((state) => {
+      if (!(peerId in state.typingUsers)) return state
+      const updated = { ...state.typingUsers }
+      delete updated[peerId]
+      return { typingUsers: updated }
+    }),
+
   clearExpiredTyping: () =>
     set((state) => {
       const now = Date.now()

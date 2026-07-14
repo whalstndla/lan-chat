@@ -88,6 +88,11 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         useChatStore.getState().setTyping(data.fromId, data.from, data.to || null)
       })
 
+      // 상대가 메시지를 전송해 typing-stop 을 보내오면 3초 만료를 기다리지 않고 즉시 해제
+      window.electronAPI.onTypingStop(({ fromId }) => {
+        useChatStore.getState().clearTyping(fromId)
+      })
+
       window.electronAPI.onFileCached(({ messageId }) => {
         // 디스크 파일은 ciphertext 라 file:// 직접 표시 불가. lanchat:// 핸들러를 통해
         // 메모리에서 복호화해 응답한다. cache buster 로 첫 시도(lanchat://<id>) 와 다른
