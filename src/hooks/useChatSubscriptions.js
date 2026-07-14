@@ -23,6 +23,23 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
   useEffect(() => {
     if (authStatus !== 'authenticated' || !authenticatedNickname) return
 
+    // 창이 백그라운드 상태였던 동안 보류된 read receipt 를 포커스 복귀 시점에 일괄 발송.
+    // 현재 보고 있는 방이 DM 이 아니면 아무 것도 하지 않는다.
+    const handleWindowFocus = () => {
+      const { currentRoom } = useChatStore.getState()
+      if (currentRoom.type !== 'dm') return
+      const peerId = currentRoom.peerId
+      useChatStore.getState().resetUnread(peerId)
+      window.electronAPI.getUnreadDMIds(peerId)
+        .then(unreadIds => {
+          if (unreadIds.length > 0) {
+            window.electronAPI.sendReadReceipt(peerId, unreadIds).catch(() => {})
+          }
+        })
+        .catch(() => {})
+    }
+    window.addEventListener('focus', handleWindowFocus)
+
     const initChat = async () => {
       const { peerId, nickname, profileImageUrl } = await window.electronAPI.getMyInfo()
       useUserStore.getState().initialize(peerId, nickname, profileImageUrl)
@@ -67,8 +84,11 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
             usePeerStore.getState().addPastDMPeer({ peerId: senderId, nickname: senderPeer.nickname })
           }
 
+          // 창이 백그라운드(비포커스)면 방을 보고 있어도 실제로 읽은 게 아니므로
+          // read receipt 를 보내지 않는다 — document.hasFocus() 로 확인.
+          // 포커스가 없어 보류된 메시지는 창 포커스 복귀 시 일괄 발송된다(아래 handleWindowFocus).
           const { currentRoom } = useChatStore.getState()
-          if (currentRoom.type === 'dm' && currentRoom.peerId === senderId) {
+          if (currentRoom.type === 'dm' && currentRoom.peerId === senderId && document.hasFocus()) {
             window.electronAPI.sendReadReceipt(senderId, [message.id]).catch(() => {})
           } else {
             const isMuted = !!useChatStore.getState().mutedRooms[senderId]
@@ -172,6 +192,7 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
     return () => {
       window.electronAPI.unsubscribeAll()
       clearInterval(typingCleanupInterval)
+      window.removeEventListener('focus', handleWindowFocus)
     }
   }, [authStatus, authenticatedNickname, setPatchNotesHighlight, setShowPatchNotes])
 }
