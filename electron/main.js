@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage, dialog } = require('electron')
 // safeStorage 는 v0.9.x 키체인 wrap 마스터키를 비밀번호 wrap 으로 마이그레이션할 때만 사용.
 // v0.10.0 부터는 OS 키체인 의존 없이 사용자 비밀번호 KDF 만으로 마스터키 보호.
 const path = require('path')
@@ -23,6 +23,25 @@ const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/la
 
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
+
+// main 프로세스 미처리 예외/거부 핸들러 — 등록하지 않으면 Node.js 기본 동작으로
+// uncaughtException 발생 시 프로세스가 그대로 종료된다. 트레이 상주 앱 특성상
+// 사용자가 창을 닫지 않고 방치하는 경우가 많아, 조용히 프로세스가 사라지는 대신
+// 로그를 남기고(peerDebugLogger) 가능하면 사용자에게 알린 뒤 계속 실행한다.
+process.on('uncaughtException', (error) => {
+  try {
+    writePeerDebugLog('main.process.uncaughtException', { error })
+  } catch { /* 로깅 실패 시 무시 */ }
+  try {
+    dialog.showErrorBox('LAN Chat 오류', `예상치 못한 오류가 발생했습니다.\n${error?.message || error}`)
+  } catch { /* 다이얼로그 표시 실패 시 무시 (예: 창이 아직 없는 시점) */ }
+})
+
+process.on('unhandledRejection', (reason) => {
+  try {
+    writePeerDebugLog('main.process.unhandledRejection', { reason })
+  } catch { /* 로깅 실패 시 무시 */ }
+})
 
 // 단일 인스턴스 강제 — 트레이에 숨겨진 채로 사용자가 앱을 다시 실행했을 때
 // 두 번째 프로세스가 별도로 떠서 포트 / DB 락 충돌로 창이 안 뜨던 버그 방지.
