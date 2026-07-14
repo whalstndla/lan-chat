@@ -5,6 +5,7 @@ import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
 import ImageLightbox from './message/ImageLightbox'
+import CopyButton from './message/CopyButton'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
@@ -317,6 +318,15 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
 
             {/* 액션 버튼 (말풍선 옆) */}
             <div className="flex items-center gap-0.5 shrink-0">
+              {/* 메시지 복사 버튼 — 텍스트 메시지의 마크다운 원문을 클립보드로 복사 */}
+              {!message.decryptionFailed && (contentType === 'text' || !contentType) && (
+                <CopyButton
+                  getText={() => message.content || ''}
+                  title="메시지 복사"
+                  copiedTitle="복사됨"
+                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                />
+              )}
               {/* 수정 버튼 */}
               {isMyMessage && !message.pending && (contentType === 'text' || !contentType) && (
                 <button

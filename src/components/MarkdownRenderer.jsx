@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import rehypeHighlight from 'rehype-highlight'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import CopyButton from './message/CopyButton'
 import 'highlight.js/styles/github-dark.css'
 
 // 접힘 기준 높이 (px). 이 값을 넘으면 기본 접힘 상태로 렌더하고 더보기 버튼 노출.
@@ -40,7 +41,7 @@ function CollapsibleCodeBlock({ children }) {
 
   const shouldCollapse = overflowing && !expanded
   return (
-    <div className="my-1">
+    <div className="my-1 group/codeblock">
       <div className="relative">
         <pre
           ref={preRef}
@@ -49,6 +50,11 @@ function CollapsibleCodeBlock({ children }) {
         >
           {children}
         </pre>
+        {/* 코드 원문 복사 버튼 — 실제 렌더된 pre 텍스트를 그대로 읽어 복사(하이라이트 span 무관하게 정확한 원문) */}
+        <CopyButton
+          getText={() => preRef.current?.innerText || ''}
+          className="absolute top-1.5 right-1.5 z-10 p-1 rounded bg-black/40 text-vsc-muted opacity-0 group-hover/codeblock:opacity-100 hover:text-white hover:bg-black/60 transition-opacity cursor-pointer"
+        />
         {shouldCollapse && (
           // 하단 페이드 — 코드가 잘려있음을 시각적으로 암시
           <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-12 bg-gradient-to-t from-[#0d1117] to-transparent" />
