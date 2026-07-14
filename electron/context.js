@@ -42,6 +42,9 @@ function createAppContext(config) {
       // (localStorage) 를 set-muted-rooms IPC 로 동기화받아 유지한다. 소리/OS알림 억제
       // 판정에만 사용하고, 안읽음 배지 증가에는 영향을 주지 않는다(#4).
       mutedRoomKeySet: new Set(),
+      // 유휴 자동 자리비움(auto-away) 이 현재 적용 중인지 여부 — 사용자가 명시적으로
+      // 상태를 변경(update-status)하면 false 로 리셋된다(#41).
+      isAutoAway: false,
     },
   }
 }

@@ -46,6 +46,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-status-changed')
     ipcRenderer.on('peer-status-changed', (_, data) => callback(data))
   },
+  // 내 상태가 main 프로세스에 의해 자동으로 바뀌었을 때(유휴 자동 자리비움/복원) 통보(#41)
+  onMyStatusChanged: (callback) => {
+    ipcRenderer.removeAllListeners('my-status-changed')
+    ipcRenderer.on('my-status-changed', (_, data) => callback(data))
+  },
 
   // 읽음 확인
   getUnreadDMIds: (senderPeerId) => ipcRenderer.invoke('get-unread-dm-ids', senderPeerId),
@@ -172,6 +177,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('reaction-updated')
     ipcRenderer.removeAllListeners('message-edited')
     ipcRenderer.removeAllListeners('peer-status-changed')
+    ipcRenderer.removeAllListeners('my-status-changed')
     ipcRenderer.removeAllListeners('play-notification-sound')
   },
 

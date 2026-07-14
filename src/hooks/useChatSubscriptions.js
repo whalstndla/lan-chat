@@ -152,6 +152,11 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         usePeerStore.getState().updatePeer(statusPeerId, { statusType, statusMessage })
       })
 
+      // 유휴 자동 자리비움/복원 등 main 프로세스가 스스로 내 상태를 바꾼 경우 반영(#41)
+      window.electronAPI.onMyStatusChanged(({ statusType, statusMessage }) => {
+        useUserStore.getState().setMyStatus(statusType, statusMessage)
+      })
+
       window.electronAPI.onPendingMessagesFlushed(({ targetPeerId, messageIds }) => {
         useChatStore.getState().clearPendingMessages(targetPeerId, messageIds)
       })

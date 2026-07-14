@@ -90,6 +90,8 @@ function teardownSession(ctx) {
     ctx.state.masterKey = null
   }
   ctx.state.peerId = null
+  // 로그아웃 시 auto-away 추적 상태도 초기화 — 다음 로그인 세션에 영향 없도록(#41)
+  ctx.state.isAutoAway = false
 }
 
 function registerAuthHandlers(ctx) {

@@ -93,6 +93,21 @@ export default function Sidebar({ onShowPatchNotes }) {
   }, [onlinePeers.length])
   const pastDMPeers = usePeerStore(state => state.pastDMPeers)
   const myStatusType = useUserStore(state => state.myStatusType)
+  const myStatusMessage = useUserStore(state => state.myStatusMessage)
+
+  // 상태 메시지 입력 임시값 — store 값이 바뀌면(예: 유휴 자동 자리비움 복원) 동기화한다.
+  const [statusMessageDraft, setStatusMessageDraft] = useState(myStatusMessage || '')
+  useEffect(() => {
+    setStatusMessageDraft(myStatusMessage || '')
+  }, [myStatusMessage])
+
+  // 입력 완료(Enter/blur) 시점에 상태 메시지를 저장 + 피어에 전파한다.
+  function commitStatusMessage() {
+    const trimmed = statusMessageDraft.trim()
+    if (trimmed === (myStatusMessage || '')) return
+    useUserStore.getState().setMyStatus(myStatusType, trimmed)
+    window.electronAPI.updateStatus({ statusType: myStatusType, statusMessage: trimmed })
+  }
 
   // 온라인 피어 + 오프라인 과거 DM 상대 병합 (온라인 우선)
   const onlinePeerIds = new Set(onlinePeers.map(p => p.peerId))
@@ -131,7 +146,7 @@ export default function Sidebar({ onShowPatchNotes }) {
             <button
               key={peer.peerId}
               onClick={() => useChatStore.getState().setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
-              title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}`}
+              title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}${isOnline && peer.statusMessage ? ` — ${peer.statusMessage}` : ''}`}
               className={`cursor-pointer relative p-1.5 rounded transition-colors ${
                 isSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
               }`}
@@ -227,7 +242,12 @@ export default function Sidebar({ onShowPatchNotes }) {
                     }`}
                   >
                     <PeerAvatar peer={peer} isOnline={isOnline} />
-                    <span className={`truncate ${!isOnline ? 'opacity-50' : ''}`}>{peer.nickname}</span>
+                    <span className="flex-1 min-w-0 text-left">
+                      <span className={`block truncate ${!isOnline ? 'opacity-50' : ''}`}>{peer.nickname}</span>
+                      {isOnline && peer.statusMessage && (
+                        <span className="block truncate text-[10px] text-vsc-muted opacity-70">{peer.statusMessage}</span>
+                      )}
+                    </span>
                     {unreadCounts[peer.peerId] > 0 && (
                       <span className="ml-auto bg-vsc-accent text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center leading-none">
                         {unreadCounts[peer.peerId]}
@@ -251,8 +271,9 @@ export default function Sidebar({ onShowPatchNotes }) {
                 value={myStatusType}
                 onChange={(e) => {
                   const newStatus = e.target.value
-                  useUserStore.getState().setMyStatus(newStatus, '')
-                  window.electronAPI.updateStatus({ statusType: newStatus, statusMessage: '' })
+                  // 상태 타입만 바꾸는 것이므로 기존에 입력해둔 상태 메시지는 유지한다
+                  useUserStore.getState().setMyStatus(newStatus, myStatusMessage)
+                  window.electronAPI.updateStatus({ statusType: newStatus, statusMessage: myStatusMessage })
                 }}
                 className="bg-vsc-bg border border-vsc-border rounded px-1 py-0.5 text-xs text-vsc-text cursor-pointer flex-1 min-w-0"
               >
@@ -262,6 +283,16 @@ export default function Sidebar({ onShowPatchNotes }) {
                 <option value="dnd">방해 금지</option>
               </select>
             </div>
+            {/* 상태 메시지 입력 — Enter 또는 blur 시점에 전파 */}
+            <input
+              type="text"
+              value={statusMessageDraft}
+              onChange={(e) => setStatusMessageDraft(e.target.value.slice(0, 100))}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              onBlur={commitStatusMessage}
+              placeholder="상태 메시지 (예: 회의 중)"
+              className="w-full bg-vsc-bg border border-vsc-border rounded px-1.5 py-0.5 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+            />
             <div className="space-y-0.5">
               <button
                 onClick={() => onShowPatchNotes?.()}

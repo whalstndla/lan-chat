@@ -12,6 +12,7 @@ const { loadOrCreateKeyPair, exportPublicKey } = require('./crypto/keyManager')
 const { closeDatabase } = require('./storage/database')
 const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath, flushPeerDebugLogNow } = require('./utils/peerDebugLogger')
 const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
+const { startPresenceMonitor, stopPresenceMonitor } = require('./utils/presence')
 const { stopPeerDiscovery } = require('./peer/discovery')
 const { autoUpdater } = require('electron-updater')
 const fs = require('fs')
@@ -139,6 +140,9 @@ async function initApp() {
   // WebSocket 서버 시작 (공용 핸들러 사용) — 고정 포트 범위 49152~49161 우선 시도
   ctx.state.wsServerInfo = await startWsServer({ onMessage: ctx.state.handleIncomingMessage })
   writePeerDebugLog('main.wsServer.ready', { wsPort: ctx.state.wsServerInfo.port })
+
+  // 유휴 자동 자리비움 감시 시작 — 로그인 전에는 내부적으로 아무 것도 하지 않는다(#41).
+  startPresenceMonitor(ctx)
 }
 
 // 부팅 / 재실행 시 중복 호출 방지 플래그.
@@ -346,6 +350,7 @@ async function performCleanup() {
   if (hasCleanedUp) return
   hasCleanedUp = true
   stopMemoryMonitor()
+  stopPresenceMonitor()
   // mDNS goodbye 패킷 전파를 위해 await (500ms 대기 포함)
   try { await stopPeerDiscovery() } catch { /* 무시 */ }
   try { stopFileServer() } catch { /* 무시 */ }
