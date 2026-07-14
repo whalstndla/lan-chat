@@ -94,19 +94,75 @@ function copyTablesAndIndexes(srcDb, dstDb) {
   } catch { /* FTS5 미지원 / 테이블 부재 무시 */ }
 }
 
-// 평문 DB 를 암호화 DB 로 변환. 원자적 교체 + 백업본 보존.
-// 반환: { migrated: boolean, backupPath?: string }
+// 암호화 DB 가 masterKey 로 정상 오픈되고 기본 쿼리가 성공하는지 확인.
+// 키가 틀리거나 파일이 손상됐으면 sqlite_master 조회 단계에서 실패한다
+// (database.js 의 applyEncryption 주석과 동일한 SQLCipher 검증 방식).
+function verifyEncryptedDatabase(dbPath, masterKey) {
+  // new Database() 는 파일이 없으면 새로 만들어버리므로(빈 DB 도 "정상 오픈"으로 오판),
+  // 검증 대상 파일이 실제로 존재하는지 먼저 확인한다.
+  if (!fs.existsSync(dbPath)) return false
+  let db
+  try {
+    db = new Database(dbPath)
+    applyEncryption(db, masterKey)
+    const row = db.prepare('SELECT count(*) AS count FROM sqlite_master').get()
+    return !!row && typeof row.count === 'number'
+  } catch {
+    return false
+  } finally {
+    if (db) { try { db.close() } catch {} }
+  }
+}
+
+// 파일을 0으로 덮어쓴 뒤 삭제 — 평문 백업처럼 민감한 파일을 디스크에서 안전하게 지우기
+// 위함. 덮어쓰기가 실패해도(권한 문제 등) 삭제 자체는 계속 시도한다.
+function secureWipeAndDelete(filePath) {
+  try {
+    const { size } = fs.statSync(filePath)
+    const fd = fs.openSync(filePath, 'r+')
+    try {
+      const chunkSize = 64 * 1024
+      const zeroChunk = Buffer.alloc(Math.min(chunkSize, size), 0)
+      let written = 0
+      while (written < size) {
+        const toWrite = Math.min(chunkSize, size - written)
+        fs.writeSync(fd, zeroChunk, 0, toWrite, written)
+        written += toWrite
+      }
+      fs.fsyncSync(fd)
+    } finally {
+      fs.closeSync(fd)
+    }
+  } catch { /* 덮어쓰기 실패해도 삭제는 계속 진행 */ }
+  try { fs.unlinkSync(filePath) } catch { /* 이미 없거나 삭제 실패 시 무시 */ }
+}
+
+// 평문 DB 를 암호화 DB 로 변환. 원자적 교체 + 무결성 검증 후 백업본 안전 삭제.
+// 반환: { migrated: boolean, backupPath?: string, backupDeleted?: boolean }
 function migratePlaintextDbToEncrypted(dbPath, masterKey) {
   if (!fs.existsSync(dbPath)) return { migrated: false }
-  if (!isPlaintextSqliteDb(dbPath)) return { migrated: false }
+
+  const dir = path.dirname(dbPath)
+  const base = path.basename(dbPath)
+  const backupPath = path.join(dir, `${base}.plaintext.bak`)
+
+  if (!isPlaintextSqliteDb(dbPath)) {
+    // 이미 암호화된 DB — 다만 과거 실행에서 안전 삭제가 중간에 실패해(#25) 평문 백업이
+    // 남아있을 수 있다. 현재 DB 가 masterKey 로 정상 오픈되면 그 백업은 더 이상 필요
+    // 없으므로 함께 정리한다 (부팅/로그인 시 남은 .bak 을 치우는 가드 역할).
+    if (fs.existsSync(backupPath) && Buffer.isBuffer(masterKey) && masterKey.length === 32) {
+      if (verifyEncryptedDatabase(dbPath, masterKey)) {
+        secureWipeAndDelete(backupPath)
+      }
+    }
+    return { migrated: false }
+  }
+
   if (!Buffer.isBuffer(masterKey) || masterKey.length !== 32) {
     throw new Error('masterKey 가 없으면 마이그레이션 불가')
   }
 
-  const dir = path.dirname(dbPath)
-  const base = path.basename(dbPath)
   const tmpEncryptedPath = path.join(dir, `${base}.encrypted-tmp-${process.pid}`)
-  const backupPath = path.join(dir, `${base}.plaintext.bak`)
 
   // 잔존 임시파일 정리
   try { fs.unlinkSync(tmpEncryptedPath) } catch {}
@@ -139,7 +195,19 @@ function migratePlaintextDbToEncrypted(dbPath, masterKey) {
     try { fs.unlinkSync(dbPath + suffix) } catch {}
   }
 
-  return { migrated: true, backupPath }
+  // 암호화 DB 무결성 확인(정상 오픈 + 기본 쿼리 성공) 후에만 평문 백업을 안전 삭제한다(#25).
+  // 검증에 실패하면 — 즉 혹시 모를 손상 — 사용자 데이터 유실을 막기 위해 백업을 그대로 둔다.
+  if (verifyEncryptedDatabase(dbPath, masterKey)) {
+    secureWipeAndDelete(backupPath)
+    return { migrated: true, backupPath, backupDeleted: true }
+  }
+  return { migrated: true, backupPath, backupDeleted: false }
 }
 
-module.exports = { isPlaintextSqliteDb, migratePlaintextDbToEncrypted, copyTablesAndIndexes }
+module.exports = {
+  isPlaintextSqliteDb,
+  migratePlaintextDbToEncrypted,
+  copyTablesAndIndexes,
+  verifyEncryptedDatabase,
+  secureWipeAndDelete,
+}
