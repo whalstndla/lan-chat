@@ -174,6 +174,20 @@ function searchMessages(db, { query, type, limit = 50 }) {
   }
 }
 
+// DM 전체 기간 검색용 — 페이지네이션 없이 상대와 나눈 DM 을 최신순으로 넉넉한 한도까지 조회.
+// DM 은 암호화 저장이라 FTS 인덱싱이 불가능하므로, 여기서 가져온 레코드를 호출자(IPC 핸들러)가
+// main 프로세스에서 복호화하며 순차 검색한다(#35). 대량 채팅 대비 안전한 상한을 둔다.
+const DM_SEARCH_FETCH_LIMIT = 5000
+function getAllDMMessagesForSearch(db, peerId1, peerId2, limit = DM_SEARCH_FETCH_LIMIT) {
+  return db.prepare(`
+    SELECT * FROM messages
+    WHERE type = 'dm'
+      AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `).all(peerId1, peerId2, peerId2, peerId1, limit)
+}
+
 // 파일 캐시 경로 저장 — 수신된 파일을 로컬에 캐시한 경로를 메시지에 연결
 function saveFileCache(db, { messageId, cachedPath }) {
   db.prepare('UPDATE messages SET cached_file_path = ? WHERE id = ?').run(cachedPath, messageId)
@@ -221,4 +235,4 @@ function deletePeerCache(db, peerId) {
   db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }

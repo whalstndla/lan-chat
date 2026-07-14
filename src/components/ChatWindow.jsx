@@ -198,18 +198,19 @@ export default function ChatWindow() {
       return
     }
     setIsSearching(true)
-    if (currentRoom.type === 'dm') {
-      // DM은 암호화되어 DB 검색 불가 → 이미 복호화된 메시지에서 클라이언트 사이드 검색
-      const currentDmMessages = dmMessages[currentRoom.peerId] || []
-      const lowerQuery = query.toLowerCase()
-      const filtered = currentDmMessages.filter(msg => {
-        const content = msg.content || ''
-        return content.toLowerCase().includes(lowerQuery)
-      })
-      setSearchResults(filtered)
-    } else {
-      const results = await window.electronAPI.searchMessages({ query, type: 'message' })
-      setSearchResults(results)
+    try {
+      if (currentRoom.type === 'dm') {
+        // DM 은 암호화 저장이라 FTS 인덱싱이 불가능 → main 프로세스가 상대와 나눈 전체 기간의
+        // DM 을 복호화하며 검색한다(#35). 과거엔 이미 화면에 로드된 메시지만 클라이언트에서
+        // 필터링해 스크롤로 불러오지 않은 과거 DM 은 검색되지 않는 비대칭이 있었다.
+        const results = await window.electronAPI.searchDMMessages({ peerId: currentRoom.peerId, query })
+        setSearchResults(results)
+      } else {
+        const results = await window.electronAPI.searchMessages({ query, type: 'message' })
+        setSearchResults(results)
+      }
+    } catch {
+      setSearchResults([])
     }
     setIsSearching(false)
   }

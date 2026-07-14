@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 메시지 전문 검색
   searchMessages: (params) => ipcRenderer.invoke('search-messages', params),
+  // DM 전체 기간 검색 — main 에서 복호화하며 검색(#35)
+  searchDMMessages: (params) => ipcRenderer.invoke('search-dm-messages', params),
 
   // 파일 영구 캐시 URL 조회 — 원본 URL이 만료된 경우 로컬 캐시로 폴백
   getCachedFileUrl: (messageId) => ipcRenderer.invoke('get-cached-file-url', messageId),
