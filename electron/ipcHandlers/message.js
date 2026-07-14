@@ -16,9 +16,11 @@ const MAX_CONTENT_LENGTH = 10000
 function registerMessageHandlers(ctx) {
   // 전체채팅 메시지 전송
   ipcMain.handle('send-global-message', (_, { content, contentType, fileUrl, fileName, format }) => {
-    // 입력 검증
-    if (content && content.length > MAX_CONTENT_LENGTH) return null
-    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return null
+    // 입력 검증 — 실패 시 null 대신 { ok:false, error } 를 반환한다.
+    // 과거에는 null 을 그대로 반환해 렌더러가 null.fromId 등에 접근하며 TypeError 로
+    // 화이트스크린이 발생했다 (렌더러 측 null 체크는 MessageInput.jsx 에서 별도 처리).
+    if (content && content.length > MAX_CONTENT_LENGTH) return { ok: false, error: 'contentTooLong' }
+    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return { ok: false, error: 'invalidContentType' }
     if (!ALLOWED_FORMATS.includes(format)) format = null
     const currentNickname = getCurrentNicknameSafely(ctx)
     const message = {
@@ -60,9 +62,9 @@ function registerMessageHandlers(ctx) {
 
   // DM 전송 (E2E 암호화, 오프라인이면 pending 큐에 저장)
   ipcMain.handle('send-dm', (_, { recipientPeerId, content, contentType, fileUrl, fileName, format }) => {
-    // 입력 검증
-    if (content && content.length > MAX_CONTENT_LENGTH) return null
-    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return null
+    // 입력 검증 — 실패 시 null 대신 { ok:false, error } 를 반환한다 (send-global-message 와 동일 이유)
+    if (content && content.length > MAX_CONTENT_LENGTH) return { ok: false, error: 'contentTooLong' }
+    if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return { ok: false, error: 'invalidContentType' }
     if (!ALLOWED_FORMATS.includes(format)) format = null
     const currentNickname = getCurrentNicknameSafely(ctx)
     const messageId = uuidv4()

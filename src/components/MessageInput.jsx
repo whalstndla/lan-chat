@@ -10,6 +10,10 @@ import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
 import useChatStore from '../store/useChatStore'
 
+// 메시지 최대 길이 — electron/ipcHandlers/message.js 의 MAX_CONTENT_LENGTH 와 동일 값을 유지.
+// 전송 전 클라이언트에서 미리 검증해, 초과 시 IPC 실패 응답을 기다리지 않고 즉시 안내한다.
+const MAX_MESSAGE_LENGTH = 10000
+
 // 파일 MIME 타입 → contentType 변환.
 // SVG 는 XSS 위험으로 fileServer 가 attachment 강제 → 인라인 표시 불가.
 // 클라이언트에서도 'image' 가 아닌 'file' 로 분류해 다운로드 동작과 일관성 확보.
@@ -250,6 +254,13 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     const content = markdown.trim()
     if (!content) return
 
+    // 전송 전 길이 사전 검증 — 초과 시 main 프로세스 왕복 없이 즉시 사용자에게 안내.
+    // (에디터 내용은 건드리지 않고 여기서 return — IME/조합 관련 clearContent 순서는 그대로 유지)
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      window.alert(`메시지가 너무 깁니다 (${content.length}자). 최대 ${MAX_MESSAGE_LENGTH}자까지 전송 가능합니다.`)
+      return
+    }
+
     // IPC 응답을 기다린 뒤 초기화하면 사용자가 시작한 다음 한글 조합까지 지워질 수 있다.
     // 전송할 내용을 먼저 보관하고 에디터는 즉시 비워 이전 전송의 후처리가 새 입력을 건드리지 않게 한다.
     editor.commands.clearContent()
@@ -264,7 +275,6 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           contentType: 'text',
           format: 'markdown',
         })
-        useChatStore.getState().addGlobalMessage(sentMessage)
       } else {
         sentMessage = await window.electronAPI.sendDM({
           recipientPeerId: currentRoom.peerId,
@@ -272,8 +282,14 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           contentType: 'text',
           format: 'markdown',
         })
-        useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
+      // main 이 입력 검증 실패 시 { ok: false, error } 를 반환한다 — 스토어에 넣지 않고 안전하게 처리.
+      if (!sentMessage || sentMessage.ok === false) {
+        window.alert('메시지 전송에 실패했습니다.')
+        return
+      }
+      if (currentRoom.type === 'global') useChatStore.getState().addGlobalMessage(sentMessage)
+      else useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
     } finally {
       setIsSending(false)
     }
@@ -321,11 +337,16 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     let sentMessage
     if (currentRoom.type === 'global') {
       sentMessage = await window.electronAPI.sendGlobalMessage(payload)
-      useChatStore.getState().addGlobalMessage(sentMessage)
     } else {
       sentMessage = await window.electronAPI.sendDM({ recipientPeerId: currentRoom.peerId, ...payload })
-      useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
     }
+    // main 이 입력 검증 실패 시 { ok: false, error } 를 반환한다 — 스토어에 넣지 않고 안전하게 처리.
+    if (!sentMessage || sentMessage.ok === false) {
+      window.alert('메시지 전송에 실패했습니다.')
+      return
+    }
+    if (currentRoom.type === 'global') useChatStore.getState().addGlobalMessage(sentMessage)
+    else useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
   }
 
   // 여러 파일을 순차적으로 전송
