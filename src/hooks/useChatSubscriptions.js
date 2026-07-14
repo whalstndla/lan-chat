@@ -22,6 +22,12 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       const history = await window.electronAPI.getGlobalHistory()
       useChatStore.getState().setGlobalHistory(history)
 
+      // 리액션 하이드레이션 — 화면에 로드된 메시지 ID들의 리액션을 배치 조회해 병합
+      if (history.length > 0) {
+        const reactionRows = await window.electronAPI.getReactions(history.map(m => m.id))
+        useChatStore.getState().setReactions(reactionRows)
+      }
+
       const dmPeers = await window.electronAPI.getDMPeers()
       usePeerStore.getState().setPastDMPeers(dmPeers)
 
@@ -129,8 +135,10 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         useChatStore.getState().setCurrentRoom(room)
       })
 
-      // 이모지 리액션 — 로컬 상태 관리, DB에도 저장
-      window.electronAPI.onReactionUpdated(() => {})
+      // 이모지 리액션 — 상대방이 추가/제거한 리액션을 스토어에 실시간 반영
+      window.electronAPI.onReactionUpdated(({ messageId, peerId, emoji, action }) => {
+        useChatStore.getState().updateReaction(messageId, emoji, peerId, action)
+      })
 
       window.electronAPI.onMessageEdited(({ messageId, fromId, newContent, editedAt, to }) => {
         const { editGlobalMessage, editDMMessage } = useChatStore.getState()

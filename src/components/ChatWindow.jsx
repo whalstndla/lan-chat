@@ -94,6 +94,9 @@ export default function ChatWindow() {
         } else {
           prependDMMessages(currentRoom.peerId, older)
         }
+        // 새로 로드된 이전 메시지들의 리액션도 하이드레이션
+        const reactionRows = await window.electronAPI.getReactions(older.map(m => m.id))
+        useChatStore.getState().setReactions(reactionRows)
         // 스크롤 위치 복원
         requestAnimationFrame(() => {
           if (container) {
@@ -222,7 +225,14 @@ export default function ChatWindow() {
 
       useChatStore.getState().resetUnread(currentRoom.peerId)
       window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId)
-        .then(history => useChatStore.getState().setDMHistory(currentRoom.peerId, history))
+        .then(async (history) => {
+          useChatStore.getState().setDMHistory(currentRoom.peerId, history)
+          // 리액션 하이드레이션 — 화면에 로드된 메시지 ID들의 리액션을 배치 조회해 병합
+          if (history.length > 0) {
+            const reactionRows = await window.electronAPI.getReactions(history.map(m => m.id))
+            useChatStore.getState().setReactions(reactionRows)
+          }
+        })
       window.electronAPI.getUnreadDMIds(currentRoom.peerId)
         .then(unreadIds => {
           if (unreadIds.length > 0) {

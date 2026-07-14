@@ -114,8 +114,8 @@ function extractFirstUrl(text) {
 export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [] }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
-  // 리액션 로컬 상태 — 스토어 구독 없이 관리
-  const [reactions, setReactions] = useState({})
+  // 리액션 — 스토어의 reactions 맵을 구독 (하이드레이션 + 실시간 갱신 반영)
+  const reactions = useChatStore(state => state.reactions[message.id]) || {}
   const onlinePeers = usePeerStore(state => state.onlinePeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
   const [lightboxData, setLightboxData] = useState(null) // { url, messageId }
@@ -167,24 +167,13 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
     }
   }
 
-  // 이모지 리액션 토글 — 내 리액션을 추가하거나 제거
+  // 이모지 리액션 토글 — 내 리액션을 추가하거나 제거. 결과는 스토어에 직접 반영
+  // (상대방의 리액션은 onReactionUpdated 구독을 통해 별도로 스토어에 반영됨)
   async function handleReaction(emoji) {
     const targetPeerId = (message.type === 'dm')
       ? (isMyMessage ? (message.to || message.to_id) : senderId) : null
     const result = await window.electronAPI.toggleReaction({ messageId: message.id, emoji, targetPeerId })
-    // 로컬 리액션 상태 업데이트
-    setReactions(prev => {
-      const updated = { ...prev }
-      const reactors = [...(updated[emoji] || [])]
-      if (result.action === 'add' && !reactors.includes(myPeerId)) reactors.push(myPeerId)
-      else if (result.action === 'remove') {
-        const idx = reactors.indexOf(myPeerId)
-        if (idx !== -1) reactors.splice(idx, 1)
-      }
-      if (reactors.length === 0) delete updated[emoji]
-      else updated[emoji] = reactors
-      return updated
-    })
+    useChatStore.getState().updateReaction(message.id, emoji, myPeerId, result.action)
   }
 
   return (

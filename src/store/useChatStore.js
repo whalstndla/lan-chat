@@ -33,6 +33,9 @@ const useChatStore = create((set, get) => ({
   // { messageId: 'notFound' | 'tooLarge' | 'timeout' | ... } — file-request 실패 통보.
   // 렌더러가 'loading' 에서 'failed' 로 즉시 전환하기 위해 사용.
   fileLoadErrors: {},
+  // { messageId: { emoji: [peerId, ...] } } — 메시지별 이모지 리액션. 히스토리 로드 시
+  // 배치 하이드레이션(setReactions) 되고, 실시간 토글/수신은 updateReaction 으로 반영.
+  reactions: {},
 
   // 채팅방 뮤트 토글 (roomKey: 'global' 또는 peerId)
   toggleRoomMute: (roomKey) =>
@@ -125,6 +128,39 @@ const useChatStore = create((set, get) => ({
       fileLoadErrors: { ...state.fileLoadErrors, [messageId]: reason || 'unknown' },
     })),
 
+  // 리액션 배치 하이드레이션 — get-reactions IPC 응답({messageId: [{peer_id, emoji}, ...]})을
+  // 스토어 형식({messageId: {emoji: [peerId, ...]}})으로 변환해 기존 상태에 병합
+  setReactions: (reactionRowsByMessageId) =>
+    set((state) => {
+      const merged = { ...state.reactions }
+      for (const [messageId, rows] of Object.entries(reactionRowsByMessageId || {})) {
+        const grouped = {}
+        for (const row of rows) {
+          if (!grouped[row.emoji]) grouped[row.emoji] = []
+          grouped[row.emoji].push(row.peer_id)
+        }
+        merged[messageId] = grouped
+      }
+      return { reactions: merged }
+    }),
+
+  // 리액션 실시간 갱신 — 내 토글 응답(toggleReaction 결과) 또는 상대방 리액션 브로드캐스트
+  // 수신(reaction-updated) 시 호출되어 해당 메시지의 이모지별 반응자 목록을 갱신
+  updateReaction: (messageId, emoji, peerId, action) =>
+    set((state) => {
+      const messageReactions = { ...(state.reactions[messageId] || {}) }
+      const reactors = [...(messageReactions[emoji] || [])]
+      if (action === 'add') {
+        if (!reactors.includes(peerId)) reactors.push(peerId)
+      } else if (action === 'remove') {
+        const idx = reactors.indexOf(peerId)
+        if (idx !== -1) reactors.splice(idx, 1)
+      }
+      if (reactors.length === 0) delete messageReactions[emoji]
+      else messageReactions[emoji] = reactors
+      return { reactions: { ...state.reactions, [messageId]: messageReactions } }
+    }),
+
   setTyping: (peerId, nickname, to) =>
     set((state) => ({
       typingUsers: {
@@ -208,6 +244,7 @@ const useChatStore = create((set, get) => ({
     dmMessages: {},
     unreadCounts: {},
     typingUsers: {},
+    reactions: {},
   }),
 }))
 
