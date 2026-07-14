@@ -38,12 +38,25 @@ body {
   line-height: 1.5;
 }
 
-.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
-  content: attr(data-placeholder);
-  float: left;
+/* placeholder — TipTap Placeholder 확장(ProseMirror 노드 데코레이션) 대신 래퍼 레벨에서 처리.
+   확장은 조합(IME) 중인 텍스트블록 노드 자체의 class/attribute 를 매 트랜잭션마다 다시 계산해
+   갱신하므로 조합 시작 순간(빈 노드 → 채워진 노드 전환)에 ProseMirror DOM 을 건드릴 위험이 있어
+   재사용하지 않기로 함(v0.10.2 IME 진단 이력, MessageInput.jsx 참고). 대신 React state
+   (isEditorEmpty) 로 이 래퍼 엘리먼트에만 data-placeholder-visible/-text 속성을 붙이고,
+   ::before 로 표시 — ProseMirror 가 관리하는 내부 DOM 은 전혀 건드리지 않는다. */
+.tiptap-editor {
+  position: relative;
+}
+
+.tiptap-editor[data-placeholder-visible='true']::before {
+  content: attr(data-placeholder-text);
+  position: absolute;
+  left: 12px;
+  top: 10px;
   color: #858585;
+  font-size: 14px;
+  line-height: 1.5;
   pointer-events: none;
-  height: 0;
 }
 
 /* 에디터 내 마크다운 스타일 */

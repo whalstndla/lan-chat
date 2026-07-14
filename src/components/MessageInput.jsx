@@ -4,7 +4,6 @@ const EmojiPicker = lazy(() => import('emoji-picker-react'))
 import { Paperclip, Smile, Send, Loader2, X, Pencil } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
 import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
@@ -67,6 +66,10 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const [pastePreview, setPastePreview] = useState(null) // null 또는 { files: [File...], previews: [{ previewUrl, fileName, fileSize }...] }
   // 수정 모드: 현재 수정 중인 메시지 객체 (null이면 일반 전송 모드)
   const [editingMessage, setEditingMessage] = useState(null)
+  // placeholder 표시 여부 — TipTap Placeholder 확장(ProseMirror 데코레이션) 대신 사용.
+  // 이 state 는 래퍼 div 의 속성만 바꾸고, EditorContent(React.memo)는 editor 인스턴스가
+  // 바뀌지 않는 한 리렌더되지 않으므로 ProseMirror 가 관리하는 에디터 내부 DOM 에는 영향이 없다.
+  const [isEditorEmpty, setIsEditorEmpty] = useState(true)
   const fileInputRef = useRef(null)
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
@@ -85,12 +88,16 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         heading: false,
         horizontalRule: false,
       }),
-      // [IME 진단 v0.10.2] Placeholder 확장이 한국어 composition transition 중 빈 노드 ↔
-      // 채워진 노드 토글로 ProseMirror DOM observer를 흔들어 첫 글자/자모가 사라지는지
-      // 확인용으로 임시 비활성화. 검증 후 영구 처리 결정 (옵션 조정 또는 CSS 직접 처리).
-      // Placeholder.configure({
-      //   placeholder: `${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`,
-      // }),
+      // [IME 진단 v0.10.2 → 최종 결정] @tiptap/extension-placeholder 는 미사용으로 확정(#14).
+      // 코드 레벨 재검토 결과: 이 확장은 ProseMirror 노드 데코레이션으로 구현되어 있어(placeholder.ts
+      // decorations 훅) doc/selection 이 바뀔 때마다 "비어있음 ↔ 채워짐" 여부를 다시 계산해 조합 중인
+      // 바로 그 텍스트블록 노드의 class/attribute 를 매 트랜잭션마다 갱신한다 — 즉 조합이 시작되는
+      // 정확히 그 순간(빈 노드 → 채워진 노드로 전환되는 첫 글자)에 ProseMirror 가 관리하는 DOM 자체를
+      // 건드리게 되어 v0.10.2 에서 관찰된 증상과 메커니즘이 일치한다. v0.10.4 의 composing 가드는
+      // Enter 전송/강제 focus() 를 막는 것이라 이 경로와는 무관해 확장을 다시 켜도 되는 근거가 되지
+      // 않는다. 대신 아래 isEditorEmpty(React state) + CSS 로 완전히 별도 구현했다 — 이 방식은
+      // EditorContent 가 React.memo 라 editor 인스턴스가 바뀌지 않는 한 리렌더되지 않으므로,
+      // ProseMirror 가 관리하는 에디터 내부 DOM 은 전혀 건드리지 않는다(래퍼 엘리먼트의 속성만 갱신).
       Markdown.configure({
         // 마크다운 붙여넣기 → 리치 텍스트 변환
         transformPastedText: true,
@@ -178,11 +185,15 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       if (draftMarkdown) {
         ed.commands.setContent(draftMarkdown)
       }
+      // 새 에디터 인스턴스 생성 시점의 비어있음 여부를 placeholder state 에 반영(위 draft 복원 반영 후).
+      setIsEditorEmpty(ed.isEmpty)
     },
     // 타이핑 인디케이터
     onUpdate: ({ editor: ed }) => {
       // draft 추적용 — store 에는 쓰지 않고 ref 에만 최신 마크다운을 보관해둔다(순수 대입이라 IME 영향 없음).
       latestMarkdownRef.current = ed.storage.markdown.getMarkdown()
+      // placeholder 표시 여부 갱신 — 래퍼 div 속성만 바뀌므로 조합에 영향 없음.
+      setIsEditorEmpty(ed.isEmpty)
 
       const now = Date.now()
       if (!ed.isEmpty && now - lastTypingSentAtRef.current > 2000) {
@@ -501,7 +512,11 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
 
         <div className="flex items-end gap-2">
         {/* Tiptap 에디터 */}
-        <div className="flex-1 tiptap-editor">
+        <div
+          className="flex-1 tiptap-editor"
+          data-placeholder-visible={isEditorEmpty ? 'true' : 'false'}
+          data-placeholder-text={`${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`}
+        >
           <EditorContent editor={editor} />
         </div>
 
