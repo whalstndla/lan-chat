@@ -330,10 +330,21 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       // main 이 입력 검증 실패 시 { ok: false, error } 를 반환한다 — 스토어에 넣지 않고 안전하게 처리.
       if (!sentMessage || sentMessage.ok === false) {
         window.alert('메시지 전송에 실패했습니다.')
+        // 전송 실패 — 미리 비워둔 에디터에 원본 내용을 복원해 사용자가 다시 타이핑하지 않고
+        // Enter 로 바로 재시도할 수 있게 한다. (즉시 초기화 패턴 자체는 유지 — 실패 시에만 복원)
+        editor.commands.setContent(content)
+        keepEditorFocus()
         return
       }
       if (currentRoom.type === 'global') useChatStore.getState().addGlobalMessage(sentMessage)
       else useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
+    } catch (err) {
+      // IPC 호출 자체가 throw 된 경우(네트워크/직렬화 예외 등) — 위 { ok: false } 분기와 동일하게
+      // 원본 내용을 복원해 유실을 막는다.
+      console.error('[메시지 전송 실패]', err)
+      window.alert('메시지 전송에 실패했습니다.')
+      editor.commands.setContent(content)
+      keepEditorFocus()
     } finally {
       setIsSending(false)
     }
