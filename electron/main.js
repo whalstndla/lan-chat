@@ -9,6 +9,7 @@ const { disconnectAll } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { collectLocalIpv4Addresses, selectPrimaryLocalIpv4 } = require('./peer/networkUtils')
 const { loadOrCreateKeyPair, exportPublicKey } = require('./crypto/keyManager')
+const { closeDatabase } = require('./storage/database')
 const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath, flushPeerDebugLogNow } = require('./utils/peerDebugLogger')
 const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
 const { stopPeerDiscovery } = require('./peer/discovery')
@@ -349,7 +350,9 @@ async function performCleanup() {
   try { await stopPeerDiscovery() } catch { /* 무시 */ }
   try { stopFileServer() } catch { /* 무시 */ }
   try { if (ctx.state.wsServerInfo) stopWsServer(ctx.state.wsServerInfo) } catch { /* 무시 */ }
-  try { if (ctx.state.database) ctx.state.database.close() } catch { /* 무시 */ }
+  // closeDatabase 가 close 전에 wal_checkpoint(TRUNCATE) 를 시도해 WAL 파일이
+  // 무한정 커지는 것을 방지한다(#27).
+  try { if (ctx.state.database) closeDatabase(ctx.state.database) } catch { /* 무시 */ }
   // 버퍼링된(비동기) 디버그 로그가 종료 시점에 유실되지 않도록 마지막으로 강제 flush.
   try { await flushPeerDebugLogNow() } catch { /* 무시 */ }
 }

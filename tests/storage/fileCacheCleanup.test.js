@@ -146,6 +146,22 @@ describe('clearAllMessages / clearAllDMs — 캐시 경로 반환', () => {
     expect(db.prepare('SELECT count(*) c FROM messages').get().c).toBe(0)
   })
 
+  it('clearAllMessages 는 VACUUM 이후에도 DB 가 정상적으로 계속 사용 가능하다(#27)', () => {
+    saveMessage(db, {
+      id: 'm1', type: 'message', from_id: 'p1', from_name: 'A', to_id: null,
+      content: '삭제될 메시지', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 1,
+    })
+    clearAllMessages(db)
+
+    expect(() => saveMessage(db, {
+      id: 'm2', type: 'message', from_id: 'p1', from_name: 'A', to_id: null,
+      content: 'VACUUM 이후 새 메시지', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 2,
+    })).not.toThrow()
+    expect(db.prepare('SELECT content FROM messages WHERE id = ?').get('m2').content).toBe('VACUUM 이후 새 메시지')
+  })
+
   it('clearAllDMs 는 DM 메시지의 캐시 경로만 반환한다', () => {
     saveMessage(db, {
       id: 'global-1', type: 'message', from_id: 'p1', from_name: 'A', to_id: null,

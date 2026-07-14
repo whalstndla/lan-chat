@@ -69,6 +69,9 @@ function clearAllMessages(db) {
     db.prepare('DELETE FROM messages').run()
     db.prepare('DELETE FROM pending_messages').run()
   })()
+  // VACUUM 은 트랜잭션 내부에서 실행할 수 없어 트랜잭션이 커밋된 이후에 호출한다.
+  // 전체 삭제처럼 큰 폭으로 비워진 페이지를 회수해 디스크 파일 크기를 줄인다(#27).
+  try { db.exec('VACUUM') } catch { /* VACUUM 실패해도 삭제 자체는 이미 커밋된 상태이므로 무시 */ }
   return { cachedFilePaths }
 }
 
@@ -82,6 +85,7 @@ function clearAllDMs(db) {
     db.prepare("DELETE FROM messages WHERE type = 'dm'").run()
     db.prepare('DELETE FROM pending_messages').run()
   })()
+  try { db.exec('VACUUM') } catch { /* 무시 */ }
   return { cachedFilePaths }
 }
 

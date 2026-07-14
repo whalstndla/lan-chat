@@ -33,6 +33,12 @@ function initDatabase(dbPath, masterKey) {
 
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  // WAL 모드에서는 synchronous=FULL 이 과도하다 — NORMAL 로도 WAL 저널이 커밋을
+  // 보장하며, 매 쓰기마다의 fsync 비용을 줄여준다(#27).
+  db.pragma('synchronous = NORMAL')
+  // 다른 프로세스/커넥션이 잠깐 잠그고 있을 때 즉시 SQLITE_BUSY 로 실패하는 대신
+  // 최대 5초까지 재시도 대기.
+  db.pragma('busy_timeout = 5000')
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -196,6 +202,10 @@ function migrateDatabase(db) {
 }
 
 function closeDatabase(db) {
+  // WAL 파일에 쌓인 내용을 메인 DB 파일로 합쳐 WAL 이 무한정 커지는 것을 방지(#27).
+  // :memory: 이거나 WAL 모드가 아니면 실패할 수 있으므로 안전하게 무시하고 close 는
+  // 계속 진행한다.
+  try { db.pragma('wal_checkpoint(TRUNCATE)') } catch { /* 무시 */ }
   db.close()
 }
 
