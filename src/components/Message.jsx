@@ -229,7 +229,14 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
 
           {/* 메시지 내용 + 리액션 버튼 (말풍선 옆) */}
           <div className={`flex items-center gap-1 ${isMyMessage ? 'flex-row-reverse' : ''}`}>
-            {(contentType === 'text' || !contentType) && (
+            {/* 복호화 실패 메시지 — 키 교환 이전에 보내졌거나 손상된 DM. 빈 말풍선 대신 안내 표시 */}
+            {message.decryptionFailed && (
+              <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-muted italic leading-relaxed break-words min-w-0 overflow-hidden">
+                🔒 복호화할 수 없는 메시지
+              </div>
+            )}
+
+            {!message.decryptionFailed && (contentType === 'text' || !contentType) && (
               <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words min-w-0 overflow-hidden">
                 {message.format === 'markdown' ? (
                   <MarkdownRenderer content={message.content} />
@@ -239,7 +246,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
               </div>
             )}
 
-            {contentType === 'image' && (resolvedFileUrl || imgStatus === 'failed') && (
+            {!message.decryptionFailed && contentType === 'image' && (resolvedFileUrl || imgStatus === 'failed') && (
               <div className="flex flex-wrap gap-1 max-w-md">
                 <div
                   className={`relative rounded overflow-hidden border border-vsc-border bg-vsc-bg ${imgStatus === 'loaded' ? 'cursor-pointer' : ''} ${extraImages.length > 0 ? 'w-32 h-32' : 'min-w-[128px] min-h-[96px]'}`}
@@ -271,7 +278,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
               </div>
             )}
 
-            {contentType === 'video' && resolvedFileUrl && (
+            {!message.decryptionFailed && contentType === 'video' && resolvedFileUrl && (
               <div className="relative rounded overflow-hidden border border-vsc-border group/video">
                 <video
                   src={resolvedFileUrl}
@@ -290,7 +297,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
               </div>
             )}
 
-            {contentType === 'file' && resolvedFileUrl && (
+            {!message.decryptionFailed && contentType === 'file' && resolvedFileUrl && (
               <button
                 onClick={() => downloadFile(message.id)}
                 className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
