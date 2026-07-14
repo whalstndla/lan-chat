@@ -129,20 +129,37 @@ function migrateDatabase(db) {
 
   // FTS5 전문 검색 (글로벌 메시지만 — DM은 암호화되어 인덱싱 불가)
   try {
+    // 백필 여부 판단은 반드시 "이번 호출 전에 messages_fts 테이블이 이미 존재했는가"로
+    // 해야 한다. content='messages' 외부 콘텐츠 테이블은 MATCH 없는 일반 SELECT/count(*)
+    // 가 인덱스를 거치지 않고 원본 messages 테이블을 그대로 스캔하므로, count(*) 결과가
+    // 항상 messages 테이블의 행 수와 같아진다 — 즉 "FTS 인덱스에 실제로 백필됐는지"를
+    // 전혀 반영하지 못하는 값이라 가드로 쓸 수 없다.
+    const ftsTableExistedBefore = !!db.prepare(
+      `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`
+    ).get()
+
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
         id UNINDEXED, content, from_name,
         content='messages', content_rowid='rowid'
       );
     `)
-    // content='messages' 모드에서는 FTS rowid가 messages 테이블 rowid와 반드시 일치해야 함.
-    // rowid를 명시하지 않으면 FTS rowid가 자동 할당되어 실제 messages rowid와 어긋나고,
-    // 엉뚱한 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생함.
-    // 따라서 rowid를 SELECT rowid FROM messages 로 명시적으로 지정함.
-    db.exec(`
-      INSERT INTO messages_fts(rowid, id, content, from_name)
-      SELECT rowid, id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
-    `)
+
+    // 기존 messages 데이터를 FTS 인덱스로 백필 — 테이블을 이번 호출에서 새로 만든
+    // 경우(=최초 1회, 신규 프로필이거나 FTS5 도입 이전 DB 의 첫 로그인)에만 수행한다.
+    // migrateDatabase() 는 로그인/등록마다 호출되는데, 가드 없이 매번 INSERT 하면
+    // 동일 rowid 가 반복 삽입 시도되어 검색 중복·인덱스 증가로 이어진다(#7).
+    // 이후 신규/수정/삭제 메시지는 트리거가 전담하므로 두 번째 로그인부터는 건너뛴다.
+    if (!ftsTableExistedBefore) {
+      // content='messages' 모드에서는 FTS rowid가 messages 테이블 rowid와 반드시 일치해야 함.
+      // rowid를 명시하지 않으면 FTS rowid가 자동 할당되어 실제 messages rowid와 어긋나고,
+      // 엉뚱한 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생함.
+      // 따라서 rowid를 SELECT rowid FROM messages 로 명시적으로 지정함.
+      db.exec(`
+        INSERT INTO messages_fts(rowid, id, content, from_name)
+        SELECT rowid, id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
+      `)
+    }
   } catch { /* FTS5 미지원 환경 무시 */ }
 }
 
