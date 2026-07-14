@@ -409,11 +409,11 @@ export default function ChatWindow() {
 
         {showSearch && (
           <ChatSearchBar
-            searchQuery={searchQuery}
             searchResults={searchResults}
             isSearching={isSearching}
             onSearch={handleSearch}
             onResultClick={handleResultClick}
+            onClose={handleToggleSearch}
           />
         )}
       </div>
@@ -507,6 +507,7 @@ export default function ChatWindow() {
                         isHighlighted={highlightedMessageId === message.id}
                         isGrouped={isGrouped}
                         extraImages={imageGroup.slice(1)}
+                        searchQuery={showSearch ? searchQuery : ''}
                       />
                     )
                     i = j
@@ -522,6 +523,7 @@ export default function ChatWindow() {
                     onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
                     isHighlighted={highlightedMessageId === message.id}
                     isGrouped={prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId}
+                    searchQuery={showSearch ? searchQuery : ''}
                   />
                 )
                 i++

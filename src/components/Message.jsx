@@ -9,6 +9,7 @@ import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
 import useFileDownload from '../hooks/useFileDownload'
+import { highlightText } from '../utils/highlightText'
 
 // timestamp → "오후 2:30" 형식
 function formatTime(timestamp) {
@@ -111,7 +112,7 @@ function extractFirstUrl(text) {
   return match ? match[0] : null
 }
 
-export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [] }) {
+export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   // 리액션 — 스토어의 reactions 맵을 구독 (하이드레이션 + 실시간 갱신 반영)
@@ -241,7 +242,14 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                 {message.format === 'markdown' ? (
                   <MarkdownRenderer content={message.content} />
                 ) : (
-                  <span className="whitespace-pre-wrap">{parseLinksInText(message.content || '')}</span>
+                  <span className="whitespace-pre-wrap">
+                    {searchQuery.trim()
+                      // 검색 중에는 검색어 하이라이트를 우선한다(#37) — 링크 파싱과 동시에
+                      // 적용하려면 별도 처리가 필요해, 검색 바가 열려있는 동안에는 텍스트
+                      // 안의 링크가 일시적으로 클릭 불가능해지는 단순한 트레이드오프를 택했다.
+                      ? highlightText(message.content || '', searchQuery)
+                      : parseLinksInText(message.content || '')}
+                  </span>
                 )}
               </div>
             )}
@@ -303,7 +311,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                 className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
               >
                 <Paperclip size={14} className="shrink-0" />
-                {fileName || '파일'}
+                {searchQuery.trim() ? highlightText(fileName || '파일', searchQuery) : (fileName || '파일')}
               </button>
             )}
 

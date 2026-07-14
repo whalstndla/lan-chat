@@ -183,3 +183,38 @@ describe('파일명 검색(#36)', () => {
     expect(searchMessages(db, { query: '정산내역', type: 'message' })).toHaveLength(0)
   })
 })
+
+// FTS5 특수문자 안전 처리(#37) — MATCH 쿼리 문법에서 의미를 갖는 문자(", *, - 등)가
+// 검색어에 포함되어도 예외 없이 안전하게(LIKE 폴백 포함) 결과를 반환해야 한다.
+describe('FTS5 특수문자 검색 안전성(#37)', () => {
+  let db
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    saveMessage(db, {
+      id: 'msg-1', type: 'message', from_id: 'peer1', from_name: '홍길동', to_id: null,
+      content: '따옴표(") 포함된 메시지입니다', content_type: 'text', encrypted_payload: null,
+      file_url: null, file_name: null, timestamp: 1000,
+    })
+  })
+
+  afterEach(() => closeDatabase(db))
+
+  it('큰따옴표만 검색해도 예외 없이 처리된다', () => {
+    expect(() => searchMessages(db, { query: '"', type: 'message' })).not.toThrow()
+  })
+
+  it('별표(FTS5 prefix 연산자)만 검색해도 예외 없이 처리된다', () => {
+    expect(() => searchMessages(db, { query: '*', type: 'message' })).not.toThrow()
+  })
+
+  it('하이픈(FTS5 NOT 연산자)이 포함된 검색어도 예외 없이 처리된다', () => {
+    expect(() => searchMessages(db, { query: '-공지', type: 'message' })).not.toThrow()
+  })
+
+  it('짝이 맞지 않는 따옴표가 포함된 검색어도 예외 없이 LIKE 폴백으로 결과를 반환한다', () => {
+    const results = searchMessages(db, { query: '따옴표("', type: 'message' })
+    expect(Array.isArray(results)).toBe(true)
+  })
+})
