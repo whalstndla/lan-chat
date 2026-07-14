@@ -7,7 +7,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const { getProfile } = require('../storage/profile')
-const { saveFileCache } = require('../storage/queries')
+const { saveFileCache, getFileCache, deleteMessage } = require('../storage/queries')
 const { getPendingMessages, deletePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
 const { getFilePort } = require('../peer/fileServer')
@@ -339,6 +339,60 @@ function cacheOwnFile(ctx, messageId, fileName) {
   } catch { /* 캐시 실패 시 무시 — 표시는 tempFilePath 원본으로 폴백 */ }
 }
 
+// 메시지 삭제 + 연결된 file_cache 파일 정리 (#24).
+// cached_file_path 는 항상 `${messageId}${확장자}` 형태로 messageId 와 1:1 매핑된다
+// (cacheOwnFile / cacheReceivedFile 참고) — 즉 다른 메시지가 같은 캐시 파일을 참조할
+// 가능성이 없으므로 참조 카운트 없이 안전하게 삭제할 수 있다.
+// deleteMessage 는 from_id 가 일치하는 경우에만 실제로 행을 지우므로(changes > 0),
+// 권한이 없어 삭제가 실제로 일어나지 않았을 때는 캐시 파일도 지우지 않는다.
+function deleteMessageAndCachedFile(ctx, messageId, fromId) {
+  const cachedFilePath = getFileCache(ctx.state.database, messageId)
+  const result = deleteMessage(ctx.state.database, messageId, fromId)
+  if (result.changes > 0 && cachedFilePath) {
+    try { fs.unlinkSync(cachedFilePath) } catch { /* 이미 없거나 삭제 실패 시 무시 */ }
+  }
+  return result
+}
+
+// 로그인 시점에 file_cache/ 안에서 어떤 메시지도 참조하지 않는 orphan 파일을 정리한다.
+// 메시지 삭제 시 개별적으로 캐시 파일을 지우지만(deleteMessageAndCachedFile, 위),
+// 과거 데이터(이 수정 이전에 삭제된 메시지)나 비정상 종료로 인해 orphan 이 남아있을 수
+// 있어 로그인마다 한 번씩 스윕한다. DB 조회가 실패하면 잘못 지우는 것보다 안전하게
+// 아무 것도 하지 않는다.
+function sweepOrphanedFileCache(ctx) {
+  const cacheDir = path.join(ctx.config.appDataPath, 'file_cache')
+  if (!fs.existsSync(cacheDir)) return { removed: 0 }
+
+  let referencedPaths
+  try {
+    referencedPaths = new Set(
+      ctx.state.database
+        .prepare('SELECT cached_file_path FROM messages WHERE cached_file_path IS NOT NULL')
+        .all()
+        .map(row => path.resolve(row.cached_file_path))
+    )
+  } catch {
+    return { removed: 0 }
+  }
+
+  let removed = 0
+  let entries
+  try {
+    entries = fs.readdirSync(cacheDir)
+  } catch {
+    return { removed: 0 }
+  }
+  for (const fileName of entries) {
+    const fullPath = path.resolve(path.join(cacheDir, fileName))
+    if (referencedPaths.has(fullPath)) continue
+    try {
+      fs.unlinkSync(fullPath)
+      removed++
+    } catch { /* 개별 파일 삭제 실패는 무시하고 계속 진행 */ }
+  }
+  return { removed }
+}
+
 // 파일 송수신 사이즈 한도 — wsServer.MAX_PAYLOAD_BYTES 와 base64 오버헤드(1.33x) 를
 // 고려해 raw 150MB 까지 단발 전송 허용. 그 이상은 send-file IPC 에서 사전 차단.
 const MAX_RAW_FILE_BYTES = 150 * 1024 * 1024
@@ -483,6 +537,8 @@ module.exports = {
   buildMyProfileImageUrl,
   cacheReceivedFile,
   cacheOwnFile,
+  deleteMessageAndCachedFile,
+  sweepOrphanedFileCache,
   requestFileViaWebSocket,
   clearPendingFileRequest,
   clearAllPendingFileRequests,

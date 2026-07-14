@@ -3,10 +3,10 @@
 
 const { ipcMain } = require('electron')
 const { v4: uuidv4 } = require('uuid')
-const { saveMessage, deleteMessage, editMessage } = require('../storage/queries')
+const { saveMessage, editMessage } = require('../storage/queries')
 const { savePendingMessage, deletePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
-const { sendPeerMessage, broadcastPeerMessage, getCurrentNicknameSafely, cacheOwnFile } = require('../utils/appUtils')
+const { sendPeerMessage, broadcastPeerMessage, getCurrentNicknameSafely, cacheOwnFile, deleteMessageAndCachedFile } = require('../utils/appUtils')
 
 // 허용 contentType/format 화이트리스트
 const ALLOWED_CONTENT_TYPES = ['text', 'image', 'video', 'file']
@@ -200,7 +200,7 @@ function registerMessageHandlers(ctx) {
 
   // 메시지 삭제 (본인 메시지만)
   ipcMain.handle('delete-message', (_, { messageId, targetPeerId }) => {
-    deleteMessage(ctx.state.database, messageId, ctx.state.peerId)
+    deleteMessageAndCachedFile(ctx, messageId, ctx.state.peerId)
     // 상대가 오프라인이라 아직 배달되지 않은 pending 큐에도 같은 id로 남아있을 수 있다.
     // 여기서 지우지 않으면 messages 테이블에서만 삭제된 채, 상대가 재접속했을 때
     // pending 큐의 메시지가 그대로 배달되어 "삭제한 메시지가 나중에 도착"하게 된다.

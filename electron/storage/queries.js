@@ -57,20 +57,32 @@ function getDMPeers(db, myPeerId) {
   }))
 }
 
-// 전체 채팅 기록 삭제 (global + DM + pending 모두) — 트랜잭션으로 원자적 실행
+// 전체 채팅 기록 삭제 (global + DM + pending 모두) — 트랜잭션으로 원자적 실행.
+// 삭제되는 메시지가 참조하던 file_cache 경로 목록을 반환 — 호출자가 DB 삭제 이후
+// (트랜잭션 밖에서) 실제 캐시 파일을 지우는 데 사용한다 (#24, DB 행만 지우고
+// 캐시 파일은 고아로 남던 문제).
 function clearAllMessages(db) {
+  const cachedFilePaths = db.prepare(
+    'SELECT cached_file_path FROM messages WHERE cached_file_path IS NOT NULL'
+  ).all().map(row => row.cached_file_path)
   db.transaction(() => {
     db.prepare('DELETE FROM messages').run()
     db.prepare('DELETE FROM pending_messages').run()
   })()
+  return { cachedFilePaths }
 }
 
-// DM 기록만 삭제 (DM 메시지 + pending) — 트랜잭션으로 원자적 실행
+// DM 기록만 삭제 (DM 메시지 + pending) — 트랜잭션으로 원자적 실행.
+// clearAllMessages 와 마찬가지로 삭제되는 DM 이 참조하던 file_cache 경로를 반환한다.
 function clearAllDMs(db) {
+  const cachedFilePaths = db.prepare(
+    "SELECT cached_file_path FROM messages WHERE type = 'dm' AND cached_file_path IS NOT NULL"
+  ).all().map(row => row.cached_file_path)
   db.transaction(() => {
     db.prepare("DELETE FROM messages WHERE type = 'dm'").run()
     db.prepare('DELETE FROM pending_messages').run()
   })()
+  return { cachedFilePaths }
 }
 
 // 특정 상대가 보낸 안읽은 DM 메시지 ID 전체 조회 (제한 없음)

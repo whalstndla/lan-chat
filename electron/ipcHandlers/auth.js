@@ -29,7 +29,7 @@ const { stopBroadcastDiscovery } = require('../peer/broadcastDiscovery')
 const { stopPeerDiscovery } = require('../peer/discovery')
 const { disconnectAll } = require('../peer/wsClient')
 const { closeAllServerClients } = require('../peer/wsServer')
-const { clearAllPeerConnectRetryState, clearAllPendingFileRequests } = require('../utils/appUtils')
+const { clearAllPeerConnectRetryState, clearAllPendingFileRequests, sweepOrphanedFileCache } = require('../utils/appUtils')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
 // 마스터키가 unlock 된 상태에서 DB 를 열고 마이그레이션 / 만료정리 수행.
@@ -57,6 +57,15 @@ function openSessionDatabase(ctx, dbPath, appDataPath) {
   }
 
   try { deleteExpiredPendingMessages(ctx.state.database) } catch {}
+
+  // file_cache/ orphan 스윕 — 메시지 삭제 시 개별적으로 캐시 파일을 지우지만(#24),
+  // 이 수정 이전에 삭제된 과거 데이터나 비정상 종료로 남은 orphan 을 로그인마다 정리.
+  try {
+    const sweepResult = sweepOrphanedFileCache(ctx)
+    if (sweepResult.removed > 0) writePeerDebugLog('auth.fileCacheSweep.summary', sweepResult)
+  } catch (err) {
+    writePeerDebugLog('auth.fileCacheSweep.error', { error: err.message })
+  }
 }
 
 // peerId 복원 또는 신규 생성.
