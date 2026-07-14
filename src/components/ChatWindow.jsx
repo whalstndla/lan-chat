@@ -408,7 +408,14 @@ export default function ChatWindow() {
           <div className="flex items-center gap-1">
             {/* 알림 뮤트 토글 버튼 */}
             <button
-              onClick={() => toggleRoomMute(roomKey)}
+              onClick={() => {
+                toggleRoomMute(roomKey)
+                // 토글 직후 main 프로세스에 뮤트 집합을 재동기화 — 소리/OS알림 억제 판정용(#4)
+                const updatedMutedRooms = useChatStore.getState().mutedRooms
+                window.electronAPI.setMutedRooms(
+                  Object.keys(updatedMutedRooms).filter((key) => updatedMutedRooms[key])
+                )
+              }}
               className={`p-1 rounded hover:bg-vsc-hover transition-colors cursor-pointer ${isMuted ? 'text-vsc-muted' : 'text-vsc-muted'}`}
               title={isMuted ? '알림 켜기' : '알림 끄기'}
             >

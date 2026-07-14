@@ -69,6 +69,11 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       const notificationSettings = await window.electronAPI.getNotificationSettings()
       useUserStore.getState().setNotificationSettings(notificationSettings)
 
+      // 뮤트된 채팅방 집합을 main 에 동기화 — 소리/OS알림 억제 판정 기준이 된다(#4).
+      // 이후 토글은 ChatWindow 의 뮤트 버튼에서 즉시 재동기화한다.
+      const mutedRooms = useChatStore.getState().mutedRooms
+      window.electronAPI.setMutedRooms(Object.keys(mutedRooms).filter((roomKey) => mutedRooms[roomKey]))
+
       // StrictMode 중복 방지 — 기존 리스너 정리 후 새로 등록
       window.electronAPI.unsubscribeAll()
 
@@ -95,8 +100,9 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
           if (currentRoom.type === 'dm' && currentRoom.peerId === senderId && document.hasFocus()) {
             window.electronAPI.sendReadReceipt(senderId, [message.id]).catch(() => {})
           } else {
-            const isMuted = !!useChatStore.getState().mutedRooms[senderId]
-            if (!isMuted) useChatStore.getState().incrementUnread(senderId)
+            // 뮤트된 방이라도 안읽음 배지는 항상 증가한다 — 뮤트는 소리/OS알림만
+            // 억제하도록 재정의됐다(#4). 소리/OS알림 억제는 main 프로세스가 판정한다.
+            useChatStore.getState().incrementUnread(senderId)
           }
         } else if (message.type === 'delete-message') {
           if (message.to) {

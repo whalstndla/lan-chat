@@ -8,6 +8,7 @@ const {
   sendToRenderer,
   incrementBadge,
   showNotification,
+  isRoomMuted,
   playNotificationSound,
   cacheReceivedFile,
 } = require('../../../utils/appUtils')
@@ -60,14 +61,17 @@ module.exports = function handleDm({ message, ctx }) {
     }
 
     if (ctx.state.mainWindow && !ctx.state.mainWindow.isFocused()) {
+      // 안읽음 배지는 뮤트 여부와 무관하게 항상 증가 — 뮤트는 소리/OS알림만 억제한다(#4).
       incrementBadge(ctx)
-      showNotification(
-        ctx,
-        `${message.from || '알 수 없음'} (DM)`,
-        decryptedPayload.content || '파일을 보냈습니다.',
-        { type: 'dm', peerId: message.fromId, nickname: message.from || '알 수 없음' }
-      )
-      playNotificationSound(ctx)
+      if (!isRoomMuted(ctx, message.fromId)) {
+        showNotification(
+          ctx,
+          `${message.from || '알 수 없음'} (DM)`,
+          decryptedPayload.content || '파일을 보냈습니다.',
+          { type: 'dm', peerId: message.fromId, nickname: message.from || '알 수 없음' }
+        )
+        playNotificationSound(ctx)
+      }
     }
 
     sendToRenderer(ctx, 'message-received', {

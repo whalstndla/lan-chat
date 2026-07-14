@@ -6,6 +6,7 @@ const {
   sendToRenderer,
   incrementBadge,
   showNotification,
+  isRoomMuted,
   playNotificationSound,
   cacheReceivedFile,
 } = require('../../../utils/appUtils')
@@ -29,14 +30,17 @@ module.exports = function handleGlobalMessage({ message, ctx }) {
   } catch { /* DB 저장 실패 시 무시 — 렌더러 전달은 계속 */ }
 
   if (ctx.state.mainWindow && !ctx.state.mainWindow.isFocused()) {
+    // 안읽음 배지는 뮤트 여부와 무관하게 항상 증가 — 뮤트는 소리/OS알림만 억제한다(#4).
     incrementBadge(ctx)
-    showNotification(
-      ctx,
-      message.from || '알 수 없음',
-      message.content || '파일을 보냈습니다.',
-      { type: 'global' }
-    )
-    playNotificationSound(ctx)
+    if (!isRoomMuted(ctx, 'global')) {
+      showNotification(
+        ctx,
+        message.from || '알 수 없음',
+        message.content || '파일을 보냈습니다.',
+        { type: 'global' }
+      )
+      playNotificationSound(ctx)
+    }
   }
 
   sendToRenderer(ctx, 'message-received', message)

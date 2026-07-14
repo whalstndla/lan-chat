@@ -38,6 +38,10 @@ function createAppContext(config) {
       // cacheReceivedFile 이 file-request 를 송신할 때 등록하고, file-data 수신 또는
       // file-request-error 수신 시 정리. 타임아웃 만료 시 백오프로 재요청.
       pendingFileRequestMap: new Map(),
+      // 뮤트된 채팅방 집합 (roomKey: 'global' 또는 peerId) — renderer 의 mutedRooms
+      // (localStorage) 를 set-muted-rooms IPC 로 동기화받아 유지한다. 소리/OS알림 억제
+      // 판정에만 사용하고, 안읽음 배지 증가에는 영향을 주지 않는다(#4).
+      mutedRoomKeySet: new Set(),
     },
   }
 }

@@ -191,6 +191,14 @@ function showNotification(ctx, title, body, navigateTo) {
   notification.show()
 }
 
+// 채팅방이 뮤트되었는지 확인 — mutedRooms 는 renderer localStorage 에만 저장되므로,
+// set-muted-rooms IPC 로 동기화받은 ctx.state.mutedRoomKeySet 을 기준으로 판정한다.
+// 뮤트는 소리/OS알림만 억제하고 안읽음 배지는 그대로 유지해야 하므로(#4), 호출부에서
+// incrementBadge 와 분리해서 사용한다.
+function isRoomMuted(ctx, roomKey) {
+  return !!ctx.state.mutedRoomKeySet && ctx.state.mutedRoomKeySet.has(roomKey)
+}
+
 // 창이 비활성화 상태일 때 렌더러에 소리 재생 요청
 function playNotificationSound(ctx) {
   if (ctx.state.mainWindow && !ctx.state.mainWindow.isDestroyed() && !ctx.state.mainWindow.isFocused()) {
@@ -529,6 +537,7 @@ module.exports = {
   incrementBadge,
   clearBadge,
   showNotification,
+  isRoomMuted,
   playNotificationSound,
   checkAndNotifyUpdated,
   loadChangelog,

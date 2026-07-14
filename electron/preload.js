@@ -194,6 +194,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveCustomNotificationSound: (buffer, extension) =>
     ipcRenderer.invoke('save-custom-notification-sound', { buffer: new Uint8Array(buffer), extension }),
 
+  // 뮤트된 채팅방 목록을 main 에 동기화 — 소리/OS알림 억제 판정용 (배지는 항상 유지)
+  setMutedRooms: (roomKeys) => ipcRenderer.invoke('set-muted-rooms', roomKeys),
+
   // 알림 소리 재생 이벤트
   onPlayNotificationSound: (callback) => {
     ipcRenderer.removeAllListeners('play-notification-sound')

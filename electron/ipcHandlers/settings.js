@@ -23,6 +23,12 @@ function registerSettingsHandlers(ctx) {
     }
     saveCustomNotificationSound(ctx.state.database, ctx.config.appDataPath, buffer, extension)
   })
+
+  // 뮤트된 채팅방 집합 동기화 — mutedRooms 는 renderer localStorage 에만 저장되므로,
+  // main 프로세스의 소리/OS알림 억제 판정을 위해 토글 시 + 앱 시작 시 전체를 전달받는다(#4).
+  ipcMain.handle('set-muted-rooms', (_, mutedRoomKeys) => {
+    ctx.state.mutedRoomKeySet = new Set(Array.isArray(mutedRoomKeys) ? mutedRoomKeys : [])
+  })
 }
 
 module.exports = { registerSettingsHandlers }
