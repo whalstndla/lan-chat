@@ -6,10 +6,10 @@ const {
   sendToRenderer,
   incrementBadge,
   showNotification,
-  isRoomMuted,
   playNotificationSound,
   cacheReceivedFile,
 } = require('../../../utils/appUtils')
+const { resolveNotificationDecision } = require('../../../utils/notificationPolicy')
 
 module.exports = function handleGlobalMessage({ message, ctx }) {
   try {
@@ -30,15 +30,15 @@ module.exports = function handleGlobalMessage({ message, ctx }) {
   } catch { /* DB 저장 실패 시 무시 — 렌더러 전달은 계속 */ }
 
   if (ctx.state.mainWindow && !ctx.state.mainWindow.isFocused()) {
-    // 안읽음 배지는 뮤트 여부와 무관하게 항상 증가 — 뮤트는 소리/OS알림만 억제한다(#4).
+    // 안읽음 배지는 뮤트/알림 범위/방해금지 여부와 무관하게 항상 증가한다(#4).
     incrementBadge(ctx)
-    if (!isRoomMuted(ctx, 'global')) {
-      showNotification(
-        ctx,
-        message.from || '알 수 없음',
-        message.content || '파일을 보냈습니다.',
-        { type: 'global' }
-      )
+    const { notify, body } = resolveNotificationDecision(ctx, {
+      roomType: 'global',
+      roomKey: 'global',
+      fallbackBody: message.content || '파일을 보냈습니다.',
+    })
+    if (notify) {
+      showNotification(ctx, message.from || '알 수 없음', body, { type: 'global' })
       playNotificationSound(ctx)
     }
   }

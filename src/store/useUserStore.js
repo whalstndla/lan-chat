@@ -27,13 +27,19 @@ const useUserStore = create((set) => ({
   notificationSound: 'notification1',  // 'notification1'~'notification4' | 'custom'
   notificationVolume: 0.7,
   notificationCustomSoundBuffer: null, // Uint8Array | null
+  notificationScope: 'all',   // 'all'(전체) | 'dm'(DM만) | 'off'(끄기)
+  notificationHideBody: false, // OS 알림 본문에 실제 메시지 대신 "새 메시지"만 표시
 
-  setNotificationSettings: ({ sound, volume, customSoundBuffer }) =>
-    set({
+  // scope/hideBody 는 sound/volume 을 바꾸는 기존 호출부가 넘기지 않아도 기존 값을
+  // 유지하도록 병합한다(sound/volume/customSoundBuffer 는 기존 동작 그대로 유지).
+  setNotificationSettings: ({ sound, volume, customSoundBuffer, scope, hideBody }) =>
+    set((state) => ({
       notificationSound: sound,
       notificationVolume: volume,
       notificationCustomSoundBuffer: customSoundBuffer ?? null,
-    }),
+      notificationScope: scope ?? state.notificationScope,
+      notificationHideBody: hideBody !== undefined ? hideBody : state.notificationHideBody,
+    })),
 }))
 
 export default useUserStore

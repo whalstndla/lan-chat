@@ -83,6 +83,10 @@ function migrateDatabase(db) {
     'ALTER TABLE profile ADD COLUMN notification_custom_sound TEXT',
     "ALTER TABLE profile ADD COLUMN status_type TEXT DEFAULT 'online'",
     "ALTER TABLE profile ADD COLUMN status_message TEXT DEFAULT ''",
+    // 알림 범위: 'all'(전체) | 'dm'(DM만) | 'off'(끄기)
+    "ALTER TABLE profile ADD COLUMN notification_scope TEXT DEFAULT 'all'",
+    // OS 알림 본문 숨김 — on 이면 실제 메시지 내용 대신 "새 메시지"만 표시
+    'ALTER TABLE profile ADD COLUMN notification_hide_body INTEGER DEFAULT 0',
   ]
   for (const sql of profileMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }

@@ -23,6 +23,13 @@ const SOUND_OPTIONS = [
   { value: 'custom', label: '직접 업로드' },
 ]
 
+// 알림 범위 옵션 — 멘션 전용은 멘션 기능(Phase 5) 이후 추가 예정
+const NOTIFICATION_SCOPE_OPTIONS = [
+  { value: 'all', label: '전체' },
+  { value: 'dm', label: 'DM만' },
+  { value: 'off', label: '끄기' },
+]
+
 export default function SettingsPanel({ onClose }) {
   const { setAuthStatus } = useAuthStore()
   const { myNickname, myProfileImageUrl, updateMyNickname, updateMyProfileImageUrl, reset: resetUser } = useUserStore()
@@ -31,6 +38,8 @@ export default function SettingsPanel({ onClose }) {
 
   const notificationSound = useUserStore(state => state.notificationSound)
   const notificationVolume = useUserStore(state => state.notificationVolume)
+  const notificationScope = useUserStore(state => state.notificationScope)
+  const notificationHideBody = useUserStore(state => state.notificationHideBody)
   const { setNotificationSettings } = useUserStore()
   const { play: playNotification } = useNotificationSound()
 
@@ -92,6 +101,16 @@ export default function SettingsPanel({ onClose }) {
     setNotificationSettings({ sound: 'custom', volume: notificationVolume, customSoundBuffer: new Uint8Array(buffer) })
     await window.electronAPI.saveNotificationSettings({ sound: 'custom', volume: notificationVolume })
     event.target.value = ''
+  }
+
+  async function handleScopeChange(newScope) {
+    setNotificationSettings({ sound: notificationSound, volume: notificationVolume, scope: newScope })
+    await window.electronAPI.saveNotificationSettings({ sound: notificationSound, volume: notificationVolume, scope: newScope })
+  }
+
+  async function handleHideBodyToggle(newValue) {
+    setNotificationSettings({ sound: notificationSound, volume: notificationVolume, hideBody: newValue })
+    await window.electronAPI.saveNotificationSettings({ sound: notificationSound, volume: notificationVolume, hideBody: newValue })
   }
 
   const handlePasswordChange = async () => {
@@ -325,6 +344,33 @@ export default function SettingsPanel({ onClose }) {
               </div>
               <input type="range" min="0" max="1" step="0.05" value={notificationVolume} onChange={e => handleVolumeChange(Number(e.target.value))} className="w-full accent-vsc-accent cursor-pointer" />
             </div>
+
+            {/* 알림 범위 */}
+            <div className="space-y-1">
+              <label className="text-vsc-muted text-xs block">알림 범위</label>
+              <div className="flex gap-1">
+                {NOTIFICATION_SCOPE_OPTIONS.map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => handleScopeChange(option.value)}
+                    className={`flex-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+                      notificationScope === option.value ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
+                    }`}
+                  >{option.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* OS 알림 본문 숨김 */}
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-vsc-muted text-xs">OS 알림에 메시지 내용 숨기기</span>
+              <input
+                type="checkbox"
+                checked={notificationHideBody}
+                onChange={e => handleHideBodyToggle(e.target.checked)}
+                className="accent-vsc-accent cursor-pointer"
+              />
+            </label>
           </div>
         </>
       )}

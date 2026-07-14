@@ -10,9 +10,9 @@ function registerSettingsHandlers(ctx) {
     getNotificationSettings(ctx.state.database, ctx.config.appDataPath)
   )
 
-  // 알림 설정 저장
-  ipcMain.handle('save-notification-settings', (_, { sound, volume }) => {
-    saveNotificationSettings(ctx.state.database, { sound, volume })
+  // 알림 설정 저장 — scope(알림 범위)/hideBody(본문 숨김)는 선택 필드(#42)
+  ipcMain.handle('save-notification-settings', (_, { sound, volume, scope, hideBody }) => {
+    saveNotificationSettings(ctx.state.database, { sound, volume, scope, hideBody })
   })
 
   // 커스텀 사운드 파일 저장 — 허용 확장자 검증 (경로 탈출 방지)

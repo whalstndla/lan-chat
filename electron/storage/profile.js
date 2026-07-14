@@ -66,6 +66,8 @@ function getNotificationSettings(db, appDataPath) {
   const profile = getProfile(db)
   const sound = profile?.notification_sound || 'notification1'
   const volume = profile?.notification_volume ?? 0.7
+  const scope = profile?.notification_scope || 'all'
+  const hideBody = !!profile?.notification_hide_body
   let customSoundBuffer = null
   if (profile?.notification_custom_sound) {
     const soundPath = path.join(appDataPath, 'sounds', profile.notification_custom_sound)
@@ -73,14 +75,18 @@ function getNotificationSettings(db, appDataPath) {
       customSoundBuffer = new Uint8Array(fs.readFileSync(soundPath))
     }
   }
-  return { sound, volume, customSoundBuffer }
+  return { sound, volume, customSoundBuffer, scope, hideBody }
 }
 
-// 알림 설정 저장
-function saveNotificationSettings(db, { sound, volume }) {
+// 알림 설정 저장 — scope/hideBody 는 선택적으로 전달되며, 생략 시 기존 값을 유지한다
+// (기존 호출부가 sound/volume 만 넘겨도 알림 범위/본문 숨김 설정이 초기화되지 않도록).
+function saveNotificationSettings(db, { sound, volume, scope, hideBody }) {
+  const current = getProfile(db)
+  const nextScope = scope !== undefined ? scope : (current?.notification_scope || 'all')
+  const nextHideBody = hideBody !== undefined ? (hideBody ? 1 : 0) : (current?.notification_hide_body ? 1 : 0)
   db.prepare(
-    'UPDATE profile SET notification_sound = ?, notification_volume = ? WHERE id = 1'
-  ).run(sound, volume)
+    'UPDATE profile SET notification_sound = ?, notification_volume = ?, notification_scope = ?, notification_hide_body = ? WHERE id = 1'
+  ).run(sound, volume, nextScope, nextHideBody)
 }
 
 // 커스텀 사운드 파일 저장 — appData/sounds/ 에 저장 후 파일명을 DB에 기록
