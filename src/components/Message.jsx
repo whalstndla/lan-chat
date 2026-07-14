@@ -1,6 +1,6 @@
 // src/components/Message.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil, Loader2 } from 'lucide-react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil, Loader2, Download, FolderOpen } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -8,6 +8,7 @@ import ImageLightbox from './message/ImageLightbox'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
+import useFileDownload from '../hooks/useFileDownload'
 
 // timestamp → "오후 2:30" 형식
 function formatTime(timestamp) {
@@ -78,7 +79,7 @@ function ExtraImageThumb({ imageMessage, onClick }) {
 
   if (!src && status !== 'failed') return null
   return (
-    <div className="relative rounded overflow-hidden border border-vsc-border w-32 h-32 bg-vsc-bg" onClick={() => status === 'loaded' && onClick(src)}>
+    <div className="relative rounded overflow-hidden border border-vsc-border w-32 h-32 bg-vsc-bg" onClick={() => status === 'loaded' && onClick(src, imageMessage.id)}>
       {status === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
           <Loader2 size={18} className="animate-spin" />
@@ -117,7 +118,8 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   const [reactions, setReactions] = useState({})
   const onlinePeers = usePeerStore(state => state.onlinePeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
-  const [lightboxUrl, setLightboxUrl] = useState(null)
+  const [lightboxData, setLightboxData] = useState(null) // { url, messageId }
+  const { downloadFile, savedPath, revealInFolder } = useFileDownload()
 
   const sender = message.from || message.from_name
   const contentType = message.contentType || message.content_type
@@ -252,7 +254,7 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
               <div className="flex flex-wrap gap-1 max-w-md">
                 <div
                   className={`relative rounded overflow-hidden border border-vsc-border bg-vsc-bg ${imgStatus === 'loaded' ? 'cursor-pointer' : ''} ${extraImages.length > 0 ? 'w-32 h-32' : 'min-w-[128px] min-h-[96px]'}`}
-                  onClick={() => imgStatus === 'loaded' && setLightboxUrl(resolvedFileUrl)}
+                  onClick={() => imgStatus === 'loaded' && setLightboxData({ url: resolvedFileUrl, messageId: message.id })}
                 >
                   {imgStatus === 'loading' && (
                     <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
@@ -275,31 +277,38 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   )}
                 </div>
                 {extraImages.map(extra => (
-                  <ExtraImageThumb key={extra.id} imageMessage={extra} onClick={(url) => setLightboxUrl(url)} />
+                  <ExtraImageThumb key={extra.id} imageMessage={extra} onClick={(url, messageId) => setLightboxData({ url, messageId })} />
                 ))}
               </div>
             )}
 
             {contentType === 'video' && resolvedFileUrl && (
-              <div className="rounded overflow-hidden border border-vsc-border">
+              <div className="relative rounded overflow-hidden border border-vsc-border group/video">
                 <video
                   src={resolvedFileUrl}
                   controls
                   className="max-w-xs max-h-64"
                   onError={onImgError}
                 />
+                <button
+                  onClick={() => downloadFile(message.id)}
+                  aria-label="비디오 저장"
+                  title="비디오 저장"
+                  className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white opacity-0 group-hover/video:opacity-100 transition-opacity cursor-pointer"
+                >
+                  <Download size={14} />
+                </button>
               </div>
             )}
 
             {contentType === 'file' && resolvedFileUrl && (
-              <a
-                href={resolvedFileUrl}
-                download={fileName}
+              <button
+                onClick={() => downloadFile(message.id)}
                 className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
               >
                 <Paperclip size={14} className="shrink-0" />
                 {fileName || '파일'}
-              </a>
+              </button>
             )}
 
             {/* 액션 버튼 (말풍선 옆) */}
@@ -369,11 +378,26 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
               ))}
             </div>
           )}
+
+          {/* 다운로드 저장 완료 안내 — 클릭 시 폴더에서 보기 */}
+          {savedPath && (
+            <button
+              onClick={revealInFolder}
+              className="mt-0.5 flex items-center gap-1 text-xs text-vsc-accent hover:underline cursor-pointer"
+            >
+              <FolderOpen size={11} />
+              저장됨 · 폴더에서 보기
+            </button>
+          )}
         </div>
       </div>
 
-      {lightboxUrl && (
-        <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
+      {lightboxData && (
+        <ImageLightbox
+          url={lightboxData.url}
+          messageId={lightboxData.messageId}
+          onClose={() => setLightboxData(null)}
+        />
       )}
     </>
   )

@@ -2,14 +2,15 @@
 // 파일 저장 및 캐시 관련 IPC 핸들러
 // 디스크 저장은 항상 마스터키로 AES-256-GCM 암호화 (보안 3단계).
 
-const { ipcMain } = require('electron')
+const { ipcMain, dialog, app, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { v4: uuidv4 } = require('uuid')
-const { getFileCache } = require('../storage/queries')
+const { getFileCache, getFileForDownload } = require('../storage/queries')
 const { getFilePort } = require('../peer/fileServer')
-const { encryptBuffer } = require('../crypto/fileEncryption')
+const { encryptBuffer, decryptBuffer, isEncryptedFile } = require('../crypto/fileEncryption')
 const { MAX_RAW_FILE_BYTES } = require('../utils/appUtils')
+const { resolveDownloadFileName } = require('../utils/downloadUtils')
 
 function registerFileHandlers(ctx) {
   const tempFilePath = path.join(ctx.config.appDataPath, 'files')
@@ -52,6 +53,57 @@ function registerFileHandlers(ctx) {
       return `lanchat://file/${encodeURIComponent(messageId)}`
     }
     return null
+  })
+
+  // 파일 다운로드 — "다른 이름으로 저장" 다이얼로그를 띄워 사용자가 선택한 위치에
+  // 원본 파일명으로 저장한다. 복호화 경로는 lanchat:// 프로토콜 핸들러(protocol/lanchatProtocol.js)와
+  // 완전히 동일 — 캐시된 ciphertext 를 메모리에서 복호화해 평문 바이트를 얻는다.
+  // 사용자가 명시적으로 다운로드(내보내기)를 요청한 것이므로 디스크에 평문으로 저장하는 것이 의도된 동작이다.
+  ipcMain.handle('download-file', async (_, messageId) => {
+    try {
+      const fileInfo = getFileForDownload(ctx.state.database, messageId)
+      if (!fileInfo?.cachedFilePath || !fs.existsSync(fileInfo.cachedFilePath)) {
+        return { ok: false, error: 'notFound' }
+      }
+
+      const rawBytes = fs.readFileSync(fileInfo.cachedFilePath)
+      let plaintext
+      if (isEncryptedFile(rawBytes)) {
+        if (!ctx.state.masterKey) return { ok: false, error: 'noMasterKey' }
+        try {
+          plaintext = decryptBuffer(rawBytes, ctx.state.masterKey)
+        } catch (err) {
+          return { ok: false, error: 'decryptionFailed', message: err.message }
+        }
+      } else {
+        // 마이그레이션 전 평문 캐시 — 그대로 사용
+        plaintext = rawBytes
+      }
+
+      const defaultFileName = resolveDownloadFileName(fileInfo.fileName, fileInfo.cachedFilePath)
+      const defaultPath = path.join(app.getPath('downloads'), defaultFileName)
+
+      const saveDialogOptions = { defaultPath }
+      const { canceled, filePath } = ctx.state.mainWindow
+        ? await dialog.showSaveDialog(ctx.state.mainWindow, saveDialogOptions)
+        : await dialog.showSaveDialog(saveDialogOptions)
+
+      if (canceled || !filePath) {
+        return { ok: false, canceled: true }
+      }
+
+      fs.writeFileSync(filePath, plaintext)
+      return { ok: true, path: filePath }
+    } catch (err) {
+      return { ok: false, error: 'writeError', message: err.message }
+    }
+  })
+
+  // 저장된 파일을 OS 파일 탐색기(파인더/탐색기)에서 보여주기 — "폴더에서 보기" 액션
+  ipcMain.handle('show-item-in-folder', (_, filePath) => {
+    if (typeof filePath === 'string' && filePath) {
+      shell.showItemInFolder(filePath)
+    }
   })
 }
 

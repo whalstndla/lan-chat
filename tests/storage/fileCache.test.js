@@ -1,6 +1,6 @@
 // tests/storage/fileCache.test.js
 const { initDatabase, migrateDatabase, closeDatabase } = require('../../electron/storage/database')
-const { saveMessage, saveFileCache, getFileCache } = require('../../electron/storage/queries')
+const { saveMessage, saveFileCache, getFileCache, getFileForDownload } = require('../../electron/storage/queries')
 
 describe('파일 영구 캐시', () => {
   let db
@@ -33,5 +33,48 @@ describe('파일 영구 캐시', () => {
 
   it('캐시 없으면 null', () => {
     expect(getFileCache(db, 'msg-none')).toBeNull()
+  })
+})
+
+describe('다운로드용 파일 정보 조회 (getFileForDownload)', () => {
+  let db
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    saveMessage(db, {
+      id: 'msg-file',
+      type: 'message',
+      from_id: 'peer1',
+      from_name: '홍길동',
+      to_id: null,
+      content: null,
+      content_type: 'image',
+      encrypted_payload: null,
+      file_url: 'http://peer1:3000/files/test.jpg',
+      file_name: 'test.jpg',
+      timestamp: Date.now(),
+    })
+  })
+
+  afterEach(() => closeDatabase(db))
+
+  it('원본 file_name 과 캐시 경로를 함께 반환', () => {
+    saveFileCache(db, { messageId: 'msg-file', cachedPath: '/cache/test.jpg' })
+    expect(getFileForDownload(db, 'msg-file')).toEqual({
+      fileName: 'test.jpg',
+      cachedFilePath: '/cache/test.jpg',
+    })
+  })
+
+  it('캐시 경로가 아직 없어도 file_name 은 반환', () => {
+    expect(getFileForDownload(db, 'msg-file')).toEqual({
+      fileName: 'test.jpg',
+      cachedFilePath: null,
+    })
+  })
+
+  it('존재하지 않는 메시지면 null 반환', () => {
+    expect(getFileForDownload(db, 'msg-none')).toBeNull()
   })
 })

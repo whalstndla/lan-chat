@@ -166,6 +166,14 @@ function getFileCache(db, messageId) {
   return row?.cached_file_path || null
 }
 
+// 다운로드용 원본 파일명 + 캐시 경로 조회 — download-file IPC 핸들러에서 사용.
+// 메시지가 없으면 null 반환.
+function getFileForDownload(db, messageId) {
+  const row = db.prepare('SELECT file_name, cached_file_path FROM messages WHERE id = ?').get(messageId)
+  if (!row) return null
+  return { fileName: row.file_name, cachedFilePath: row.cached_file_path }
+}
+
 // 피어 캐시 저장 — key-exchange 성공 시 IP·포트 기록 (mDNS 없이도 재연결 가능)
 function savePeerCache(db, { peerId, ip, wsPort, nickname }) {
   db.prepare(`
@@ -194,4 +202,4 @@ function deletePeerCache(db, peerId) {
   db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache, savePeerCache, loadPeerCache, deletePeerCache }
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }

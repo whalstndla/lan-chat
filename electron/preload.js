@@ -73,6 +73,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 파일 영구 캐시 URL 조회 — 원본 URL이 만료된 경우 로컬 캐시로 폴백
   getCachedFileUrl: (messageId) => ipcRenderer.invoke('get-cached-file-url', messageId),
 
+  // 파일 다운로드 — 복호화된 원본을 "다른 이름으로 저장" 다이얼로그로 저장
+  downloadFile: (messageId) => ipcRenderer.invoke('download-file', messageId),
+
+  // 저장된 파일을 OS 파일 탐색기에서 보여주기 ("폴더에서 보기")
+  showItemInFolder: (filePath) => ipcRenderer.invoke('show-item-in-folder', filePath),
+
   // 이벤트 구독 — 중복 등록 방지를 위해 기존 리스너 제거 후 재등록
   subscribeToMessages: (callback) => {
     ipcRenderer.removeAllListeners('message-received')
