@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 읽음 확인
   getUnreadDMIds: (senderPeerId) => ipcRenderer.invoke('get-unread-dm-ids', senderPeerId),
+  // 상대별 안읽은 DM 개수 일괄 조회 — 부팅 시 사이드바 배지 복원용
+  getUnreadCounts: () => ipcRenderer.invoke('get-unread-counts'),
   sendReadReceipt: (targetPeerId, messageIds) => ipcRenderer.invoke('send-read-receipt', { targetPeerId, messageIds }),
 
   // 읽음 확인 수신 이벤트

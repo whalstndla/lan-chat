@@ -90,6 +90,18 @@ function getUnreadDMMessageIds(db, myPeerId, senderPeerId) {
   `).all(senderPeerId, myPeerId).map(row => row.id)
 }
 
+// 상대별 안읽은 DM 개수 일괄 조회 — { peerId: count } 형태로 반환.
+// 부팅/재로그인 시 DB 의 read=0 상태를 사이드바 배지에 복원하는 용도.
+function getUnreadCountsByPeer(db, myPeerId) {
+  const rows = db.prepare(`
+    SELECT from_id AS peerId, COUNT(*) AS count
+    FROM messages
+    WHERE type = 'dm' AND to_id = ? AND read = 0
+    GROUP BY from_id
+  `).all(myPeerId)
+  return Object.fromEntries(rows.map(row => [row.peerId, row.count]))
+}
+
 // DM 메시지 읽음 상태 DB 업데이트
 function markMessagesAsRead(db, messageIds) {
   if (!messageIds?.length) return
@@ -202,4 +214,4 @@ function deletePeerCache(db, peerId) {
   db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }
+module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }

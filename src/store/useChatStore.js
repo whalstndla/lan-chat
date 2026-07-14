@@ -93,6 +93,12 @@ const useChatStore = create((set, get) => ({
       }
     }),
 
+  // 부팅/재로그인 시 DB 에서 조회한 상대별 안읽은 개수를 일괄 반영 (사이드바 배지 복원)
+  setUnreadCounts: (counts) =>
+    set((state) => ({
+      unreadCounts: { ...state.unreadCounts, ...counts },
+    })),
+
   incrementUnread: (peerId) =>
     set((state) => ({
       unreadCounts: {

@@ -2,7 +2,7 @@
 // 읽음 상태 관련 IPC 핸들러 — 안읽은 DM ID 조회, 읽음 확인 전송
 
 const { ipcMain } = require('electron')
-const { getUnreadDMMessageIds, markMessagesAsRead: markMessagesAsReadDB } = require('../storage/queries')
+const { getUnreadDMMessageIds, markMessagesAsRead: markMessagesAsReadDB, getUnreadCountsByPeer } = require('../storage/queries')
 const { sendPeerMessage } = require('../utils/appUtils')
 
 // 한 번에 처리할 messageId 청크 크기 — SQLite 변수 개수 한도(기본 999)를 고려해
@@ -13,6 +13,11 @@ function registerReadStatusHandlers(ctx) {
   // 안읽은 DM 메시지 ID 조회 (제한 없음)
   ipcMain.handle('get-unread-dm-ids', (_, senderPeerId) => {
     return getUnreadDMMessageIds(ctx.state.database, ctx.state.peerId, senderPeerId)
+  })
+
+  // 상대별 안읽은 DM 개수 일괄 조회 — 부팅/재로그인 시 사이드바 배지 복원용
+  ipcMain.handle('get-unread-counts', () => {
+    return getUnreadCountsByPeer(ctx.state.database, ctx.state.peerId)
   })
 
   // 읽음 확인 전송 — 전송 성공 시에만 로컬 DB 업데이트 (실패 시 재진입 때 재전송 가능)

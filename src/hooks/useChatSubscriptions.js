@@ -56,6 +56,10 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       const dmPeers = await window.electronAPI.getDMPeers()
       usePeerStore.getState().setPastDMPeers(dmPeers)
 
+      // 안읽은 개수 복원 — DB 의 read=0 카운트를 사이드바 배지에 반영 (재시작 시 0으로 보이던 문제)
+      const unreadCounts = await window.electronAPI.getUnreadCounts()
+      useChatStore.getState().setUnreadCounts(unreadCounts)
+
       const versionInfo = await window.electronAPI.getAppVersionInfo()
       if (versionInfo.updatedFromVersion) {
         setPatchNotesHighlight(versionInfo.currentVersion)
