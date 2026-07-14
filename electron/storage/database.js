@@ -160,6 +160,38 @@ function migrateDatabase(db) {
         SELECT rowid, id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
       `)
     }
+
+    // messages 테이블 변경을 messages_fts 에 자동 동기화하는 트리거.
+    // 과거엔 saveMessage() 가 INSERT 시에만 수동으로 FTS 를 동기화해 edit/delete/
+    // clearAllMessages/clearAllDMs 이후 FTS 인덱스가 실제 messages 테이블과 어긋나
+    // (삭제된 메시지의 토큰이 남거나, 수정 전 텍스트로 검색되는) 문제가 있었다.
+    // 표준 external-content FTS5 트리거로 일원화해 INSERT/UPDATE/DELETE 모두
+    // 자동으로 반영되도록 한다 (전역 메시지만 대상 — DM 은 암호화되어 제외).
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS messages_fts_after_insert AFTER INSERT ON messages
+      WHEN new.type = 'message' AND new.content IS NOT NULL
+      BEGIN
+        INSERT INTO messages_fts(rowid, id, content, from_name)
+        VALUES (new.rowid, new.id, new.content, new.from_name);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS messages_fts_after_delete AFTER DELETE ON messages
+      WHEN old.type = 'message' AND old.content IS NOT NULL
+      BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name)
+        VALUES ('delete', old.rowid, old.id, old.content, old.from_name);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS messages_fts_after_update AFTER UPDATE OF content, from_name ON messages
+      BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name)
+          SELECT 'delete', old.rowid, old.id, old.content, old.from_name
+          WHERE old.type = 'message' AND old.content IS NOT NULL;
+        INSERT INTO messages_fts(rowid, id, content, from_name)
+          SELECT new.rowid, new.id, new.content, new.from_name
+          WHERE new.type = 'message' AND new.content IS NOT NULL;
+      END;
+    `)
   } catch { /* FTS5 미지원 환경 무시 */ }
 }
 
