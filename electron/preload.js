@@ -137,7 +137,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('reaction-updated', (_, data) => callback(data))
   },
 
-  // 이벤트 구독 해제
+  // 이벤트 구독 해제 — 채팅/피어 관련 채널만 해제한다.
+  // update-* 채널은 App.jsx 마운트 시 1회만 등록되어 앱 수명 전체 동안 유지되어야 하므로
+  // (로그인 이후에도 "업데이트 확인" 버튼이 동작해야 함) 여기서 제외한다.
   unsubscribeAll: () => {
     ipcRenderer.removeAllListeners('message-received')
     ipcRenderer.removeAllListeners('peer-discovered')
@@ -155,11 +157,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('message-edited')
     ipcRenderer.removeAllListeners('peer-status-changed')
     ipcRenderer.removeAllListeners('play-notification-sound')
-    ipcRenderer.removeAllListeners('update-available')
-    ipcRenderer.removeAllListeners('update-download-progress')
-    ipcRenderer.removeAllListeners('update-not-available')
-    ipcRenderer.removeAllListeners('update-downloaded')
-    ipcRenderer.removeAllListeners('update-error')
   },
 
   // 외부 링크 열기
