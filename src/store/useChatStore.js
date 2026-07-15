@@ -1,6 +1,12 @@
 // src/store/useChatStore.js
 import { create } from 'zustand'
 
+// 라이브 append(새 메시지 도착) 시 유지할 최근 메시지 상한 — 과거를 로드하지 않은 일반 상태에서
+// 메모리 무한 증가를 막는다. 단, 사용자가 위로 스크롤해 과거를 로드했거나 검색 점프로 이 값을
+// 초과하는 히스토리를 한 번에 불러온 방(=expanded)에서는 트림을 하지 않는다 — 그렇지 않으면
+// slice(-N) 이 지금 보고 있는 과거 메시지를 잘라 증발시킨다(#10).
+const LIVE_TAIL_CAP = 500
+
 // localStorage에서 뮤트 상태 복원
 function loadMutedRooms() {
   try {
@@ -97,6 +103,11 @@ const useChatStore = create((set, get) => ({
   // 스크롤+하이라이트할 대상 messageId. ChatWindow 가 구독해 처리하고 나면 다시 null 로 비운다.
   pendingScrollMessageId: null,
 
+  // 과거(prepend/검색 점프)로 확장돼 append 트림을 비활성화해야 하는지(#10). 전체 채팅은 boolean,
+  // DM 은 상대별로 관리한다. 방 히스토리를 기본 페이지로 (재)로드하면 다시 false 로 리셋된다.
+  globalHistoryExpanded: false,
+  dmHistoryExpanded: {}, // { peerId: boolean }
+
   // 채팅방 뮤트 토글 (roomKey: 'global' 또는 peerId)
   toggleRoomMute: (roomKey) =>
     set((state) => {
@@ -141,14 +152,20 @@ const useChatStore = create((set, get) => ({
       return { drafts: updated }
     }),
 
-  setGlobalHistory: (messages) => set({ globalMessages: messages }),
+  // 방 진입/검색 점프 시 히스토리 전체 교체. 기본 페이지(100)보다 크게(=LIVE_TAIL_CAP 초과)
+  // 한 번에 로드된 경우엔 expanded 로 표시해 이후 append 가 그 과거를 트림하지 않게 한다(#10).
+  setGlobalHistory: (messages) =>
+    set({ globalMessages: messages, globalHistoryExpanded: messages.length > LIVE_TAIL_CAP }),
 
-  // 이전 메시지를 앞에 추가 (무한 스크롤)
+  // 이전 메시지를 앞에 추가 (무한 스크롤). 실제로 과거가 추가되면 expanded 로 표시한다.
   prependGlobalMessages: (older) =>
     set((state) => {
       const existingIds = new Set(state.globalMessages.map(m => m.id))
       const unique = older.filter(m => !existingIds.has(m.id))
-      return { globalMessages: [...unique, ...state.globalMessages] }
+      return {
+        globalMessages: [...unique, ...state.globalMessages],
+        globalHistoryExpanded: unique.length > 0 ? true : state.globalHistoryExpanded,
+      }
     }),
 
   prependDMMessages: (peerId, older) =>
@@ -158,27 +175,36 @@ const useChatStore = create((set, get) => ({
       const unique = older.filter(m => !existingIds.has(m.id))
       return {
         dmMessages: { ...state.dmMessages, [peerId]: [...unique, ...existing] },
+        dmHistoryExpanded: unique.length > 0
+          ? { ...state.dmHistoryExpanded, [peerId]: true }
+          : state.dmHistoryExpanded,
       }
     }),
 
   addGlobalMessage: (message) =>
     set((state) => {
       const updated = [...state.globalMessages, message]
-      // 최근 500개만 유지 (메모리 누수 방지)
-      return { globalMessages: updated.length > 500 ? updated.slice(-500) : updated }
+      // 과거를 로드해 확장된 방에서는 트림하지 않는다 — 지금 보고 있는 과거 메시지 증발 방지(#10).
+      if (state.globalHistoryExpanded) return { globalMessages: updated }
+      // 일반 라이브 상태에서는 최근 LIVE_TAIL_CAP 개만 유지 (메모리 누수 방지)
+      return { globalMessages: updated.length > LIVE_TAIL_CAP ? updated.slice(-LIVE_TAIL_CAP) : updated }
     }),
 
+  // 방 진입/검색 점프 시 DM 히스토리 전체 교체 — global 과 동일한 expanded 판정.
   setDMHistory: (peerId, messages) =>
     set((state) => ({
       dmMessages: { ...state.dmMessages, [peerId]: messages },
+      dmHistoryExpanded: { ...state.dmHistoryExpanded, [peerId]: messages.length > LIVE_TAIL_CAP },
     })),
 
   addDMMessage: (peerId, message) =>
     set((state) => {
       const existing = state.dmMessages[peerId] || []
       const appended = [...existing, message]
-      // Phase 4: 메모리 누적 방지 — 최근 500개만 유지 (globalMessages 와 동일 정책)
-      const trimmed = appended.length > 500 ? appended.slice(-500) : appended
+      // 과거를 로드해 확장된 방(#10)에서는 트림하지 않는다. 그 외에는 최근 LIVE_TAIL_CAP 개만 유지.
+      const trimmed = state.dmHistoryExpanded[peerId]
+        ? appended
+        : (appended.length > LIVE_TAIL_CAP ? appended.slice(-LIVE_TAIL_CAP) : appended)
       return {
         dmMessages: { ...state.dmMessages, [peerId]: trimmed },
       }
@@ -395,6 +421,8 @@ const useChatStore = create((set, get) => ({
       drafts: {},
       bookmarks: {},
       pendingScrollMessageId: null,
+      globalHistoryExpanded: false,
+      dmHistoryExpanded: {},
     })
   },
 }))
