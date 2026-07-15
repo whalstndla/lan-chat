@@ -109,6 +109,7 @@ function ExtraImageThumb({ imageMessage, onClick }) {
           src={src}
           alt={imageMessage.fileName || imageMessage.file_name || '이미지'}
           className={`w-32 h-32 object-cover ${status === 'loaded' ? 'block cursor-pointer' : 'invisible'}`}
+          loading="lazy"
           onLoad={onLoad}
           onError={onError}
         />
@@ -319,6 +320,7 @@ function Message({ message, onStartEdit, isHighlighted = false, isGrouped = fals
                       src={resolvedFileUrl}
                       alt={fileName || '이미지'}
                       className={`${extraImages.length > 0 ? 'w-32 h-32 object-cover' : 'max-w-xs max-h-64 object-contain'} ${imgStatus === 'loaded' ? 'block' : 'invisible'}`}
+                      loading="lazy"
                       onLoad={onImgLoad}
                       onError={onImgError}
                     />
@@ -335,6 +337,7 @@ function Message({ message, onStartEdit, isHighlighted = false, isGrouped = fals
                 <video
                   src={resolvedFileUrl}
                   controls
+                  preload="metadata"
                   className="max-w-xs max-h-64"
                   onError={onImgError}
                 />
