@@ -65,6 +65,8 @@ export default function ChatWindow() {
   // 수정 시작 핸들러 — 매 렌더마다 새 함수가 생기면 Message 의 React.memo 가 무력화되므로
   // ref 기반으로 안정화한다(messageInputRef 는 렌더 간 동일 참조라 의존성이 없다).
   const handleStartEdit = useCallback((msg) => messageInputRef.current?.startEdit(msg), [])
+  // 답장 시작 핸들러(#28) — handleStartEdit 와 동일한 ref 패턴으로 MessageInput 에 답장 대상 전달.
+  const handleStartReply = useCallback((msg) => messageInputRef.current?.startReply(msg), [])
 
   // 렌더 아이템 목록(날짜/안읽음 구분선 + 연속 이미지 그룹 구조)을 구조가 바뀔 때만 재계산한다.
   // 자주 바뀌는 isHighlighted/searchQuery 는 여기 넣지 않고 렌더 시 각 Message 에 props 로 전달한다.
@@ -202,8 +204,10 @@ export default function ChatWindow() {
     }
   }
 
-  // 검색 결과 클릭 → 해당 메시지로 스크롤 + 하이라이트
-  function scrollToMessage(messageId) {
+  // 검색 결과 클릭 / 답장 인용 클릭(#28) → 해당 메시지로 스크롤 + 하이라이트.
+  // 답장 인용에서 재사용하려고 useCallback 으로 참조를 안정화한다(Message 의 React.memo 유지).
+  // 원본이 화면(DOM)에 없으면 조용히 무시 — 과한 히스토리 로드를 하지 않는다(#28 설계 결정).
+  const scrollToMessage = useCallback((messageId) => {
     setHighlightedMessageId(messageId)
     // DOM에서 해당 메시지 요소 찾아 스크롤
     requestAnimationFrame(() => {
@@ -214,7 +218,7 @@ export default function ChatWindow() {
     })
     // 3초 후 하이라이트 제거
     setTimeout(() => setHighlightedMessageId(null), 3000)
-  }
+  }, [])
 
   // 검색 결과 클릭 처리(#36) — 이미 화면(DOM)에 로드되어 있으면 바로 스크롤하고,
   // 스크롤로 로드하지 않아 아직 없는 과거 결과라면 해당 타임스탬프까지 히스토리를
@@ -521,6 +525,8 @@ export default function ChatWindow() {
                 <Message
                   message={item.message}
                   onStartEdit={handleStartEdit}
+                  onReply={handleStartReply}
+                  onQuoteClick={scrollToMessage}
                   isHighlighted={highlightedMessageId === item.message.id}
                   isGrouped={item.isGrouped}
                   extraImages={item.extraImages}

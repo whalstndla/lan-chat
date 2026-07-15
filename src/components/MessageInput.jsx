@@ -1,7 +1,7 @@
 // src/components/MessageInput.jsx
 import React, { useState, useRef, useEffect, Suspense, lazy, useCallback, forwardRef, useImperativeHandle } from 'react'
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
-import { Paperclip, Smile, Send, Loader2, X, Pencil } from 'lucide-react'
+import { Paperclip, Smile, Send, Loader2, X, Pencil, Reply } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Markdown } from 'tiptap-markdown'
@@ -11,6 +11,7 @@ import useChatStore, { getRoomKey } from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import { isCompressibleImageType, compressImageFile } from '../utils/imageCompression'
 import { findLastEditableOwnMessage } from '../utils/lastEditableMessage'
+import { buildReplyPreview } from '../utils/replyPreview'
 
 // 메시지 최대 길이 — electron/ipcHandlers/message.js 의 MAX_CONTENT_LENGTH 와 동일 값을 유지.
 // 전송 전 클라이언트에서 미리 검증해, 초과 시 IPC 실패 응답을 기다리지 않고 즉시 안내한다.
@@ -69,6 +70,9 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const [pastePreview, setPastePreview] = useState(null) // null 또는 { files: [File...], previews: [{ previewUrl, fileName, fileSize }...] }
   // 수정 모드: 현재 수정 중인 메시지 객체 (null이면 일반 전송 모드)
   const [editingMessage, setEditingMessage] = useState(null)
+  // 답장 모드(#28): 현재 답장 대상 스냅샷 { id, preview: { fromName, snippet } } (null이면 답장 아님).
+  // 수정 모드와 상호배타 — startReply/startEdit 가 서로를 해제한다.
+  const [replyTarget, setReplyTarget] = useState(null)
   // placeholder 표시 여부 — TipTap Placeholder 확장(ProseMirror 데코레이션) 대신 사용.
   // 이 state 는 래퍼 div 의 속성만 바꾸고, EditorContent(React.memo)는 editor 인스턴스가
   // 바뀌지 않는 한 리렌더되지 않으므로 ProseMirror 가 관리하는 에디터 내부 DOM 에는 영향이 없다.
@@ -268,6 +272,11 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     editingMessageRef.current = editingMessage
   }, [editingMessage])
 
+  // 방 전환 시 답장 배너 해제(#28) — A 방 메시지에 대한 답장 컨텍스트가 B 방으로 새지 않게 한다.
+  useEffect(() => {
+    setReplyTarget(null)
+  }, [currentRoom])
+
   // 방을 떠날 때(전환 직전) 작성 중이던 내용을 해당 방의 draft 로 저장.
   // cleanup 클로저가 "이전" currentRoom 을 캡처하므로 정확히 떠나는 방의 roomKey 로 저장된다.
   // latestMarkdownRef 는 에디터 인스턴스와 무관한 순수 ref 라, useEditor 내부 effect(에디터 파괴)와의
@@ -347,9 +356,26 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
 
   // 수정 모드 시작 — 선택한 메시지를 에디터에 로드
   function startEdit(message) {
+    // 답장 모드와 상호배타 — 수정 시작 시 답장 배너를 해제한다.
+    setReplyTarget(null)
     setEditingMessage(message)
     editor?.commands.setContent(message.content || '')
     editor?.commands.focus()
+  }
+
+  // 답장 모드 시작(#28) — 대상 메시지의 비정규화 스냅샷을 만들어 답장 배너를 띄운다.
+  // 에디터 내용은 건드리지 않는다(작성 중이던 텍스트 보존). 수정 모드였다면 해제한다.
+  function startReply(message) {
+    if (!message) return
+    if (editingMessageRef.current) cancelEdit()
+    setReplyTarget({ id: message.id, preview: buildReplyPreview(message) })
+    editor?.commands.focus('end')
+  }
+
+  // 답장 모드 취소 — 배너만 닫고 에디터 내용은 유지한다.
+  function cancelReply() {
+    setReplyTarget(null)
+    keepEditorFocus()
   }
 
   // 수정 내용 제출 — IPC 호출 후 스토어 업데이트
@@ -395,12 +421,18 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       return
     }
 
+    // 답장(#28) — 전송 시점의 답장 대상을 스냅샷으로 보관(아래에서 즉시 배너를 지우므로).
+    // send 페이로드에 실을 optional 메타이며, IME 핵심 로직(clearContent/keepEditorFocus)과 무관.
+    const replySnapshot = replyTarget
+
     // IPC 응답을 기다린 뒤 초기화하면 사용자가 시작한 다음 한글 조합까지 지워질 수 있다.
     // 전송할 내용을 먼저 보관하고 에디터는 즉시 비워 이전 전송의 후처리가 새 입력을 건드리지 않게 한다.
     editor.commands.clearContent()
     keepEditorFocus()
     // 에디터를 비운 시점에 맞춰 해당 방의 draft 도 함께 비운다(전송 중인 내용이 draft 로 남지 않도록).
     useChatStore.getState().clearDraft(getRoomKey(currentRoom))
+    // 답장 배너도 함께 해제 — clearContent/keepEditorFocus 순서 뒤에 순수 추가(조합에 영향 없음).
+    setReplyTarget(null)
 
     setIsSending(true)
     try {
@@ -410,6 +442,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           content,
           contentType: 'text',
           format: 'markdown',
+          replyToId: replySnapshot?.id || null,
+          replyPreview: replySnapshot?.preview || null,
         })
       } else {
         sentMessage = await window.electronAPI.sendDM({
@@ -417,6 +451,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           content,
           contentType: 'text',
           format: 'markdown',
+          replyToId: replySnapshot?.id || null,
+          replyPreview: replySnapshot?.preview || null,
         })
       }
       // main 이 입력 검증 실패 시 { ok: false, error } 를 반환한다 — 스토어에 넣지 않고 안전하게 처리.
@@ -426,6 +462,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         // Enter 로 바로 재시도할 수 있게 한다. (즉시 초기화 패턴 자체는 유지 — 실패 시에만 복원)
         editor.commands.setContent(content)
         keepEditorFocus()
+        // 답장 배너도 함께 복원 — 내용과 동일하게 실패 시에만 되돌린다.
+        setReplyTarget(replySnapshot)
         return
       }
       if (currentRoom.type === 'global') useChatStore.getState().addGlobalMessage(sentMessage)
@@ -437,10 +475,11 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
       window.alert('메시지 전송에 실패했습니다.')
       editor.commands.setContent(content)
       keepEditorFocus()
+      setReplyTarget(replySnapshot)
     } finally {
       setIsSending(false)
     }
-  }, [editor, isSending, currentRoom, editingMessage, keepEditorFocus])
+  }, [editor, isSending, currentRoom, editingMessage, keepEditorFocus, replyTarget])
 
   // sendMessage를 ref에 저장 (handleKeyDown에서 참조)
   useEffect(() => {
@@ -523,10 +562,11 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     sendFiles(fileList)
   }
 
-  // 부모 컴포넌트에서 ref를 통해 handleDroppedFiles, startEdit 호출 가능하도록 노출
+  // 부모 컴포넌트에서 ref를 통해 handleDroppedFiles, startEdit, startReply 호출 가능하도록 노출
   useImperativeHandle(ref, () => ({
     handleDroppedFiles,
     startEdit,
+    startReply,
   }))
 
   function confirmPasteSend() {
@@ -593,6 +633,22 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             <Pencil size={12} />
             <span>메시지 수정 중</span>
             <button onClick={cancelEdit} className="ml-auto text-vsc-muted hover:text-red-400 cursor-pointer">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
+        {/* 답장 모드 배너(#28) — 답장 중일 때만 표시(수정 모드와 상호배타). "○○에게 답장" + 스니펫 + 취소. */}
+        {replyTarget && !editingMessage && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-vsc-panel border-b border-vsc-border text-xs">
+            <Reply size={12} className="shrink-0 text-vsc-accent" />
+            <span className="text-vsc-accent font-semibold shrink-0">
+              {replyTarget.preview?.fromName || '알 수 없음'}에게 답장
+            </span>
+            <span className="text-vsc-muted truncate min-w-0">
+              {replyTarget.preview?.snippet}
+            </span>
+            <button onClick={cancelReply} aria-label="답장 취소" className="ml-auto shrink-0 text-vsc-muted hover:text-red-400 cursor-pointer">
               <X size={14} />
             </button>
           </div>

@@ -1,7 +1,8 @@
 // src/components/Message.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, Pencil, Loader2, Download, FolderOpen } from 'lucide-react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, Pencil, Loader2, Download, FolderOpen, Reply } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
+import { parseReplyPreview } from '../utils/replyPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
 import ImageLightbox from './message/ImageLightbox'
@@ -138,7 +139,7 @@ function getBookmarkPreview(message, contentType, fileName) {
     : content
 }
 
-function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
+function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   // 리액션 — 스토어의 reactions 맵을 구독 (하이드레이션 + 실시간 갱신 반영)
@@ -160,6 +161,14 @@ function Message({ message, onStartEdit, isHighlighted = false, isGrouped = fals
   const contentType = message.contentType || message.content_type
   const fileUrl = message.fileUrl || message.file_url
   const fileName = message.fileName || message.file_name
+
+  // 답장(#28) — 원본 messageId + 비정규화 인용 스냅샷. 라이브(camelCase)/DB(snake_case,
+  // reply_preview 는 JSON 문자열) 양쪽 경로를 모두 허용한다. 필드가 없으면 인용 미표시(하위호환).
+  const replyToId = message.replyToId || message.reply_to_id || null
+  const replyPreview = useMemo(
+    () => parseReplyPreview(message.replyPreview ?? message.reply_preview),
+    [message.replyPreview, message.reply_preview]
+  )
 
   // 텍스트 메시지에서 첫 번째 URL 추출 (링크 프리뷰용)
   const firstUrl = useMemo(() => {
@@ -273,6 +282,24 @@ function Message({ message, onStartEdit, isHighlighted = false, isGrouped = fals
           </div>
           )}
 
+          {/* 답장 인용 블록(#28) — reply_to_id 가 있으면 말풍선 위에 원본 발신자+스니펫 표시.
+              클릭 시 원본이 화면(DOM)에 있으면 스크롤+하이라이트, 없으면 조용히 무시(ChatWindow). */}
+          {replyToId && replyPreview && (
+            <button
+              type="button"
+              onClick={() => onQuoteClick?.(replyToId)}
+              title="원본 메시지로 이동"
+              className={`flex flex-col gap-0.5 mb-1 max-w-full text-left border-l-2 border-vsc-accent bg-vsc-panel/60 rounded px-2 py-1 hover:bg-vsc-hover cursor-pointer transition-colors ${isMyMessage ? 'items-end' : 'items-start'}`}
+            >
+              <span className="text-xs font-semibold text-vsc-accent truncate max-w-full">
+                {replyPreview.fromName}
+              </span>
+              <span className="text-xs text-vsc-muted truncate max-w-full">
+                {replyPreview.snippet || '내용 없음'}
+              </span>
+            </button>
+          )}
+
           {/* 메시지 내용 + 리액션 버튼 (말풍선 옆) */}
           <div className={`flex items-center gap-1 ${isMyMessage ? 'flex-row-reverse' : ''}`}>
             {/* 복호화 실패 메시지 — 키 교환 이전에 보내졌거나 손상된 DM. 빈 말풍선 대신 안내 표시 */}
@@ -364,6 +391,18 @@ function Message({ message, onStartEdit, isHighlighted = false, isGrouped = fals
 
             {/* 액션 버튼 (말풍선 옆) */}
             <div className="flex items-center gap-0.5 shrink-0">
+              {/* 답장 버튼(#28) — 복호화 실패가 아닌 모든 메시지(내/상대)에 대해 답장 가능.
+                  클릭 시 부모(ChatWindow→MessageInput)로 답장 대상 전달. */}
+              {!message.decryptionFailed && (
+                <button
+                  onClick={() => onReply?.(message)}
+                  aria-label="답장"
+                  title="답장"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                >
+                  <Reply size={12} />
+                </button>
+              )}
               {/* 메시지 복사 버튼 — 텍스트 메시지의 마크다운 원문을 클립보드로 복사 */}
               {!message.decryptionFailed && (contentType === 'text' || !contentType) && (
                 <CopyButton
@@ -460,8 +499,9 @@ function Message({ message, onStartEdit, isHighlighted = false, isGrouped = fals
   )
 }
 
-// React.memo — ChatWindow 가 넘기는 props(message/onStartEdit/isHighlighted/isGrouped/
-// extraImages/searchQuery)가 얕은 비교로 동일하면 부모 리렌더 시에도 다시 그리지 않는다.
-// onStartEdit 는 useCallback, extraImages 는 구조 memo(빈 배열은 공유 상수)로 참조가 안정화돼 있어
-// 새 메시지 도착/무관한 피어 변화 시 기존 메시지들이 리렌더되지 않는다.
+// React.memo — ChatWindow 가 넘기는 props(message/onStartEdit/onReply/onQuoteClick/
+// isHighlighted/isGrouped/extraImages/searchQuery)가 얕은 비교로 동일하면 부모 리렌더 시에도
+// 다시 그리지 않는다. onStartEdit/onReply/onQuoteClick 는 useCallback, extraImages 는 구조
+// memo(빈 배열은 공유 상수)로 참조가 안정화돼 있어 새 메시지 도착/무관한 피어 변화 시 기존
+// 메시지들이 리렌더되지 않는다.
 export default React.memo(Message)
