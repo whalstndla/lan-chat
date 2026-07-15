@@ -8,7 +8,9 @@ import { Markdown } from 'tiptap-markdown'
 import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
 import useChatStore, { getRoomKey } from '../store/useChatStore'
+import useUserStore from '../store/useUserStore'
 import { isCompressibleImageType, compressImageFile } from '../utils/imageCompression'
+import { findLastEditableOwnMessage } from '../utils/lastEditableMessage'
 
 // 메시지 최대 길이 — electron/ipcHandlers/message.js 의 MAX_CONTENT_LENGTH 와 동일 값을 유지.
 // 전송 전 클라이언트에서 미리 검증해, 초과 시 IPC 실패 응답을 기다리지 않고 즉시 안내한다.
@@ -74,6 +76,10 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const fileInputRef = useRef(null)
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
+  // 이모지 피커 바깥 클릭 감지용 ref(#40) — 피커 컨테이너와 토글 버튼 둘 다 클릭 영역에서
+  // 제외해야 토글 버튼으로 닫을 때 "닫혔다가 다시 열리는" 깜빡임이 생기지 않는다.
+  const emojiPickerRef = useRef(null)
+  const emojiButtonRef = useRef(null)
   // 붙여넣기 미리보기 항목 고유 id 발급용 카운터 — 압축 예상 크기 비동기 계산 결과를
   // 정확한 항목에 반영하기 위해 index 대신 고유 id 로 매칭한다(연속 붙여넣기/제거 시에도 안전).
   const pastePreviewIdCounterRef = useRef(0)
@@ -207,6 +213,19 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           sendMessageRef.current?.()
           return true
         }
+        // ↑ 로 마지막 내 메시지 불러와 수정(#40). 입력창이 완전히 비어있고, 이미 다른 메시지를
+        // 수정 중이 아닐 때만 발동한다. 위 조합 가드를 통과한 뒤에만 이 코드에 도달하므로
+        // 한글 등 IME 조합 중에는 Enter 전송과 동일하게 절대 발동하지 않는다.
+        if (event.key === 'ArrowUp' && !editingMessageRef.current && view.state.doc.textContent.length === 0) {
+          const { globalMessages, dmMessages } = useChatStore.getState()
+          const roomMessages = currentRoom.type === 'global' ? globalMessages : (dmMessages[currentRoom.peerId] || [])
+          const lastOwnMessage = findLastEditableOwnMessage(roomMessages, useUserStore.getState().myPeerId)
+          if (lastOwnMessage) {
+            event.preventDefault()
+            startEdit(lastOwnMessage)
+            return true
+          }
+        }
         return false
       },
     },
@@ -296,6 +315,35 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [editor])
+
+  // 이모지 피커 바깥 클릭 시 닫기(#40). 토글 버튼 자체는 클릭 영역에서 제외해야 한다 — 안 그러면
+  // 버튼 클릭 시 mousedown 에서 먼저 닫히고 뒤이은 click 의 토글 핸들러가 다시 열어버려서
+  // "버튼으로는 못 닫는" 깜빡임이 생긴다.
+  useEffect(() => {
+    if (!showEmojiPicker) return
+    const handleOutsideClick = (event) => {
+      if (emojiPickerRef.current?.contains(event.target)) return
+      if (emojiButtonRef.current?.contains(event.target)) return
+      setShowEmojiPicker(false)
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [showEmojiPicker])
+
+  // Esc 로 메시지 수정 취소(#40). IME 조합 중에는 절대 취소하지 않는다 — 한글 조합을 취소하려고
+  // 누른 Esc 를 편집 취소로 오인하면 안 되므로, Enter 전송과 동일한 조합 가드를 그대로 재사용한다.
+  // 붙여넣기 미리보기가 열려 있으면 그쪽 Esc 처리(PastePreviewDialog)를 우선하고 여기서는 무시한다.
+  useEffect(() => {
+    if (!editingMessage) return
+    const handleEscKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      if (editor?.view?.composing || event.isComposing || event.keyCode === 229) return
+      if (pastePreview) return
+      cancelEdit()
+    }
+    window.addEventListener('keydown', handleEscKeyDown)
+    return () => window.removeEventListener('keydown', handleEscKeyDown)
+  }, [editingMessage, pastePreview, editor])
 
   // 수정 모드 시작 — 선택한 메시지를 에디터에 로드
   function startEdit(message) {
@@ -521,7 +569,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     <div className="px-4 pb-4 pt-2 shrink-0 relative">
       {/* 이모지 피커 */}
       {showEmojiPicker && (
-        <div className="absolute bottom-16 right-4 z-10">
+        <div ref={emojiPickerRef} className="absolute bottom-16 right-4 z-10">
           <Suspense fallback={null}>
             <EmojiPicker onEmojiClick={onEmojiSelect} theme="dark" height={380} searchPlaceholder="이모지 검색..." />
           </Suspense>
@@ -571,7 +619,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             className="cursor-pointer p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150">
             <Paperclip size={16} />
           </button>
-          <button onMouseDown={(event) => event.preventDefault()} onClick={() => setShowEmojiPicker(prev => !prev)} aria-label="이모지 선택" title="이모지"
+          <button ref={emojiButtonRef} onMouseDown={(event) => event.preventDefault()} onClick={() => setShowEmojiPicker(prev => !prev)} aria-label="이모지 선택" title="이모지"
             className={`cursor-pointer p-1.5 rounded transition-colors duration-150 ${showEmojiPicker ? 'text-vsc-accent bg-vsc-hover' : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'}`}>
             <Smile size={16} />
           </button>
