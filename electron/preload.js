@@ -3,6 +3,10 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // 플랫폼 정보(#72) — win/linux 타이틀바 분기(App.jsx TitleBar 신호등 여백 제거)용.
+  // 실행 중 값이 바뀌지 않는 정적 문자열이라 함수가 아닌 값 그대로 노출한다.
+  platform: process.platform,
+
   // 인증
   checkProfileExists: () => ipcRenderer.invoke('check-profile-exists'),
   register: (data) => ipcRenderer.invoke('register', data),

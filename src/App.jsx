@@ -12,6 +12,9 @@ import PatchNotes from './components/PatchNotes'
 import KeyChangeWarningModal from './components/KeyChangeWarningModal'
 
 // macOS hiddenInset 타이틀바: 트래픽 라이트(80×38px) 안전 영역 + 드래그 핸들
+// win/linux 는 네이티브 프레임을 그대로 쓰므로(main.js #72 분기) 신호등 여백이 필요 없다.
+const isMac = window.electronAPI.platform === 'darwin'
+
 function TitleBar({ nickname, updateState, onCheckUpdate }) {
   const handleRightButtonClick = () => {
     if (updateState === 'downloaded') {
@@ -44,8 +47,8 @@ function TitleBar({ nickname, updateState, onCheckUpdate }) {
       style={{ WebkitAppRegion: 'drag', height: '38px' }}
       className="shrink-0 bg-vsc-sidebar border-b border-vsc-border flex items-center justify-between pr-3"
     >
-      {/* 좌측: 트래픽 라이트 안전 영역(pl-20) 후 앱 타이틀 */}
-      <div className="flex items-center gap-2 pl-20 select-none">
+      {/* 좌측: macOS 는 트래픽 라이트 안전 영역(pl-20), win/linux 는 네이티브 프레임이라 여백 불필요(#72) */}
+      <div className={`flex items-center gap-2 ${isMac ? 'pl-20' : 'pl-3'} select-none`}>
         <img src={logoImage} alt="LAN Chat" className="w-4 h-4 object-contain shrink-0" />
         <span className="text-vsc-text text-xs font-semibold">LAN Chat</span>
         {nickname && <span className="text-vsc-muted text-xs">— {nickname}</span>}
