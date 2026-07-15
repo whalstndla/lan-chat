@@ -53,7 +53,9 @@ function initDatabase(dbPath, masterKey) {
       file_url          TEXT,
       file_name         TEXT,
       timestamp         INTEGER NOT NULL,
-      format            TEXT
+      format            TEXT,
+      reply_to_id       TEXT,
+      reply_preview     TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
     CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type, from_id, to_id);
@@ -98,6 +100,10 @@ function migrateDatabase(db) {
     'ALTER TABLE messages ADD COLUMN format TEXT',
     'ALTER TABLE messages ADD COLUMN edited_at INTEGER',
     'ALTER TABLE messages ADD COLUMN cached_file_path TEXT',
+    // 답장/인용(#28) — 원본 messageId + 비정규화 미리보기 스냅샷(JSON 문자열).
+    // additive 하위호환: 구버전 클라이언트는 이 컬럼/필드를 무시한다.
+    'ALTER TABLE messages ADD COLUMN reply_to_id TEXT',
+    'ALTER TABLE messages ADD COLUMN reply_preview TEXT',
   ]
   for (const sql of messagesMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }

@@ -2,9 +2,15 @@
 function saveMessage(db, message) {
   db.prepare(`
     INSERT OR IGNORE INTO messages
-    (id, type, from_id, from_name, to_id, content, content_type, encrypted_payload, file_url, file_name, timestamp, format)
-    VALUES (@id, @type, @from_id, @from_name, @to_id, @content, @content_type, @encrypted_payload, @file_url, @file_name, @timestamp, @format)
-  `).run({ ...message, format: message.format || null })
+    (id, type, from_id, from_name, to_id, content, content_type, encrypted_payload, file_url, file_name, timestamp, format, reply_to_id, reply_preview)
+    VALUES (@id, @type, @from_id, @from_name, @to_id, @content, @content_type, @encrypted_payload, @file_url, @file_name, @timestamp, @format, @reply_to_id, @reply_preview)
+  `).run({
+    ...message,
+    format: message.format || null,
+    // 답장(#28) — 미지정 시 null 로 정규화(구버전/일반 메시지 호환). reply_preview 는 JSON 문자열.
+    reply_to_id: message.reply_to_id || null,
+    reply_preview: message.reply_preview || null,
+  })
 
   // FTS5 동기화(INSERT/UPDATE/DELETE)는 database.js 의 messages_fts_after_* 트리거가
   // 전담한다. 과거엔 여기서 수동으로 INSERT 했으나, 트리거와 병행하면 동일 rowid 를
