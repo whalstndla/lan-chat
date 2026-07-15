@@ -149,6 +149,21 @@ function migrateDatabase(db) {
     );
   `)
 
+  // TOFU(Trust On First Use) 키 고정(#59) — peerId 별 최초 공개키를 고정 저장한다.
+  // hello 수신 시 이 테이블과 대조해, 알려진 peerId 의 키가 바뀌면 조용히 덮어쓰지 않고
+  // 사용자 재확인(경고)을 거치게 한다. CREATE TABLE IF NOT EXISTS 라 기존 DB 에도 additive
+  // 하게 추가되며 별도 데이터 마이그레이션이 필요 없다.
+  //   first_seen : 최초 고정 시각(ms) — 지문/신뢰 이력 표시용.
+  //   verified   : 대면 지문(안전 번호) 비교로 사용자가 명시적으로 검증했는지(0/1).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS peer_keys (
+      peer_id    TEXT PRIMARY KEY,
+      public_key TEXT NOT NULL,
+      first_seen INTEGER NOT NULL,
+      verified   INTEGER NOT NULL DEFAULT 0
+    );
+  `)
+
   // 방별 마지막 읽은 지점(타임스탬프) — 안읽음 구분선을 재시작 후에도 유지하기 위한 영속
   // 저장소(#39). room_key 는 전체채팅이면 'global', DM 이면 상대 peerId — 렌더러의
   // getRoomKey() 규약과 동일하게 맞춰 별도 매핑 없이 그대로 키로 사용한다.

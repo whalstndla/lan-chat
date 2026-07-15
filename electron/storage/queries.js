@@ -301,4 +301,35 @@ function deletePeerCache(db, peerId) {
   db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }
+// TOFU 키 고정(#59) — peerId 에 고정된 공개키 레코드 조회. 없으면 null.
+// verified 는 boolean 으로 정규화해 반환한다.
+function getPinnedKey(db, peerId) {
+  const row = db.prepare(
+    'SELECT peer_id AS peerId, public_key AS publicKey, first_seen AS firstSeen, verified FROM peer_keys WHERE peer_id = ?'
+  ).get(peerId)
+  if (!row) return null
+  return { peerId: row.peerId, publicKey: row.publicKey, firstSeen: row.firstSeen, verified: !!row.verified }
+}
+
+// TOFU 최초 고정 — 아직 고정된 키가 없을 때만 저장한다(INSERT OR IGNORE).
+// 여러 피어가 동시에 hello 를 보내는 최초 연결 러시에서도 이미 고정된 키를
+// 실수로 덮어쓰지 않도록 IGNORE 로 멱등하게 만든다.
+function pinKey(db, { peerId, publicKey, firstSeen, verified = 0 }) {
+  db.prepare(`
+    INSERT OR IGNORE INTO peer_keys (peer_id, public_key, first_seen, verified)
+    VALUES (?, ?, ?, ?)
+  `).run(peerId, publicKey, firstSeen, verified ? 1 : 0)
+}
+
+// TOFU 고정 키 교체 — 사용자가 키 변경을 명시적으로 승인(trust-peer-key)했을 때만 호출한다.
+// 새 키는 아직 대면 검증 전이므로 verified 를 0 으로 리셋한다(안전 번호 비교는 별도 단계).
+function updatePinnedKey(db, { peerId, publicKey }) {
+  db.prepare('UPDATE peer_keys SET public_key = ?, verified = 0 WHERE peer_id = ?').run(publicKey, peerId)
+}
+
+// 대면 지문(안전 번호) 검증 여부 갱신 — 사용자가 상대와 지문을 직접 비교해 확인한 경우.
+function setVerified(db, peerId, verified) {
+  db.prepare('UPDATE peer_keys SET verified = ? WHERE peer_id = ?').run(verified ? 1 : 0, peerId)
+}
+
+module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache, getPinnedKey, pinKey, updatePinnedKey, setVerified }
