@@ -12,16 +12,30 @@ const { rewriteFileUrl } = require('../utils/appUtils')
 // DM 검색 결과 목록에 노출할 최대 건수 — 전역 searchMessages() 의 기본 limit(50)과 동일하게 맞춘다.
 const DM_SEARCH_RESULT_LIMIT = 50
 
-// DM 메시지 레코드 하나를 복호화 — get-dm-history / search-dm-messages 공용 로직.
-// peerId1 = 나, peerId2 = 상대방. encrypted_payload 가 없거나 상대 공개키를 모르면
-// (레거시 평문 DM 또는 키 교환 이전 오프라인 캐시) 원본 그대로 반환한다.
-function decryptDMRecord(ctx, msg, peerId1, peerId2) {
-  const readFlag = !!msg.read
+// peerId2(상대)의 공개키로 공유 비밀키를 1회 도출 — get-dm-history / search-dm-messages 는
+// 같은 상대와의 메시지 여러 건을 순회하므로, 호출부에서 루프 진입 전 한 번만 계산해
+// decryptDMRecord 에 인자로 넘긴다(메시지마다 동일 키를 반복 도출하지 않도록). 공개키가
+// 없거나 도출에 실패하면 null 을 반환해 decryptDMRecord 가 평문 fallback 경로를 타게 한다.
+function deriveSharedSecretForPeer(ctx, peerId2) {
   const otherPublicKey = ctx.state.peerPublicKeyMap.get(peerId2)
+  if (!otherPublicKey) return null
+  try {
+    return deriveSharedSecret(ctx.state.myPrivateKey, otherPublicKey)
+  } catch (err) {
+    console.warn(`[히스토리] sharedSecret 도출 실패: peerId=${peerId2}`, err.message)
+    return null
+  }
+}
 
-  if (msg.encrypted_payload && otherPublicKey) {
+// DM 메시지 레코드 하나를 복호화 — get-dm-history / search-dm-messages 공용 로직.
+// peerId1 = 나, peerId2 = 상대방. sharedSecret 은 호출부에서 미리 도출해 전달한다(루프 밖 1회 도출).
+// encrypted_payload 가 없거나 sharedSecret 이 없으면(레거시 평문 DM 또는 키 교환 이전
+// 오프라인 캐시, 혹은 공유키 도출 실패) 원본 그대로 반환한다.
+function decryptDMRecord(ctx, msg, peerId1, peerId2, sharedSecret) {
+  const readFlag = !!msg.read
+
+  if (msg.encrypted_payload && sharedSecret) {
     try {
-      const sharedSecret = deriveSharedSecret(ctx.state.myPrivateKey, otherPublicKey)
       let decryptedPayload
 
       // 송신자/수신자 peerId를 정확하게 전달 (HKDF 키 도출에 사용)
@@ -55,7 +69,7 @@ function decryptDMRecord(ctx, msg, peerId1, peerId2) {
         fileName: decryptedPayload.fileName || msg.file_name,
       }
     } catch (err) {
-      console.warn(`[히스토리] sharedSecret 도출 실패: msgId=${msg.id}`, err.message)
+      console.warn(`[히스토리] 복호화 처리 실패: msgId=${msg.id}`, err.message)
     }
   }
   return { ...msg, read: readFlag, file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id) }
@@ -76,7 +90,9 @@ function registerHistoryHandlers(ctx) {
   // DM 기록 조회 (복호화 포함)
   ipcMain.handle('get-dm-history', (_, { peerId1, peerId2, limit, offset }) => {
     const history = getDMHistory(ctx.state.database, peerId1, peerId2, limit || 100, offset || 0)
-    return history.map(msg => decryptDMRecord(ctx, msg, peerId1, peerId2))
+    // 상대(peerId2)가 고정이므로 공유키는 루프 밖에서 1회만 도출해 재사용한다.
+    const sharedSecret = deriveSharedSecretForPeer(ctx, peerId2)
+    return history.map(msg => decryptDMRecord(ctx, msg, peerId1, peerId2, sharedSecret))
   })
 
   // 과거 DM 상대 목록 조회 (오프라인 포함)
@@ -96,10 +112,12 @@ function registerHistoryHandlers(ctx) {
     const myPeerId = ctx.state.peerId
     const lowerQuery = query.trim().toLowerCase()
     const records = getAllDMMessagesForSearch(ctx.state.database, myPeerId, peerId)
+    // 상대(peerId)가 고정이므로 공유키는 루프 밖에서 1회만 도출해 재사용한다.
+    const sharedSecret = deriveSharedSecretForPeer(ctx, peerId)
 
     const results = []
     for (const record of records) {
-      const decrypted = decryptDMRecord(ctx, record, myPeerId, peerId)
+      const decrypted = decryptDMRecord(ctx, record, myPeerId, peerId, sharedSecret)
       if (decrypted.decryptionFailed) continue
 
       const content = decrypted.content || ''

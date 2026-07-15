@@ -16,6 +16,13 @@ jest.mock('electron', () => {
   }
 })
 
+// deriveSharedSecret 을 jest.fn 으로 감싸 실제 구현은 그대로 두고 호출 횟수만 추적한다.
+// get-dm-history 가 상대(peerId2)당 공유키를 루프 밖에서 1회만 도출하는지(호이스트) 검증하는 데 사용.
+jest.mock('../../electron/crypto/encryption', () => {
+  const actual = jest.requireActual('../../electron/crypto/encryption')
+  return { ...actual, deriveSharedSecret: jest.fn(actual.deriveSharedSecret) }
+})
+
 const { __handlers } = require('electron')
 const { initDatabase, migrateDatabase, closeDatabase } = require('../../electron/storage/database')
 const { saveMessage, editMessage } = require('../../electron/storage/queries')
@@ -116,6 +123,74 @@ describe('get-dm-history — 수정된 DM 메시지 표시', () => {
     const result = handler(null, { peerId1: 'peer1', peerId2: 'peer2' })
 
     expect(result[0].content).toBe('수정 안 한 메시지')
+  })
+})
+
+// Phase 4.5 — get-dm-history 성능 호이스트: 상대(peerId2)가 고정인 한 번의 조회에서는
+// deriveSharedSecret(ECDH 공유키 도출)을 메시지 개수와 무관하게 1회만 호출해야 한다.
+describe('get-dm-history — 공유키 도출 호이스트 (Phase 4.5)', () => {
+  let db
+  const peer1 = generateKeyPair()
+  const peer2 = generateKeyPair()
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    __handlers.clear()
+  })
+
+  afterEach(() => closeDatabase(db))
+
+  function buildCtx() {
+    return {
+      state: {
+        database: db,
+        peerId: 'peer1',
+        myPrivateKey: peer1.privateKey,
+        peerPublicKeyMap: new Map([['peer2', peer2.publicKey]]),
+        localIP: 'localhost',
+      },
+    }
+  }
+
+  it('메시지가 여러 건이어도 공유키는 1회만 도출하고, 각 메시지는 호이스트 전과 동일하게 복호화된다', () => {
+    const ctx = buildCtx()
+    const sharedSecret = deriveSharedSecret(peer1.privateKey, peer2.publicKey)
+
+    const messageCount = 5
+    for (let i = 0; i < messageCount; i++) {
+      const encryptedPayload = encryptDM(
+        { content: `메시지 ${i}`, contentType: 'text', fileUrl: null, fileName: null },
+        sharedSecret,
+        'peer1',
+        'peer2'
+      )
+      saveMessage(db, {
+        id: `dm-${i}`,
+        type: 'dm',
+        from_id: 'peer1',
+        from_name: '나',
+        to_id: 'peer2',
+        content: null,
+        content_type: 'text',
+        encrypted_payload: encryptedPayload,
+        file_url: null,
+        file_name: null,
+        timestamp: 1000 + i,
+      })
+    }
+
+    // 픽스처 생성 과정에서 발생한 호출은 제외하고, 핸들러 호출만 카운트한다.
+    deriveSharedSecret.mockClear()
+
+    registerHistoryHandlers(ctx)
+    const handler = __handlers.get('get-dm-history')
+    const result = handler(null, { peerId1: 'peer1', peerId2: 'peer2' })
+
+    expect(result).toHaveLength(messageCount)
+    result.forEach((msg, i) => expect(msg.content).toBe(`메시지 ${i}`))
+    // 100건이든 5건이든 상대가 고정이면 도출은 1회 — 루프 밖 호이스트 검증.
+    expect(deriveSharedSecret).toHaveBeenCalledTimes(1)
   })
 })
 
