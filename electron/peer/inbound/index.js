@@ -18,6 +18,10 @@ const editMessageHandler = require('./handlers/edit')
 const fileRequest = require('./handlers/fileRequest')
 const fileData = require('./handlers/fileData')
 const fileRequestError = require('./handlers/fileRequestError')
+const fileChunkStart = require('./handlers/fileChunkStart')
+const fileChunk = require('./handlers/fileChunk')
+const fileChunkEnd = require('./handlers/fileChunkEnd')
+const fileCancel = require('./handlers/fileCancel')
 const keyExchange = require('./handlers/keyExchange')
 const hello = require('./handlers/hello')
 const dm = require('./handlers/dm')
@@ -38,6 +42,11 @@ const HANDLERS = {
   'file-request': fileRequest,
   'file-data': fileData,
   'file-request-error': fileRequestError,
+  // 청크 스트리밍 전송 (#44/#45/#49). 화이트리스트에 없는 구버전은 drop = 레거시 file-data 로 폴백.
+  'file-chunk-start': fileChunkStart,
+  'file-chunk': fileChunk,
+  'file-chunk-end': fileChunkEnd,
+  'file-cancel': fileCancel,
   'key-exchange': keyExchange,       // v1 (현재 기본 전송 포맷)
   'hello': hello,                    // v2 (수신 지원만, 송신은 v0.9.0부터)
   'dm': dm,

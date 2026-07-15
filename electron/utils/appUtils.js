@@ -40,7 +40,7 @@ function getMyAdvertisedAddresses(ctx) {
 // Phase 1c: v2 hello 페이로드 생성 (wire.buildHello 래핑).
 // 기존 buildMyKeyExchangePayload 는 v0.8.0 부터 v2 hello 를 반환 —
 // 호환성을 위해 이름은 유지하지만 내부적으로 v2 포맷으로 송신.
-const { buildHello } = require('../peer/wire')
+const { buildHello, negotiateCapabilities } = require('../peer/wire')
 
 function buildMyHelloPayload(ctx, currentPeerId, nickname) {
   return buildHello({
@@ -425,9 +425,25 @@ function sweepOrphanedFileCache(ctx) {
   return { removed }
 }
 
-// 파일 송수신 사이즈 한도 — wsServer.MAX_PAYLOAD_BYTES 와 base64 오버헤드(1.33x) 를
-// 고려해 raw 150MB 까지 단발 전송 허용. 그 이상은 send-file IPC 에서 사전 차단.
+// 레거시 단발 file-data 사이즈 한도 — wsServer.MAX_PAYLOAD_BYTES 와 base64 오버헤드(1.33x) 를
+// 고려해 raw 150MB 까지 단발 전송 허용. 구버전(청크 미지원) 피어에게 보낼 때의 상한이다.
 const MAX_RAW_FILE_BYTES = 150 * 1024 * 1024
+
+// 청크 전송(#44/#45/#49) 사이즈 한도 — 청크화로 단일 프레임 제약이 사라지므로 상향한다.
+// 단 무한대는 금지(송/수신 모두 전체 평문을 메모리에 1회 올리므로) — 1GB 로 제한.
+// save-file IPC 업로드 가드와 청크 경로(fileRequest → sendFileAsChunks) 상한으로 쓰인다.
+const MAX_CHUNKED_FILE_BYTES = 1024 * 1024 * 1024
+
+// 협상된 capability 조회 — 상대가 해당 기능을 지원하고(원격 hello) 나도 지원하면(LOCAL) true.
+// peerManager 세션의 remoteCapabilities 를 LOCAL_CAPABILITIES 와 교집합해 판정한다.
+// peerManager/세션이 없으면(협상 정보 없음) 안전하게 false → 레거시 경로로 폴백.
+function peerSupportsCapability(ctx, peerId, capability) {
+  if (!ctx.state.peerManager) return false
+  const session = ctx.state.peerManager.getSession(peerId)
+  if (!session) return false
+  const remoteCapabilities = session.handshake?.remoteCapabilities || []
+  return negotiateCapabilities(remoteCapabilities).includes(capability)
+}
 
 // 파일 재요청 백오프 (ms). 메시지 손실·키 도착 지연·임시 연결 불안정에 대비.
 // 한 번에 끝내지 않고 점진적으로 retry → 사용자가 오래 기다리지 않으면서도
@@ -576,6 +592,8 @@ module.exports = {
   requestFileViaWebSocket,
   clearPendingFileRequest,
   clearAllPendingFileRequests,
+  peerSupportsCapability,
   MAX_RAW_FILE_BYTES,
+  MAX_CHUNKED_FILE_BYTES,
   FILE_REQUEST_RETRY_DELAYS_MS,
 }

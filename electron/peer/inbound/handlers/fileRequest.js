@@ -4,10 +4,11 @@
 
 const path = require('path')
 const fs = require('fs')
-const { sendPeerMessage, MAX_RAW_FILE_BYTES } = require('../../../utils/appUtils')
+const { sendPeerMessage, peerSupportsCapability, MAX_RAW_FILE_BYTES, MAX_CHUNKED_FILE_BYTES } = require('../../../utils/appUtils')
 const { decryptBuffer, isEncryptedFile } = require('../../../crypto/fileEncryption')
 const { deriveSharedSecret } = require('../../../crypto/encryption')
 const { encryptFileForPeer } = require('../../../crypto/peerFileTransfer')
+const { sendFileAsChunks } = require('../../fileChunkTransfer')
 const { getFileCache } = require('../../../storage/queries')
 const { writePeerDebugLog } = require('../../../utils/peerDebugLogger')
 
@@ -65,19 +66,37 @@ module.exports = function handleFileRequest({ message, ctx }) {
     return
   }
 
-  // 파일 사이즈 사전 가드 — 전송 시도 자체가 wsServer maxPayload 를 초과해
-  // 연결을 끊을 가능성이 있는 거대 파일은 거부 (모든 retry 도 무의미).
+  // 청크 지원 협상 여부 — 요청자가 'file-chunk' 를 협상했으면 청크 스트리밍, 아니면 레거시 폴백.
+  // 협상 정보가 없으면(peerManager/세션 없음, 구버전 피어) 안전하게 레거시 경로를 택한다.
+  const useChunk = peerSupportsCapability(ctx, requesterPeerId, 'file-chunk')
+  // 청크 경로는 단일 프레임 제약이 없어 더 큰 상한(1GB)을, 레거시는 단발 한도(150MB)를 적용.
+  const sizeLimit = useChunk ? MAX_CHUNKED_FILE_BYTES : MAX_RAW_FILE_BYTES
+
+  // 파일 사이즈 사전 가드 — 상한 초과 파일은 거부 (레거시는 wsServer maxPayload 초과로 연결이
+  // 끊기고, 청크는 메모리 폭증을 유발하므로 양쪽 다 사전 차단하는 것이 안전).
   try {
     const stat = fs.statSync(filePath)
-    // 평문 크기 추정: 암호화 envelope 인 경우 HEADER_BYTES(33) 만큼 더 큰 디스크 크기 → 빼서 raw 추정.
-    // 보수적으로 raw 한도 + ECDH iv/tag 28바이트 여유까지만 허용.
-    if (stat.size > MAX_RAW_FILE_BYTES + 1024) {
-      writePeerDebugLog('inbound.fileRequest.tooLarge', { messageId, fileName, size: stat.size, maxRaw: MAX_RAW_FILE_BYTES })
+    // 평문 크기 추정: 암호화 envelope 인 경우 HEADER_BYTES(33) 만큼 더 큰 디스크 크기 → iv/tag 여유 포함.
+    if (stat.size > sizeLimit + 1024) {
+      writePeerDebugLog('inbound.fileRequest.tooLarge', { messageId, fileName, size: stat.size, sizeLimit, useChunk })
       replyError(ctx, requesterPeerId, messageId, 'tooLarge')
       return
     }
   } catch { /* stat 실패 시 송신 시도 (정상 케이스에서는 발생 안 함) */ }
 
+  if (useChunk) {
+    // 청크 스트리밍 — 비동기로 파일을 읽어(루프 블로킹 회피) 1MB 단위로 흘려보낸다.
+    // sendFileAsChunks 는 내부에서 try/catch/finally 로 실패 시 file-request-error(sendError) 를
+    // 보내므로 여기서는 fire-and-forget 하되 방어적으로 catch 만 붙인다.
+    writePeerDebugLog('inbound.fileRequest.chunkStart', { messageId, fileName, toId: requesterPeerId })
+    Promise.resolve(sendFileAsChunks(ctx, { requesterPeerId, messageId, fileName, filePath }))
+      .catch((err) => {
+        writePeerDebugLog('inbound.fileRequest.chunkError', { messageId, error: err?.message })
+      })
+    return
+  }
+
+  // 레거시 단발 file-data 경로 (구버전 피어 폴백) — 기존 동작 그대로 보존.
   try {
     const raw = fs.readFileSync(filePath)
     const plaintext = isEncryptedFile(raw)

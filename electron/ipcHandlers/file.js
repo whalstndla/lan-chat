@@ -9,7 +9,8 @@ const { v4: uuidv4 } = require('uuid')
 const { getFileCache, getFileForDownload } = require('../storage/queries')
 const { getFilePort } = require('../peer/fileServer')
 const { encryptBuffer, decryptBuffer, isEncryptedFile } = require('../crypto/fileEncryption')
-const { MAX_RAW_FILE_BYTES } = require('../utils/appUtils')
+const { MAX_CHUNKED_FILE_BYTES } = require('../utils/appUtils')
+const { cancelInboundTransferByMessageId } = require('../peer/fileChunkTransfer')
 const { resolveDownloadFileName } = require('../utils/downloadUtils')
 
 function registerFileHandlers(ctx) {
@@ -24,11 +25,12 @@ function registerFileHandlers(ctx) {
       if (!ctx.state.masterKey) {
         return { ok: false, error: 'noMasterKey' }
       }
-      // 사이즈 사전 차단 — wsServer maxPayload 를 초과할 거대 파일은 보내봐야 수신측 연결만
-      // 끊김. 사용자에게 즉시 알려서 송신 시도를 막는다.
+      // 사이즈 사전 차단 — 청크 전송(#44/#45/#49)으로 단발 프레임 제약이 사라져 상한을 1GB 로
+      // 상향했다. 청크 미지원(구버전) 피어가 요청하면 fileRequest 핸들러가 레거시 한도(150MB)를
+      // 초과분에 대해 tooLarge 로 거부하므로, 업로드 자체는 청크 상한까지 허용한다.
       const byteLength = fileBuffer?.byteLength ?? fileBuffer?.length ?? 0
-      if (byteLength > MAX_RAW_FILE_BYTES) {
-        return { ok: false, error: 'tooLarge', maxBytes: MAX_RAW_FILE_BYTES, size: byteLength }
+      if (byteLength > MAX_CHUNKED_FILE_BYTES) {
+        return { ok: false, error: 'tooLarge', maxBytes: MAX_CHUNKED_FILE_BYTES, size: byteLength }
       }
       const ext = path.extname(fileName)
       const savedFileName = `${uuidv4()}${ext}`
@@ -104,6 +106,13 @@ function registerFileHandlers(ctx) {
     if (typeof filePath === 'string' && filePath) {
       shell.showItemInFolder(filePath)
     }
+  })
+
+  // 진행 중인 청크 전송 취소(#44/#45/#49) — 사용자가 대용량 파일 수신을 중단할 때.
+  // 송신측에 file-cancel 을 보내 루프를 멈추고, 로컬 부분 버퍼를 폐기한다.
+  ipcMain.handle('cancel-file-transfer', (_, messageId) => {
+    cancelInboundTransferByMessageId(ctx, messageId)
+    return { ok: true }
   })
 }
 

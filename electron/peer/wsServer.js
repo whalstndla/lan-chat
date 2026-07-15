@@ -9,8 +9,15 @@ const ALLOWED_MESSAGE_TYPES = [
   'key-exchange', 'hello', 'typing', 'typing-stop', 'delete-message', 'nickname-changed',
   'read-receipt', 'message', 'dm', 'reaction', 'edit-message', 'status-changed',
   'file-request', 'file-data', 'file-request-error',
+  // 청크 스트리밍 전송 (#44/#45/#49) — additive. 구버전은 이 목록에 없어 drop = 레거시 폴백.
+  'file-chunk-start', 'file-chunk', 'file-chunk-end', 'file-cancel',
   'history-sync-request', 'history-sync-response',
 ]
+
+// 청크 스트림은 유한(전송당 totalChunks 개)하고 프레임당 maxPayload 로 이미 제한되며,
+// 수신측 totalBytes 상한/동시 transfer 상한으로 자원이 방어된다. 따라서 초당 메시지 캡에서
+// 제외해 대용량 파일이 rate limiter 에 의해 청크가 조용히 드롭(→전송 깨짐)되지 않게 한다.
+const RATE_LIMIT_EXEMPT_TYPES = new Set(['file-chunk-start', 'file-chunk', 'file-chunk-end'])
 
 // IP별 연결 수 추적 (DoS 방지)
 const connectionCountByIP = new Map()
@@ -108,17 +115,26 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
           })
 
           socket.on('message', (data) => {
-            // 메시지 빈도 체크
-            const now = Date.now()
-            if (now - lastResetTime >= 1000) { messageCount = 0; lastResetTime = now }
-            messageCount++
-            if (messageCount > MAX_MESSAGES_PER_SECOND) return // 초과 시 무시
+            let message
+            try {
+              message = JSON.parse(data.toString())
+            } catch {
+              // 잘못된 JSON 무시
+              return
+            }
+            // 알 수 없는 메시지 타입은 무시 (fallthrough 방지)
+            if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) return
+
+            // 메시지 빈도 체크 — 청크 스트림 타입은 캡에서 제외(유한 + maxPayload/버퍼 상한으로 방어).
+            // 그 외 타입만 초당 카운트해 초과 시 드롭한다.
+            if (!RATE_LIMIT_EXEMPT_TYPES.has(message.type)) {
+              const now = Date.now()
+              if (now - lastResetTime >= 1000) { messageCount = 0; lastResetTime = now }
+              messageCount++
+              if (messageCount > MAX_MESSAGES_PER_SECOND) return // 초과 시 무시
+            }
 
             try {
-              const message = JSON.parse(data.toString())
-              // 알 수 없는 메시지 타입은 무시 (fallthrough 방지)
-              if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) return
-
               // 동일 ID 메시지 재수신(replay/재전송) 차단은 wsServer/wsClient 공용 진입점인
               // messageHandler.js 의 handleIncomingMessage 로 이동했다(#57). 여기서는 판정하지 않는다.
 
@@ -161,7 +177,7 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
               })
               onMessage(message, reply)
             } catch {
-              // 잘못된 JSON 무시
+              // 처리 중 예외 무시 (개별 핸들러 오류가 소켓 전체를 죽이지 않도록)
             }
           })
         })
