@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage, dialog } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage, dialog, shell } = require('electron')
 // safeStorage 는 v0.9.x 키체인 wrap 마스터키를 비밀번호 wrap 으로 마이그레이션할 때만 사용.
 // v0.10.0 부터는 OS 키체인 의존 없이 사용자 비밀번호 KDF 만으로 마스터키 보호.
 const path = require('path')
@@ -55,6 +55,21 @@ if (!hasSingleInstanceLock) {
 }
 
 const isDev = !app.isPackaged
+
+// 렌더러가 이동해도 되는 "앱 내부" URL 인지 판정한다(네비게이션 가드용).
+// 허용: 프로덕션 file://, 앱 내부 lanchat://, dev 서버 localhost/127.0.0.1.
+// 그 외(외부 http(s), 다른 스킴)는 렌더러 세션을 외부 페이지로 끌고 가지 못하게 차단한다.
+function isInternalNavigationUrl(targetUrl) {
+  try {
+    const parsed = new URL(targetUrl)
+    if (parsed.protocol === 'file:') return true
+    if (parsed.protocol === 'lanchat:') return true
+    if (isDev && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')) return true
+    return false
+  } catch {
+    return false
+  }
+}
 
 // 앱 데이터 경로
 const appDataPath = app.getPath('userData')
@@ -193,6 +208,24 @@ async function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
+  })
+
+  // 네비게이션 가드 — 렌더러가 신뢰불가 콘텐츠(피어 마크다운 링크 등)로 세션을
+  // 외부 페이지로 끌고 가거나 임의의 새 BrowserWindow 를 여는 것을 차단한다.
+  // 외부 링크는 기존과 동일하게 shell.openExternal(사용자 기본 브라우저)로만 열린다.
+  ctx.state.mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // http/https 만 외부 브라우저로 위임, 그 외 스킴/파일은 조용히 무시.
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    // 어떤 경우에도 앱 안에서 새 창을 만들지 않는다.
+    return { action: 'deny' }
+  })
+
+  // 앱 내부(file://·lanchat://·dev localhost) 가 아닌 곳으로의 네비게이션을 막고,
+  // 외부 http/https 였다면 기본 브라우저로 열어 링크 클릭 UX 는 유지한다.
+  ctx.state.mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isInternalNavigationUrl(url)) return
+    event.preventDefault()
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
   })
 
   // 닫기 버튼 클릭 시 종료 대신 숨김 (트레이로 최소화)
