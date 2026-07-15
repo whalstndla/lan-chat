@@ -160,6 +160,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('pending-messages-flushed', (_, data) => callback(data))
   },
 
+  // TOFU 키 변경 경고(#59) — 상대 공개키가 고정 키와 달라졌을 때 통보.
+  // data: { peerId, nickname, fingerprint } (변경 감지) 또는 { peerId, resolved: true } (정상 복귀로 해제).
+  onPeerKeyChanged: (callback) => {
+    ipcRenderer.removeAllListeners('peer-key-changed')
+    ipcRenderer.on('peer-key-changed', (_, data) => callback(data))
+  },
+  // 키 변경을 사용자가 명시적으로 신뢰 — 고정 키/세션 맵을 새 키로 교체
+  trustPeerKey: (peerId) => ipcRenderer.invoke('trust-peer-key', { peerId }),
+
   // 알림 클릭 시 채팅방 이동
   onNavigateToRoom: (callback) => {
     ipcRenderer.removeAllListeners('navigate-to-room')
@@ -187,6 +196,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-nickname-changed')
     ipcRenderer.removeAllListeners('peer-profile-updated')
     ipcRenderer.removeAllListeners('pending-messages-flushed')
+    ipcRenderer.removeAllListeners('peer-key-changed')
     ipcRenderer.removeAllListeners('peer-connecting')
     ipcRenderer.removeAllListeners('file-cached')
     ipcRenderer.removeAllListeners('file-request-error')

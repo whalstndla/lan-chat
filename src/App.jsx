@@ -9,6 +9,7 @@ import LoginScreen from './components/LoginScreen'
 import Sidebar from './components/Sidebar'
 import ChatWindow from './components/ChatWindow'
 import PatchNotes from './components/PatchNotes'
+import KeyChangeWarningModal from './components/KeyChangeWarningModal'
 
 // macOS hiddenInset 타이틀바: 트래픽 라이트(80×38px) 안전 영역 + 드래그 핸들
 function TitleBar({ nickname, updateState, onCheckUpdate }) {
@@ -216,6 +217,8 @@ export default function App() {
           highlightVersion={patchNotesHighlight}
         />
       )}
+      {/* TOFU 키 변경 경고 모달(#59) — keyChangedPeers 가 있으면 자동 표시 */}
+      <KeyChangeWarningModal />
     </div>
   )
 }

@@ -1,6 +1,6 @@
 // src/components/Sidebar.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark, Search, Plug } from 'lucide-react'
+import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark, Search, Plug, ShieldAlert } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
@@ -103,6 +103,8 @@ export default function Sidebar({ onShowPatchNotes }) {
     }
   }
   const onlinePeers = usePeerStore(state => state.onlinePeers)
+  // TOFU 키 변경 경고(#59) — 보안키가 바뀐 피어에 경고 아이콘을 표시하기 위한 맵
+  const keyChangedPeers = usePeerStore(state => state.keyChangedPeers)
 
   // peer-connecting 이벤트로 연결 시도 중 상태 추적
   useEffect(() => {
@@ -196,12 +198,15 @@ export default function Sidebar({ onShowPatchNotes }) {
             <button
               key={peer.peerId}
               onClick={() => useChatStore.getState().setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
-              title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}${isOnline && peer.statusMessage ? ` — ${peer.statusMessage}` : ''}`}
+              title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}${keyChangedPeers[peer.peerId] ? ' — 보안키 변경됨' : ''}${isOnline && peer.statusMessage ? ` — ${peer.statusMessage}` : ''}`}
               className={`cursor-pointer relative p-1.5 rounded transition-colors ${
                 isSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
               }`}
             >
               <PeerAvatar peer={peer} isOnline={isOnline} />
+              {keyChangedPeers[peer.peerId] && (
+                <ShieldAlert size={10} className="absolute -bottom-0.5 -left-0.5 text-red-400" />
+              )}
               {hasUnread && (
                 <span className="absolute top-0 right-0 w-2 h-2 bg-vsc-accent rounded-full" />
               )}
@@ -367,6 +372,9 @@ export default function Sidebar({ onShowPatchNotes }) {
                         <span className="block truncate text-[10px] text-vsc-muted opacity-70">{peer.statusMessage}</span>
                       )}
                     </span>
+                    {keyChangedPeers[peer.peerId] && (
+                      <ShieldAlert size={13} className="shrink-0 text-red-400" title="보안키가 변경되었습니다" />
+                    )}
                     {unreadCounts[peer.peerId] > 0 && (
                       <span className="ml-auto bg-vsc-accent text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center leading-none">
                         {unreadCounts[peer.peerId]}

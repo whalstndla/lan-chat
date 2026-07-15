@@ -189,6 +189,17 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         useChatStore.getState().clearPendingMessages(targetPeerId, messageIds)
       })
 
+      // TOFU 키 변경 경고(#59) — 상대 공개키가 고정 키와 달라지면 경고 대상에 표시하고,
+      // 정상 키로 복귀(resolved)하면 해제한다. 실제 신뢰 승인은 경고 모달에서 처리한다.
+      window.electronAPI.onPeerKeyChanged((data) => {
+        if (!data?.peerId) return
+        if (data.resolved) {
+          usePeerStore.getState().clearKeyChanged(data.peerId)
+        } else {
+          usePeerStore.getState().markKeyChanged(data.peerId, data.nickname, data.fingerprint)
+        }
+      })
+
       window.electronAPI.onReadReceipt(({ fromId, messageIds }) => {
         useChatStore.getState().markMessagesAsRead(fromId, messageIds)
       })
@@ -201,6 +212,8 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
           usePeerStore.getState().addPastDMPeer({ peerId: peer.peerId, nickname: peer.nickname })
         }
         usePeerStore.getState().removePeer(leftPeerId)
+        // 떠난 피어의 키 변경 경고도 함께 정리 — 재연결 시 hello 로 다시 판정된다(#59).
+        usePeerStore.getState().clearKeyChanged(leftPeerId)
       })
 
       window.electronAPI.onPlayNotificationSound(() => {
