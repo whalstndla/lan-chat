@@ -195,6 +195,22 @@ const useChatStore = create((set, get) => ({
       return { globalMessages: updated.length > LIVE_TAIL_CAP ? updated.slice(-LIVE_TAIL_CAP) : updated }
     }),
 
+  // #31 히스토리 동기화 배치 병합 — 상대에게서 받은 과거 전체채팅 메시지들을 한 번에 병합한다.
+  // addGlobalMessage 가 "append" 라 과거 메시지를 끝에 붙여 순서가 깨지는 것과 달리,
+  // 여기서는 id 중복 제거 후 timestamp 오름차순으로 정렬해 올바른 시간 순서에 끼워 넣는다.
+  // 과거 catch-up 이므로 안읽음 배지는 건드리지 않는다(라이브 수신과 구분).
+  mergeGlobalMessages: (incoming) =>
+    set((state) => {
+      if (!Array.isArray(incoming) || incoming.length === 0) return state
+      const existingIds = new Set(state.globalMessages.map((m) => m.id))
+      const fresh = incoming.filter((m) => m?.id && !existingIds.has(m.id))
+      if (fresh.length === 0) return state
+      const merged = [...state.globalMessages, ...fresh].sort((a, b) => a.timestamp - b.timestamp)
+      // 과거를 로드해 확장된 방(#10)에서는 트림하지 않는다. 그 외엔 최근 LIVE_TAIL_CAP 개만 유지.
+      if (state.globalHistoryExpanded) return { globalMessages: merged }
+      return { globalMessages: merged.length > LIVE_TAIL_CAP ? merged.slice(-LIVE_TAIL_CAP) : merged }
+    }),
+
   // 방 진입/검색 점프 시 DM 히스토리 전체 교체 — global 과 동일한 expanded 판정.
   setDMHistory: (peerId, messages) =>
     set((state) => ({

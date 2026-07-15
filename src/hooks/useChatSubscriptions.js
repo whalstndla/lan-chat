@@ -131,6 +131,12 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         }
       })
 
+      // #31 히스토리 동기화 — 연결 시 상대에게서 받은 과거 전체채팅 메시지 배치를 병합.
+      // mergeGlobalMessages 가 id 중복 제거 + timestamp 정렬로 올바른 순서에 끼워 넣는다.
+      window.electronAPI.onGlobalHistorySynced((messages) => {
+        useChatStore.getState().mergeGlobalMessages(messages)
+      })
+
       window.electronAPI.onTypingEvent((data) => {
         useChatStore.getState().setTyping(data.fromId, data.from, data.to || null)
       })

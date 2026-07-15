@@ -101,6 +101,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('message-received')
     ipcRenderer.on('message-received', (_, message) => callback(message))
   },
+  // #31 전체채팅 히스토리 동기화 — 연결 시 상대에게서 받은 과거 전체채팅 메시지 배치.
+  onGlobalHistorySynced: (callback) => {
+    ipcRenderer.removeAllListeners('global-history-synced')
+    ipcRenderer.on('global-history-synced', (_, messages) => callback(messages))
+  },
   subscribeToPeerDiscovery: (callback) => {
     ipcRenderer.removeAllListeners('peer-discovered')
     ipcRenderer.on('peer-discovered', (_, peerInfo) => callback(peerInfo))
@@ -167,6 +172,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // (로그인 이후에도 "업데이트 확인" 버튼이 동작해야 함) 여기서 제외한다.
   unsubscribeAll: () => {
     ipcRenderer.removeAllListeners('message-received')
+    ipcRenderer.removeAllListeners('global-history-synced')
     ipcRenderer.removeAllListeners('peer-discovered')
     ipcRenderer.removeAllListeners('peer-left')
     ipcRenderer.removeAllListeners('typing-event')
