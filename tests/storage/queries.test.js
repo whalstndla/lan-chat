@@ -1,6 +1,12 @@
 // tests/storage/queries.test.js
 const { initDatabase, migrateDatabase, closeDatabase } = require('../../electron/storage/database')
-const { saveMessage, getGlobalHistory, getDMHistory } = require('../../electron/storage/queries')
+const {
+  saveMessage,
+  getGlobalHistory,
+  getDMHistory,
+  getGlobalMessagesSince,
+  getLatestGlobalMessageTimestamp,
+} = require('../../electron/storage/queries')
 
 describe('메시지 쿼리', () => {
   let db
@@ -55,6 +61,79 @@ describe('메시지 쿼리', () => {
     const result = getGlobalHistory(db)
     expect(result[0].reply_to_id).toBeNull()
     expect(result[0].reply_preview).toBeNull()
+  })
+})
+
+describe('#31 히스토리 동기화 쿼리 — getGlobalMessagesSince / getLatestGlobalMessageTimestamp', () => {
+  let db
+
+  // 지정한 timestamp 로 전체채팅 메시지 하나를 저장하는 헬퍼
+  function insertGlobal(id, timestamp, content = 'hi') {
+    saveMessage(db, {
+      id, type: 'message', from_id: 'peerX', from_name: '테스터',
+      to_id: null, content, content_type: 'text',
+      encrypted_payload: null, file_url: null, file_name: null, timestamp,
+    })
+  }
+
+  beforeEach(() => { db = initDatabase(':memory:') })
+  afterEach(() => { closeDatabase(db) })
+
+  it('getLatestGlobalMessageTimestamp: 메시지가 없으면 0 을 반환', () => {
+    expect(getLatestGlobalMessageTimestamp(db)).toBe(0)
+  })
+
+  it('getLatestGlobalMessageTimestamp: 가장 최근 전체채팅 timestamp 를 반환', () => {
+    insertGlobal('m1', 1000)
+    insertGlobal('m2', 3000)
+    insertGlobal('m3', 2000)
+    expect(getLatestGlobalMessageTimestamp(db)).toBe(3000)
+  })
+
+  it('getLatestGlobalMessageTimestamp: DM(type=dm)은 무시하고 전체채팅만 본다', () => {
+    insertGlobal('m1', 1000)
+    saveMessage(db, {
+      id: 'dm-1', type: 'dm', from_id: 'a', from_name: 'A', to_id: 'b',
+      content: null, content_type: 'text', encrypted_payload: 'x==',
+      file_url: null, file_name: null, timestamp: 9999,
+    })
+    // DM 의 9999 는 무시되고 전체채팅 최신값 1000 이 나와야 한다
+    expect(getLatestGlobalMessageTimestamp(db)).toBe(1000)
+  })
+
+  it('getGlobalMessagesSince: timestamp >= sinceTimestamp 를 ASC 로 반환 (경계 포함)', () => {
+    insertGlobal('m1', 1000)
+    insertGlobal('m2', 2000)
+    insertGlobal('m3', 3000)
+    // 경계값 2000 포함(>=) — m2, m3 반환
+    const rows = getGlobalMessagesSince(db, 2000, 500)
+    expect(rows.map(r => r.id)).toEqual(['m2', 'm3'])
+  })
+
+  it('getGlobalMessagesSince: since=0 이면 전체를 ASC 로 반환', () => {
+    insertGlobal('m3', 3000)
+    insertGlobal('m1', 1000)
+    insertGlobal('m2', 2000)
+    const rows = getGlobalMessagesSince(db, 0, 500)
+    expect(rows.map(r => r.id)).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  it('getGlobalMessagesSince: limit 초과 시 "가장 최신" N 개만 ASC 로 반환', () => {
+    for (let i = 1; i <= 5; i++) insertGlobal(`m${i}`, i * 1000)
+    // limit=3 → 최신 3개(m3,m4,m5) 를 시간 오름차순으로
+    const rows = getGlobalMessagesSince(db, 0, 3)
+    expect(rows.map(r => r.id)).toEqual(['m3', 'm4', 'm5'])
+  })
+
+  it('getGlobalMessagesSince: DM 은 제외한다(전체채팅만)', () => {
+    insertGlobal('m1', 1000)
+    saveMessage(db, {
+      id: 'dm-1', type: 'dm', from_id: 'a', from_name: 'A', to_id: 'b',
+      content: null, content_type: 'text', encrypted_payload: 'x==',
+      file_url: null, file_name: null, timestamp: 2000,
+    })
+    const rows = getGlobalMessagesSince(db, 0, 500)
+    expect(rows.map(r => r.id)).toEqual(['m1'])
   })
 })
 

@@ -27,6 +27,28 @@ function getGlobalHistory(db, limit = 100, offset = 0) {
   `).all(limit, offset).reverse()
 }
 
+// #31 전체채팅 히스토리 동기화 — 특정 timestamp 이후(포함)의 전체채팅 메시지를 조회한다.
+// 경계 누락을 막기 위해 `>` 가 아닌 `>=` 를 쓴다(같은 ms 재전송은 수신측 dedup 으로 안전).
+// 상한(limit)을 초과하면 "가장 최신" limit 개만 반환한다 — 과도한 페이로드 방지.
+// getGlobalHistory 와 동일하게 DESC + LIMIT 로 최신 N개를 뽑은 뒤 ASC 로 뒤집어 반환한다.
+function getGlobalMessagesSince(db, sinceTimestamp, limit = 500) {
+  return db.prepare(`
+    SELECT * FROM messages
+    WHERE type = 'message' AND timestamp >= ?
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `).all(sinceTimestamp, limit).reverse()
+}
+
+// #31 내 DB 의 가장 최근 전체채팅 메시지 timestamp 반환 — 없으면 0.
+// 히스토리 동기화 요청 시 sinceTimestamp 로 실어 보낸다.
+function getLatestGlobalMessageTimestamp(db) {
+  const row = db.prepare(`
+    SELECT MAX(timestamp) AS ts FROM messages WHERE type = 'message'
+  `).get()
+  return row?.ts || 0
+}
+
 function getDMHistory(db, peerId1, peerId2, limit = 100, offset = 0) {
   return db.prepare(`
     SELECT * FROM messages
@@ -277,4 +299,4 @@ function deletePeerCache(db, peerId) {
   db.prepare('DELETE FROM peer_cache WHERE peer_id = ?').run(peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }
+module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache }
