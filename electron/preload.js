@@ -222,6 +222,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 뮤트된 채팅방 목록을 main 에 동기화 — 소리/OS알림 억제 판정용 (배지는 항상 유지)
   setMutedRooms: (roomKeys) => ipcRenderer.invoke('set-muted-rooms', roomKeys),
 
+  // 링크 미리보기(외부 서버 OG 요청) 사용 여부 — SSRF/프라이버시 옵션(#66)
+  getLinkPreviewEnabled: () => ipcRenderer.invoke('get-link-preview-enabled'),
+  setLinkPreviewEnabled: (enabled) => ipcRenderer.invoke('set-link-preview-enabled', enabled),
+
   // 알림 소리 재생 이벤트
   onPlayNotificationSound: (callback) => {
     ipcRenderer.removeAllListeners('play-notification-sound')

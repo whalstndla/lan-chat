@@ -2,7 +2,7 @@
 // 알림 설정 관련 IPC 핸들러 — 조회, 저장, 커스텀 사운드 저장
 
 const { ipcMain } = require('electron')
-const { getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound } = require('../storage/profile')
+const { getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound, getLinkPreviewEnabled, setLinkPreviewEnabled } = require('../storage/profile')
 
 function registerSettingsHandlers(ctx) {
   // 알림 설정 조회
@@ -28,6 +28,14 @@ function registerSettingsHandlers(ctx) {
   // main 프로세스의 소리/OS알림 억제 판정을 위해 토글 시 + 앱 시작 시 전체를 전달받는다(#4).
   ipcMain.handle('set-muted-rooms', (_, mutedRoomKeys) => {
     ctx.state.mutedRoomKeySet = new Set(Array.isArray(mutedRoomKeys) ? mutedRoomKeys : [])
+  })
+
+  // 링크 미리보기(외부 서버 OG 요청) 사용 여부 조회/저장 — SSRF/프라이버시 옵션(#66)
+  ipcMain.handle('get-link-preview-enabled', () => getLinkPreviewEnabled(ctx.state.database))
+
+  ipcMain.handle('set-link-preview-enabled', (_, enabled) => {
+    setLinkPreviewEnabled(ctx.state.database, !!enabled)
+    return true
   })
 }
 

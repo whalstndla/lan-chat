@@ -90,6 +90,8 @@ function migrateDatabase(db) {
     "ALTER TABLE profile ADD COLUMN notification_scope TEXT DEFAULT 'all'",
     // OS 알림 본문 숨김 — on 이면 실제 메시지 내용 대신 "새 메시지"만 표시
     'ALTER TABLE profile ADD COLUMN notification_hide_body INTEGER DEFAULT 0',
+    // 링크 미리보기(외부 서버 OG 요청) 사용 여부 — 기본 on(1). off 면 완전 단절.
+    'ALTER TABLE profile ADD COLUMN link_preview_enabled INTEGER DEFAULT 1',
   ]
   for (const sql of profileMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }

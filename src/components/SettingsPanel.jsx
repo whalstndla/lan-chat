@@ -1,5 +1,5 @@
 // src/components/SettingsPanel.jsx
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useUserStore from '../store/useUserStore'
@@ -60,6 +60,21 @@ export default function SettingsPanel({ onClose }) {
   const [updateErrorMessage, setUpdateErrorMessage] = useState(null)
   const fileInputRef = useRef(null)
   const soundFileInputRef = useRef(null)
+
+  // 링크 미리보기(외부 서버 OG 요청) 사용 여부 — 기본 on, 마운트 시 main 에서 로드(#66)
+  const [linkPreviewEnabled, setLinkPreviewEnabled] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI.getLinkPreviewEnabled?.().then((value) => {
+      if (!cancelled) setLinkPreviewEnabled(value !== false) // 미정의/실패 시 기본 on
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleLinkPreviewToggle(nextEnabled) {
+    setLinkPreviewEnabled(nextEnabled)
+    await window.electronAPI.setLinkPreviewEnabled?.(nextEnabled)
+  }
 
   // 핸들러들
   async function handleNicknameSave() {
@@ -381,6 +396,21 @@ export default function SettingsPanel({ onClose }) {
         <>
           {renderSubPageHeader('데이터 관리')}
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+            {/* 링크 미리보기 토글 — 끄면 외부 서버로의 OG 요청을 완전히 막는다(완전 단절 모드) */}
+            <div className="pb-3 mb-1 border-b border-vsc-border">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-vsc-text text-xs">링크 미리보기</span>
+                <input
+                  type="checkbox"
+                  checked={linkPreviewEnabled}
+                  onChange={e => handleLinkPreviewToggle(e.target.checked)}
+                  className="accent-vsc-accent cursor-pointer"
+                />
+              </label>
+              <p className="text-[10px] text-vsc-muted mt-1 leading-relaxed">
+                끄면 채팅 속 링크의 미리보기를 위해 외부 서버로 요청하지 않습니다.
+              </p>
+            </div>
             {confirmAction === null ? (
               <>
                 <button onClick={() => setConfirmAction('clearAll')}

@@ -108,6 +108,23 @@ function saveCustomNotificationSound(db, appDataPath, buffer, extension) {
   return filename
 }
 
+// 링크 미리보기 사용 여부 조회 — 기본값 on(true).
+// 완전 단절 모드 사용자는 off 로 두어 링크 프리뷰용 외부 요청을 완전히 막을 수 있다.
+function getLinkPreviewEnabled(db) {
+  if (!db) return true
+  const profile = getProfile(db)
+  // 컬럼/행이 없으면(마이그레이션 전 등) 기존 동작(on) 유지
+  if (!profile || profile.link_preview_enabled === undefined || profile.link_preview_enabled === null) {
+    return true
+  }
+  return !!profile.link_preview_enabled
+}
+
+// 링크 미리보기 사용 여부 저장
+function setLinkPreviewEnabled(db, enabled) {
+  db.prepare('UPDATE profile SET link_preview_enabled = ? WHERE id = 1').run(enabled ? 1 : 0)
+}
+
 // 상태 타입 및 상태 메시지 저장
 function updateStatus(db, { statusType, statusMessage }) {
   db.prepare('UPDATE profile SET status_type = ?, status_message = ? WHERE id = 1')
@@ -129,5 +146,6 @@ module.exports = {
   saveProfile, getProfile, verifyPassword,
   updatePeerId, updateLastLogin, clearLastLogin, updateNickname, updateProfileImage,
   getNotificationSettings, saveNotificationSettings, saveCustomNotificationSound,
+  getLinkPreviewEnabled, setLinkPreviewEnabled,
   updatePassword, updateStatus,
 }
