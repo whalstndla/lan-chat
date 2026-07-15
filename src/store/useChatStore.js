@@ -72,6 +72,30 @@ export function getRoomKey(room) {
   return room.type === 'global' ? 'global' : room.peerId
 }
 
+// message 가 other 보다 timestamp 기준으로 과거인지 판정. 둘 중 하나라도 timestamp 가 없으면
+// 비교가 불가능하므로 과거로 취급하지 않는다(false) — 기존 append-only 동작을 그대로 보존한다.
+function isOlderMessage(message, other) {
+  if (message?.timestamp == null || other?.timestamp == null) return false
+  return message.timestamp < other.timestamp
+}
+
+// 오프라인 상대가 재접속하며 flush 한 지각 메시지는 원래(과거) timestamp 를 유지한 채 도착한다(#20).
+// 신규 메시지가 배열 마지막 메시지보다 최신이면(절대다수 케이스, timestamp 비교 불가 포함) 그대로
+// append 하고, 더 과거면 timestamp 오름차순이 유지되도록 뒤에서부터 선형 탐색해 삽입 위치를 찾는다.
+// 동일 timestamp 를 가진 기존 메시지들보다는 뒤에 삽입해 안정적인 순서를 유지한다.
+function insertMessageInOrder(list, message) {
+  if (list.length === 0 || !isOlderMessage(message, list[list.length - 1])) {
+    return [...list, message]
+  }
+  let insertAt = list.length
+  while (insertAt > 0 && isOlderMessage(message, list[insertAt - 1])) {
+    insertAt--
+  }
+  const updated = list.slice()
+  updated.splice(insertAt, 0, message)
+  return updated
+}
+
 // 현재 보고 있는 채팅방 타입
 // { type: 'global' } 또는 { type: 'dm', peerId: 'xxx', nickname: '홍길동' }
 const useChatStore = create((set, get) => ({
@@ -188,7 +212,9 @@ const useChatStore = create((set, get) => ({
       if (message?.id && state.globalMessages.some((m) => m.id === message.id)) {
         return state
       }
-      const updated = [...state.globalMessages, message]
+      // 오프라인 상대가 재접속하며 flush 한 지각 메시지는 과거 timestamp 를 유지한 채 오므로
+      // 무조건 끝에 붙이지 않고 timestamp 순서에 맞는 위치에 삽입한다(#20).
+      const updated = insertMessageInOrder(state.globalMessages, message)
       // 과거를 로드해 확장된 방에서는 트림하지 않는다 — 지금 보고 있는 과거 메시지 증발 방지(#10).
       if (state.globalHistoryExpanded) return { globalMessages: updated }
       // 일반 라이브 상태에서는 최근 LIVE_TAIL_CAP 개만 유지 (메모리 누수 방지)
@@ -225,11 +251,13 @@ const useChatStore = create((set, get) => ({
       if (message?.id && existing.some((m) => m.id === message.id)) {
         return state
       }
-      const appended = [...existing, message]
+      // 오프라인 상대가 재접속하며 flush 한 지각 메시지는 과거 timestamp 를 유지한 채 오므로
+      // 무조건 끝에 붙이지 않고 timestamp 순서에 맞는 위치에 삽입한다(#20).
+      const inserted = insertMessageInOrder(existing, message)
       // 과거를 로드해 확장된 방(#10)에서는 트림하지 않는다. 그 외에는 최근 LIVE_TAIL_CAP 개만 유지.
       const trimmed = state.dmHistoryExpanded[peerId]
-        ? appended
-        : (appended.length > LIVE_TAIL_CAP ? appended.slice(-LIVE_TAIL_CAP) : appended)
+        ? inserted
+        : (inserted.length > LIVE_TAIL_CAP ? inserted.slice(-LIVE_TAIL_CAP) : inserted)
       return {
         dmMessages: { ...state.dmMessages, [peerId]: trimmed },
       }
