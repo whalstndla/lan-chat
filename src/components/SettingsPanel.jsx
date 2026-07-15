@@ -76,6 +76,31 @@ export default function SettingsPanel({ onClose }) {
     await window.electronAPI.setLinkPreviewEnabled?.(nextEnabled)
   }
 
+  // 로그인 시 자동 시작(#71) — supported 는 OS 지원 여부(Linux 는 false), 마운트 시 main 에서 로드
+  const [autoLaunchSettings, setAutoLaunchSettings] = useState({ supported: true, openAtLogin: false, startHidden: false })
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI.getAutoLaunchSettings?.().then((value) => {
+      if (!cancelled && value) setAutoLaunchSettings(value)
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleAutoLaunchToggle(nextOpenAtLogin) {
+    // 자동 시작을 끄면 "숨김 시작"도 의미가 없으므로 함께 끈다.
+    const nextSettings = { openAtLogin: nextOpenAtLogin, startHidden: nextOpenAtLogin && autoLaunchSettings.startHidden }
+    setAutoLaunchSettings((prev) => ({ ...prev, ...nextSettings }))
+    const result = await window.electronAPI.setAutoLaunchSettings?.(nextSettings)
+    if (result) setAutoLaunchSettings(result)
+  }
+
+  async function handleStartHiddenToggle(nextStartHidden) {
+    const nextSettings = { openAtLogin: autoLaunchSettings.openAtLogin, startHidden: nextStartHidden }
+    setAutoLaunchSettings((prev) => ({ ...prev, ...nextSettings }))
+    const result = await window.electronAPI.setAutoLaunchSettings?.(nextSettings)
+    if (result) setAutoLaunchSettings(result)
+  }
+
   // 핸들러들
   async function handleNicknameSave() {
     const trimmed = nicknameInput.trim()
@@ -449,6 +474,38 @@ export default function SettingsPanel({ onClose }) {
             <div className="bg-vsc-panel rounded p-3 space-y-1">
               <p className="text-xs text-vsc-text font-semibold">LAN Chat</p>
               <p className="text-xs text-vsc-muted">사내 LAN 기반 P2P 채팅</p>
+            </div>
+
+            {/* 시작 설정 — 로그인 시 자동 시작(#71) */}
+            <div>
+              <label className="text-vsc-muted text-xs block mb-2">시작 설정</label>
+              {autoLaunchSettings.supported ? (
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-vsc-text text-xs">로그인 시 자동 시작</span>
+                    <input
+                      type="checkbox"
+                      checked={autoLaunchSettings.openAtLogin}
+                      onChange={e => handleAutoLaunchToggle(e.target.checked)}
+                      className="accent-vsc-accent cursor-pointer"
+                    />
+                  </label>
+                  <label className={`flex items-center justify-between ${autoLaunchSettings.openAtLogin ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'}`}>
+                    <span className="text-vsc-text text-xs">창 숨김으로 시작 (트레이)</span>
+                    <input
+                      type="checkbox"
+                      checked={autoLaunchSettings.startHidden}
+                      disabled={!autoLaunchSettings.openAtLogin}
+                      onChange={e => handleStartHiddenToggle(e.target.checked)}
+                      className="accent-vsc-accent cursor-pointer"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <p className="text-[10px] text-vsc-muted leading-relaxed">
+                  현재 OS에서는 로그인 시 자동 시작을 지원하지 않습니다.
+                </p>
+              )}
             </div>
 
             {/* 업데이트 확인 */}

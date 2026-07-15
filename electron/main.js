@@ -25,6 +25,8 @@ const { sendToRenderer, clearBadge, checkAndNotifyUpdated } = require('./utils/a
 const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/lanchatProtocol')
 // 창 크기/위치 기억(#71) — 저장된 bounds 를 디스플레이 범위와 대조해 복원한다.
 const { resolveWindowState, saveWindowState, DEFAULT_WIDTH, DEFAULT_HEIGHT, MIN_WIDTH, MIN_HEIGHT } = require('./storage/windowState')
+// 로그인 시 자동 시작(#71) — 부팅 시 "숨김 시작" 여부 판정에만 필요, 토글 적용은 IPC 핸들러(app.js)에서.
+const { loadAutoLaunchPreference, shouldStartHiddenThisLaunch } = require('./utils/autoLaunch')
 
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
@@ -79,6 +81,11 @@ const appDataPath = app.getPath('userData')
 const tempFilePath = path.join(appDataPath, 'files')
 const profileFolderPath = path.join(appDataPath, 'profile')
 const systemDefaultNickname = os.userInfo().username
+
+// 로그인 자동 시작(#71) 선호도 — 이번 실행이 "자동 시작 + 숨김 시작"으로 인한 것인지 부팅 시 1회 판정.
+// 최초 창 생성에만 반영하고(트레이로만 뜸), 이후 두 번째 인스턴스/activate 시엔 항상 정상 표시한다.
+const autoLaunchPreference = loadAutoLaunchPreference(appDataPath)
+let shouldStartHiddenOnFirstLaunch = shouldStartHiddenThisLaunch(app, autoLaunchPreference)
 
 // AppContext 생성
 const ctx = createAppContext({
@@ -201,12 +208,18 @@ async function createWindow() {
   // (모니터 분리 등) resolveWindowState 가 null 을 반환해 기본 크기로 폴백한다.
   const restoredBounds = resolveWindowState(appDataPath, screen.getAllDisplays())
 
+  // 로그인 자동 시작으로 인한 최초 실행이고 "숨김 시작"이 켜져 있으면 창을 띄우지 않고 트레이만 띄운다.
+  // 플래그는 1회성 — 이후 재실행(두 번째 인스턴스/activate)에서는 항상 정상적으로 보이게 한다.
+  const startHidden = shouldStartHiddenOnFirstLaunch
+  shouldStartHiddenOnFirstLaunch = false
+
   ctx.state.mainWindow = new BrowserWindow({
     width: restoredBounds?.width ?? DEFAULT_WIDTH,
     height: restoredBounds?.height ?? DEFAULT_HEIGHT,
     ...(restoredBounds ? { x: restoredBounds.x, y: restoredBounds.y } : {}),
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
+    show: !startHidden,
     backgroundColor: '#1e1e1e',
     titleBarStyle: 'hiddenInset',
     webPreferences: {

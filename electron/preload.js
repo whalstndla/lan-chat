@@ -236,6 +236,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getLinkPreviewEnabled: () => ipcRenderer.invoke('get-link-preview-enabled'),
   setLinkPreviewEnabled: (enabled) => ipcRenderer.invoke('set-link-preview-enabled', enabled),
 
+  // 로그인 시 자동 시작(#71) — { supported, openAtLogin, startHidden } 형태로 상태 조회/변경
+  getAutoLaunchSettings: () => ipcRenderer.invoke('get-auto-launch-settings'),
+  setAutoLaunchSettings: (settings) => ipcRenderer.invoke('set-auto-launch-settings', settings),
+
   // 알림 소리 재생 이벤트
   onPlayNotificationSound: (callback) => {
     ipcRenderer.removeAllListeners('play-notification-sound')

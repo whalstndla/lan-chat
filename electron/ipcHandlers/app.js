@@ -11,6 +11,7 @@ const { autoUpdater } = require('electron-updater')
 const { sendToRenderer, loadChangelog } = require('../utils/appUtils')
 const { isBlockedUrlAsync } = require('../utils/urlGuard')
 const { getLinkPreviewEnabled } = require('../storage/profile')
+const { getAutoLaunchStatus, saveAutoLaunchPreference, applyAutoLaunchSettings } = require('../utils/autoLaunch')
 
 // SSRF 가드가 적용된 fetch — 각 리다이렉트 홉의 목적지까지 재검증한다(#66).
 // redirect:'manual' 로 3xx 를 직접 따라가며 매 홉마다 스킴/사설 IP/DNS(rebinding)를 검사해,
@@ -117,6 +118,17 @@ function registerAppHandlers(ctx) {
     }
     ctx.state.updatedFromVersion = null
     return result
+  })
+
+  // 로그인 시 자동 시작(#71) 상태 조회 — openAtLogin 은 가능하면 OS 에 실제 등록된 값을 반환한다.
+  ipcMain.handle('get-auto-launch-settings', () => getAutoLaunchStatus(app, ctx.config.appDataPath))
+
+  // 로그인 시 자동 시작 설정 변경 — 선호도 저장 + 실제 OS 로그인 아이템 등록/해제(#71).
+  // Linux 등 미지원 플랫폼은 applyAutoLaunchSettings 내부에서 안전하게 no-op 처리된다.
+  ipcMain.handle('set-auto-launch-settings', (_, { openAtLogin, startHidden }) => {
+    saveAutoLaunchPreference(ctx.config.appDataPath, { openAtLogin, startHidden })
+    applyAutoLaunchSettings(app, { openAtLogin, startHidden })
+    return getAutoLaunchStatus(app, ctx.config.appDataPath)
   })
 
   // 업데이트 확인 IPC 핸들러 — dev에서는 즉시 not-available 반환
