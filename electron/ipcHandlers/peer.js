@@ -8,6 +8,7 @@ const { startBroadcastDiscovery, stopBroadcastDiscovery } = require('../peer/bro
 const { buildPeerConnectHostCandidates } = require('../peer/networkUtils')
 const { connectToPeer, disconnectAll, disconnectFromPeer } = require('../peer/wsClient')
 const { closeAllServerClients } = require('../peer/wsServer')
+const { connectManualPeer } = require('../peer/manualConnect')
 const { getFilePort } = require('../peer/fileServer')
 const { loadPeerCache, deletePeerCache } = require('../storage/queries')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
@@ -341,6 +342,35 @@ function registerPeerHandlers(ctx) {
     } finally {
       ctx.state.isDiscoveryStarting = false
     }
+  })
+
+  // 수동 피어 연결(#33) — mDNS/UDP 브로드캐스트 발견이 둘 다 막힌 망에서
+  // IP(+선택적 포트) 직접 입력으로 최초 핸드셰이크를 개시한다.
+  // 발견 없이 host 만 아는 상태이므로, 응답(hello/key-exchange)을 기존
+  // handleIncomingMessage 로 전달해 "역방향 연결" 로직이 실제 peerId 로
+  // 정식 세션(autoReconnect 포함)을 자연스럽게 맺도록 한다. 기존 발견/연결
+  // 경로(start-peer-discovery)는 그대로 유지되며 서로 영향을 주지 않는다.
+  ipcMain.handle('connect-manual-peer', async (_event, params) => {
+    const { host, wsPort } = params || {}
+    if (!ctx.state.wsServerInfo) {
+      return { ok: false, error: '서버가 아직 준비되지 않았습니다' }
+    }
+    // mySessionId 는 보통 start-peer-discovery 시점에 생성되지만, 수동 연결은
+    // 그 호출 순서에 의존하지 않아야 하므로 여기서도 방어적으로 보장한다.
+    // (없으면 hello 의 sessionId 가 비어 상대측 parseHello 가 거부한다)
+    if (!ctx.state.mySessionId) ctx.state.mySessionId = randomUUID()
+    const currentNickname = getCurrentNicknameSafely(ctx)
+    writePeerDebugLog('main.manualConnect.requested', { host, wsPort })
+    const result = await connectManualPeer({
+      host,
+      wsPort,
+      buildHelloPayload: () => buildMyKeyExchangePayload(ctx, ctx.state.peerId, currentNickname),
+      onReply: (message) => {
+        ctx.state.handleIncomingMessage(message, () => {})
+      },
+    })
+    writePeerDebugLog('main.manualConnect.result', { host, wsPort, result })
+    return result
   })
 }
 

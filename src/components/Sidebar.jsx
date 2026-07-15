@@ -1,6 +1,6 @@
 // src/components/Sidebar.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark, Search } from 'lucide-react'
+import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark, Search, Plug } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
@@ -79,6 +79,29 @@ export default function Sidebar({ onShowPatchNotes }) {
   const [connectingCount, setConnectingCount] = useState(0)
   // DM/피어 목록 필터(#43) — 닉네임 부분일치. 사이드바를 접었다 펴도 값은 유지된다.
   const [peerFilterQuery, setPeerFilterQuery] = useState('')
+  // 수동 피어 연결(#33) — mDNS/UDP 브로드캐스트 발견이 막힌 망에서 IP 직접 입력으로 연결
+  const [showManualConnect, setShowManualConnect] = useState(false)
+  const [manualHost, setManualHost] = useState('')
+  const [manualPort, setManualPort] = useState('')
+  // null | 'connecting' | 'success' | { error }
+  const [manualConnectStatus, setManualConnectStatus] = useState(null)
+
+  // 연결 시도 → 결과에 따라 성공/실패 피드백 표시
+  async function handleManualConnect() {
+    const host = manualHost.trim()
+    if (!host || manualConnectStatus === 'connecting') return
+    setManualConnectStatus('connecting')
+    const trimmedPort = manualPort.trim()
+    const result = await window.electronAPI.connectManualPeer({
+      host,
+      wsPort: trimmedPort ? Number(trimmedPort) : undefined,
+    })
+    if (result?.ok) {
+      setManualConnectStatus('success')
+    } else {
+      setManualConnectStatus({ error: result?.error || '연결에 실패했습니다' })
+    }
+  }
   const onlinePeers = usePeerStore(state => state.onlinePeers)
 
   // peer-connecting 이벤트로 연결 시도 중 상태 추적
@@ -224,6 +247,18 @@ export default function Sidebar({ onShowPatchNotes }) {
                   <RotateCw size={13} />
                 </button>
                 <button
+                  onClick={() => {
+                    setShowManualConnect(v => !v)
+                    setManualConnectStatus(null)
+                  }}
+                  title="IP로 연결"
+                  className={`cursor-pointer p-0.5 rounded transition-colors ${
+                    showManualConnect ? 'text-vsc-accent bg-vsc-hover' : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+                  }`}
+                >
+                  <Plug size={13} />
+                </button>
+                <button
                   onClick={() => setCollapsed(true)}
                   title="사이드바 접기"
                   className="cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
@@ -232,6 +267,44 @@ export default function Sidebar({ onShowPatchNotes }) {
                 </button>
               </div>
             </div>
+            {/* IP로 연결(#33) — mDNS/UDP 브로드캐스트 발견이 막힌 망에서 최초 연결 수단 */}
+            {showManualConnect && (
+              <div className="px-2 pb-1.5 space-y-1">
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    value={manualHost}
+                    onChange={(e) => setManualHost(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleManualConnect()}
+                    placeholder="IP 주소 (예: 192.168.0.5)"
+                    aria-label="연결할 피어 IP 주소"
+                    className="flex-1 min-w-0 bg-vsc-bg border border-vsc-border rounded px-2 py-1 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+                  />
+                  <input
+                    type="text"
+                    value={manualPort}
+                    onChange={(e) => setManualPort(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleManualConnect()}
+                    placeholder="포트"
+                    aria-label="연결할 피어 포트 (선택)"
+                    className="w-14 bg-vsc-bg border border-vsc-border rounded px-1.5 py-1 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+                  />
+                </div>
+                <button
+                  onClick={handleManualConnect}
+                  disabled={!manualHost.trim() || manualConnectStatus === 'connecting'}
+                  className="cursor-pointer w-full text-xs px-2 py-1 rounded bg-vsc-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+                >
+                  {manualConnectStatus === 'connecting' ? '연결 중...' : '연결'}
+                </button>
+                {manualConnectStatus === 'success' && (
+                  <p className="text-[11px] text-green-400 px-0.5">연결에 성공했습니다.</p>
+                )}
+                {manualConnectStatus?.error && (
+                  <p className="text-[11px] text-red-400 px-0.5">{manualConnectStatus.error}</p>
+                )}
+              </div>
+            )}
             <button
               onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
               className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${

@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 피어 발견
   startPeerDiscovery: () => ipcRenderer.invoke('start-peer-discovery'),
+  // 수동 피어 연결(#33) — mDNS/UDP 브로드캐스트 발견이 막힌 망에서 IP 직접 입력으로 연결
+  connectManualPeer: (params) => ipcRenderer.invoke('connect-manual-peer', params),
 
   // 메시지 전송
   sendGlobalMessage: (payload) => ipcRenderer.invoke('send-global-message', payload),
