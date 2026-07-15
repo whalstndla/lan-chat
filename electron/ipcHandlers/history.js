@@ -158,4 +158,6 @@ function registerHistoryHandlers(ctx) {
     getDMMessageRank(ctx.state.database, ctx.state.peerId, peerId, timestamp))
 }
 
-module.exports = { registerHistoryHandlers }
+// deriveSharedSecretForPeer / decryptDMRecord 는 채팅 내보내기(#74, electron/ipcHandlers/data.js)에서도
+// DM 복호화 경로를 그대로 재사용한다 — 복호화 로직을 두 곳에 중복 구현하지 않기 위함.
+module.exports = { registerHistoryHandlers, deriveSharedSecretForPeer, decryptDMRecord }

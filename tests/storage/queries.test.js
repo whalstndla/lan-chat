@@ -6,6 +6,8 @@ const {
   getDMHistory,
   getGlobalMessagesSince,
   getLatestGlobalMessageTimestamp,
+  getGlobalMessagesForExport,
+  getDMMessagesForExport,
 } = require('../../electron/storage/queries')
 
 describe('메시지 쿼리', () => {
@@ -237,5 +239,45 @@ describe('멘션 컬럼 마이그레이션(#29) — 기존 DB 호환', () => {
     // 새 멘션 메시지는 정상 저장
     expect(JSON.parse(newRow.mentions)).toEqual(['peer1'])
     legacyDb.close()
+  })
+})
+
+// 채팅 내보내기(#74)용 배치 조회 — getGlobalHistory/getDMHistory 는 "최신 N개" 화면 표시용으로
+// DESC+reverse 를 쓰지만, 내보내기는 offset 이 커질수록 계속 더 최신으로 이어져야 배치를 파일에
+// 순서대로 이어붙였을 때 전체가 시간순이 된다. 이를 ASC 페이지네이션으로 검증한다.
+describe('getGlobalMessagesForExport / getDMMessagesForExport — 내보내기용 ASC 페이지네이션(#74)', () => {
+  let db
+
+  beforeEach(() => { db = initDatabase(':memory:') })
+  afterEach(() => { closeDatabase(db) })
+
+  it('전체채팅 — offset 없이도 오래된 순으로 정렬해 반환한다', () => {
+    saveMessage(db, { id: 'g-3', type: 'message', from_id: 'p1', from_name: 'A', to_id: null, content: '세번째', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 3000 })
+    saveMessage(db, { id: 'g-1', type: 'message', from_id: 'p1', from_name: 'A', to_id: null, content: '첫번째', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 1000 })
+    saveMessage(db, { id: 'g-2', type: 'message', from_id: 'p1', from_name: 'A', to_id: null, content: '두번째', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 2000 })
+
+    const result = getGlobalMessagesForExport(db, 10, 0)
+    expect(result.map(m => m.id)).toEqual(['g-1', 'g-2', 'g-3'])
+  })
+
+  it('전체채팅 — 배치를 offset 순서대로 이어붙이면 전체가 시간순으로 이어진다', () => {
+    for (let i = 0; i < 5; i++) {
+      saveMessage(db, { id: `g-${i}`, type: 'message', from_id: 'p1', from_name: 'A', to_id: null, content: `msg${i}`, content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 1000 + i })
+    }
+    const batch1 = getGlobalMessagesForExport(db, 2, 0)
+    const batch2 = getGlobalMessagesForExport(db, 2, 2)
+    const batch3 = getGlobalMessagesForExport(db, 2, 4)
+    const combinedIds = [...batch1, ...batch2, ...batch3].map(m => m.id)
+    expect(combinedIds).toEqual(['g-0', 'g-1', 'g-2', 'g-3', 'g-4'])
+    expect(batch3).toHaveLength(1) // 마지막 배치는 limit 보다 적어 "더 이상 없음" 신호가 됨
+  })
+
+  it('DM — 상대와 나눈 메시지만 오래된 순으로 반환한다', () => {
+    saveMessage(db, { id: 'dm-2', type: 'dm', from_id: 'peer2', from_name: '상대', to_id: 'peer1', content: '두번째', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 2000 })
+    saveMessage(db, { id: 'dm-1', type: 'dm', from_id: 'peer1', from_name: '나', to_id: 'peer2', content: '첫번째', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 1000 })
+    saveMessage(db, { id: 'dm-other', type: 'dm', from_id: 'peer1', from_name: '나', to_id: 'peer3', content: '다른 상대', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 1500 })
+
+    const result = getDMMessagesForExport(db, 'peer1', 'peer2', 10, 0)
+    expect(result.map(m => m.id)).toEqual(['dm-1', 'dm-2'])
   })
 })

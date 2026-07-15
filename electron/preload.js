@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clearAllMessages: () => ipcRenderer.invoke('clear-all-messages'),
   clearAllDMs: () => ipcRenderer.invoke('clear-all-dms'),
 
+  // 채팅 내보내기(#74) — { scope: 'global'|'dm', peerId?, format: 'txt'|'json' }
+  exportChatHistory: (params) => ipcRenderer.invoke('export-chat-history', params),
+
   // 파일 저장 — ArrayBuffer를 Uint8Array로 변환 후 전송 (IPC 직렬화 안전)
   saveFile: (fileBuffer, fileName) => ipcRenderer.invoke('save-file', { fileBuffer: new Uint8Array(fileBuffer), fileName }),
 

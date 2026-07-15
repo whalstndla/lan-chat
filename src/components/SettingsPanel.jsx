@@ -1,6 +1,6 @@
 // src/components/SettingsPanel.jsx
-import React, { useState, useRef, useEffect } from 'react'
-import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download } from 'lucide-react'
+import React, { useState, useRef, useEffect, useMemo } from 'react'
+import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download, FileDown } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useUserStore from '../store/useUserStore'
 import usePeerStore from '../store/usePeerStore'
@@ -30,6 +30,16 @@ const NOTIFICATION_SCOPE_OPTIONS = [
   { value: 'dm', label: 'DM만' },
   { value: 'mention', label: '멘션만' },
   { value: 'off', label: '끄기' },
+]
+
+// 채팅 내보내기(#74) 옵션 — 범위(전체채팅/DM) + 형식(txt/json)
+const EXPORT_SCOPE_OPTIONS = [
+  { value: 'global', label: '전체채팅' },
+  { value: 'dm', label: 'DM' },
+]
+const EXPORT_FORMAT_OPTIONS = [
+  { value: 'txt', label: 'TXT' },
+  { value: 'json', label: 'JSON' },
 ]
 
 export default function SettingsPanel({ onClose }) {
@@ -99,6 +109,41 @@ export default function SettingsPanel({ onClose }) {
     setAutoLaunchSettings((prev) => ({ ...prev, ...nextSettings }))
     const result = await window.electronAPI.setAutoLaunchSettings?.(nextSettings)
     if (result) setAutoLaunchSettings(result)
+  }
+
+  // 채팅 내보내기(#74) — 범위(전체채팅/DM) + 형식(txt/json) 선택 후 저장 다이얼로그로 내보낸다.
+  const pastDMPeers = usePeerStore(state => state.pastDMPeers)
+  const onlinePeers = usePeerStore(state => state.onlinePeers)
+  const dmPeerOptions = useMemo(() => {
+    const peerMap = new Map()
+    pastDMPeers.forEach(peer => peerMap.set(peer.peerId, peer.nickname))
+    onlinePeers.forEach(peer => peerMap.set(peer.peerId, peer.nickname))
+    return Array.from(peerMap.entries()).map(([peerId, nickname]) => ({ peerId, nickname }))
+  }, [pastDMPeers, onlinePeers])
+
+  const [exportScope, setExportScope] = useState('global')
+  const [exportPeerId, setExportPeerId] = useState('')
+  const [exportFormat, setExportFormat] = useState('txt')
+  const [exportStatus, setExportStatus] = useState(null) // { type: 'loading'|'success'|'error', text }
+
+  async function handleExportChatHistory() {
+    if (exportScope === 'dm' && !exportPeerId) {
+      setExportStatus({ type: 'error', text: 'DM 상대를 선택해주세요.' })
+      return
+    }
+    setExportStatus({ type: 'loading', text: '내보내는 중...' })
+    const result = await window.electronAPI.exportChatHistory?.({
+      scope: exportScope,
+      peerId: exportScope === 'dm' ? exportPeerId : undefined,
+      format: exportFormat,
+    })
+    if (result?.ok) {
+      setExportStatus({ type: 'success', text: `저장 완료: ${result.path}` })
+    } else if (result?.canceled) {
+      setExportStatus(null)
+    } else {
+      setExportStatus({ type: 'error', text: '내보내기에 실패했습니다.' })
+    }
   }
 
   // 핸들러들
@@ -421,6 +466,50 @@ export default function SettingsPanel({ onClose }) {
         <>
           {renderSubPageHeader('데이터 관리')}
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+            {/* 채팅 내보내기(#74) — 전체채팅/DM 기록을 txt/json 파일로 백업 */}
+            <div className="pb-3 mb-1 border-b border-vsc-border space-y-2">
+              <label className="text-vsc-muted text-xs flex items-center gap-1"><FileDown size={11} />채팅 내보내기</label>
+              <div className="flex gap-1">
+                {EXPORT_SCOPE_OPTIONS.map(option => (
+                  <button key={option.value} onClick={() => setExportScope(option.value)}
+                    className={`flex-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+                      exportScope === option.value ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
+                    }`}
+                  >{option.label}</button>
+                ))}
+              </div>
+              {exportScope === 'dm' && (
+                <select
+                  value={exportPeerId}
+                  onChange={e => setExportPeerId(e.target.value)}
+                  className="w-full bg-vsc-panel border border-vsc-border rounded px-2 py-1 text-xs text-vsc-text outline-none focus:border-vsc-accent"
+                >
+                  <option value="">DM 상대 선택</option>
+                  {dmPeerOptions.map(peer => (
+                    <option key={peer.peerId} value={peer.peerId}>{peer.nickname}</option>
+                  ))}
+                </select>
+              )}
+              <div className="flex gap-1">
+                {EXPORT_FORMAT_OPTIONS.map(option => (
+                  <button key={option.value} onClick={() => setExportFormat(option.value)}
+                    className={`flex-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+                      exportFormat === option.value ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
+                    }`}
+                  >{option.label}</button>
+                ))}
+              </div>
+              <button onClick={handleExportChatHistory} disabled={exportStatus?.type === 'loading'}
+                className="cursor-pointer w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded text-xs bg-vsc-accent text-vsc-bg font-semibold hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity">
+                <Download size={12} />내보내기
+              </button>
+              {exportStatus && (
+                <p className={`text-[10px] break-all ${exportStatus.type === 'error' ? 'text-red-400' : exportStatus.type === 'success' ? 'text-green-400' : 'text-vsc-muted'}`}>
+                  {exportStatus.text}
+                </p>
+              )}
+            </div>
+
             {/* 링크 미리보기 토글 — 끄면 외부 서버로의 OG 요청을 완전히 막는다(완전 단절 모드) */}
             <div className="pb-3 mb-1 border-b border-vsc-border">
               <label className="flex items-center justify-between cursor-pointer">

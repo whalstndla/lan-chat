@@ -218,6 +218,30 @@ function getAllDMMessagesForSearch(db, peerId1, peerId2, limit = DM_SEARCH_FETCH
   `).all(peerId1, peerId2, peerId2, peerId1, limit)
 }
 
+// 채팅 내보내기(#74)용 전체채팅 배치 조회 — ASC(오래된 순) + LIMIT/OFFSET 페이지네이션.
+// getGlobalHistory 는 "최신 N개 화면 표시"용으로 DESC 조회 후 reverse() 하는데, 이 방식은
+// offset 이 커질수록 더 과거로 이동하므로 배치를 파일에 순서대로 이어붙이면 전체 순서가
+// 뒤죽박죽이 된다. 내보내기는 오래된 것부터 최신까지 그대로 이어붙여야 하므로 ASC 로 조회한다.
+function getGlobalMessagesForExport(db, limit, offset) {
+  return db.prepare(`
+    SELECT * FROM messages
+    WHERE type = 'message'
+    ORDER BY timestamp ASC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset)
+}
+
+// 채팅 내보내기(#74)용 DM 배치 조회 — 위 getGlobalMessagesForExport 와 동일한 이유로 ASC 사용.
+function getDMMessagesForExport(db, peerId1, peerId2, limit, offset) {
+  return db.prepare(`
+    SELECT * FROM messages
+    WHERE type = 'dm'
+      AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
+    ORDER BY timestamp ASC
+    LIMIT ? OFFSET ?
+  `).all(peerId1, peerId2, peerId2, peerId1, limit, offset)
+}
+
 // 검색 결과 점프용 — 특정 타임스탬프보다 최신인 메시지 개수를 반환한다(#36).
 // 이 값 + 1 을 limit 으로 getGlobalHistory/getDMHistory 를 호출하면, 오프셋 계산 없이
 // 한 번에 해당 메시지가 포함되는 지점까지의 히스토리를 정확히 불러올 수 있다.
@@ -332,4 +356,4 @@ function setVerified(db, peerId, verified) {
   db.prepare('UPDATE peer_keys SET verified = ? WHERE peer_id = ?').run(verified ? 1 : 0, peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache, getPinnedKey, pinKey, updatePinnedKey, setVerified }
+module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessagesForExport, getDMMessagesForExport, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache, getPinnedKey, pinKey, updatePinnedKey, setVerified }
