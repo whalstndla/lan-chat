@@ -269,6 +269,9 @@ async function flushPendingMessages(ctx, targetPeerId, retryCount = 0) {
             contentType: messagePayload.contentType,
             fileUrl: messagePayload.fileUrl,
             fileName: messagePayload.fileName,
+            // 답장 메타(#28)도 pending 재전송 시 동일하게 암호화 페이로드에 실어 보낸다.
+            replyToId: messagePayload.replyToId || null,
+            replyPreview: messagePayload.replyPreview || null,
           },
           sharedSecret,
           ctx.state.peerId,

@@ -12,16 +12,43 @@ const { sendPeerMessage, broadcastPeerMessage, getCurrentNicknameSafely, cacheOw
 const ALLOWED_CONTENT_TYPES = ['text', 'image', 'video', 'file']
 const ALLOWED_FORMATS = [null, undefined, 'markdown']
 const MAX_CONTENT_LENGTH = 10000
+// 답장(#28) reply 메타 크기 상한 — 비정규화 스냅샷이 비대해지지 않도록 방어적으로 자른다.
+const MAX_REPLY_SNIPPET_LENGTH = 200
+const MAX_REPLY_FROMNAME_LENGTH = 100
+
+// 답장 메타 정규화/방어적 검증 — renderer/wire 어느 쪽 입력이든 { fromName, snippet } 만
+// 문자열로 남기고 길이를 제한한다. replyToId 가 없으면 전부 null(=일반 메시지).
+// 반환: { replyToId, replyPreview(객체|null, 라이브/와이어용), replyPreviewJson(문자열|null, DB용) }
+function normalizeReply(replyToId, replyPreview) {
+  if (!replyToId || typeof replyToId !== 'string') {
+    return { replyToId: null, replyPreview: null, replyPreviewJson: null }
+  }
+  let sanitizedPreview = null
+  if (replyPreview && typeof replyPreview === 'object') {
+    const fromName = typeof replyPreview.fromName === 'string'
+      ? replyPreview.fromName.slice(0, MAX_REPLY_FROMNAME_LENGTH) : ''
+    const snippet = typeof replyPreview.snippet === 'string'
+      ? replyPreview.snippet.slice(0, MAX_REPLY_SNIPPET_LENGTH) : ''
+    sanitizedPreview = { fromName, snippet }
+  }
+  return {
+    replyToId,
+    replyPreview: sanitizedPreview,
+    replyPreviewJson: sanitizedPreview ? JSON.stringify(sanitizedPreview) : null,
+  }
+}
 
 function registerMessageHandlers(ctx) {
   // 전체채팅 메시지 전송
-  ipcMain.handle('send-global-message', (_, { content, contentType, fileUrl, fileName, format }) => {
+  ipcMain.handle('send-global-message', (_, { content, contentType, fileUrl, fileName, format, replyToId, replyPreview }) => {
     // 입력 검증 — 실패 시 null 대신 { ok:false, error } 를 반환한다.
     // 과거에는 null 을 그대로 반환해 렌더러가 null.fromId 등에 접근하며 TypeError 로
     // 화이트스크린이 발생했다 (렌더러 측 null 체크는 MessageInput.jsx 에서 별도 처리).
     if (content && content.length > MAX_CONTENT_LENGTH) return { ok: false, error: 'contentTooLong' }
     if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return { ok: false, error: 'invalidContentType' }
     if (!ALLOWED_FORMATS.includes(format)) format = null
+    // 답장(#28) — additive. 전체채팅은 비암호화라 reply 메타를 평문 와이어 필드로 전달한다.
+    const normalizedReply = normalizeReply(replyToId, replyPreview)
     const currentNickname = getCurrentNicknameSafely(ctx)
     const message = {
       id: uuidv4(),
@@ -35,6 +62,8 @@ function registerMessageHandlers(ctx) {
       fileUrl: fileUrl || null,
       fileName: fileName || null,
       timestamp: Date.now(),
+      replyToId: normalizedReply.replyToId,
+      replyPreview: normalizedReply.replyPreview,
     }
     broadcastPeerMessage(ctx, message)
     // 메시지 전송 완료 시점에 typing-stop 을 브로드캐스트 — 수신측에 최대 3초간
@@ -50,6 +79,8 @@ function registerMessageHandlers(ctx) {
         encrypted_payload: null,
         file_url: message.fileUrl, file_name: message.fileName,
         timestamp: message.timestamp,
+        reply_to_id: normalizedReply.replyToId,
+        reply_preview: normalizedReply.replyPreviewJson,
       })
     } catch { /* DB 저장 실패 시 무시 */ }
     // 자기가 보낸 파일을 영구 캐시로 복사 (재시작 / 임시폴더 정리 후에도 표시 유지)
@@ -61,11 +92,14 @@ function registerMessageHandlers(ctx) {
   })
 
   // DM 전송 (E2E 암호화, 오프라인이면 pending 큐에 저장)
-  ipcMain.handle('send-dm', (_, { recipientPeerId, content, contentType, fileUrl, fileName, format }) => {
+  ipcMain.handle('send-dm', (_, { recipientPeerId, content, contentType, fileUrl, fileName, format, replyToId, replyPreview }) => {
     // 입력 검증 — 실패 시 null 대신 { ok:false, error } 를 반환한다 (send-global-message 와 동일 이유)
     if (content && content.length > MAX_CONTENT_LENGTH) return { ok: false, error: 'contentTooLong' }
     if (!ALLOWED_CONTENT_TYPES.includes(contentType)) return { ok: false, error: 'invalidContentType' }
     if (!ALLOWED_FORMATS.includes(format)) format = null
+    // 답장(#28) — DM 은 reply 스니펫이 원본 내용을 담으므로 평문 노출을 피해 fileName 처럼
+    // "암호화 페이로드 안"으로 전송하고, DB 에는 file_url/file_name 처럼 평문 컬럼으로 저장한다.
+    const normalizedReply = normalizeReply(replyToId, replyPreview)
     const currentNickname = getCurrentNicknameSafely(ctx)
     const messageId = uuidv4()
     const timestamp = Date.now()
@@ -88,7 +122,7 @@ function registerMessageHandlers(ctx) {
       savePendingMessage(ctx.state.database, {
         id: messageId,
         targetPeerId: recipientPeerId,
-        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
+        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null, replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview },
         originalTimestamp: timestamp,
       })
       // messages 테이블에 평문으로 저장 (히스토리 표시용)
@@ -99,12 +133,14 @@ function registerMessageHandlers(ctx) {
         content_type: contentType, format: format || null, encrypted_payload: null,
         file_url: fileUrl || null, file_name: fileName || null,
         timestamp,
+        reply_to_id: normalizedReply.replyToId, reply_preview: normalizedReply.replyPreviewJson,
       })
       cacheOwnFileIfAny()
       return {
         id: messageId, type: 'dm', from: currentNickname, fromId: ctx.state.peerId,
         to: recipientPeerId, content: content || null, contentType, format: format || null,
         fileUrl: fileUrl || null, fileName: fileName || null, timestamp, pending: true,
+        replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview,
       }
     }
 
@@ -112,8 +148,9 @@ function registerMessageHandlers(ctx) {
     try {
       const sharedSecret = deriveSharedSecret(ctx.state.myPrivateKey, recipientPublicKey)
       // ctx.state.peerId = 나(송신자), recipientPeerId = 수신자
+      // 답장 메타(replyToId/replyPreview)도 페이로드에 함께 암호화 — 평문 와이어 노출 방지.
       encryptedPayload = encryptDM(
-        { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null },
+        { content: content || null, contentType, fileUrl: fileUrl || null, fileName: fileName || null, replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview },
         sharedSecret,
         ctx.state.peerId,
         recipientPeerId
@@ -123,7 +160,7 @@ function registerMessageHandlers(ctx) {
       savePendingMessage(ctx.state.database, {
         id: messageId,
         targetPeerId: recipientPeerId,
-        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
+        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null, replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview },
         originalTimestamp: timestamp,
       })
       saveMessage(ctx.state.database, {
@@ -133,12 +170,14 @@ function registerMessageHandlers(ctx) {
         content_type: contentType, format: format || null, encrypted_payload: null,
         file_url: fileUrl || null, file_name: fileName || null,
         timestamp,
+        reply_to_id: normalizedReply.replyToId, reply_preview: normalizedReply.replyPreviewJson,
       })
       cacheOwnFileIfAny()
       return {
         id: messageId, type: 'dm', from: currentNickname, fromId: ctx.state.peerId,
         to: recipientPeerId, content: content || null, contentType, format: format || null,
         fileUrl: fileUrl || null, fileName: fileName || null, timestamp, pending: true,
+        replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview,
       }
     }
 
@@ -149,13 +188,14 @@ function registerMessageHandlers(ctx) {
     }
 
     const sent = sendPeerMessage(ctx, recipientPeerId, message)
+    // 답장 메타는 encryptedPayload 안에만 실어 전송하고, 내 DB 에는 평문 컬럼으로 저장한다.
 
     if (!sent) {
       // 소켓은 있지만 연결 끊긴 경우 → pending 저장
       savePendingMessage(ctx.state.database, {
         id: messageId,
         targetPeerId: recipientPeerId,
-        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null },
+        messagePayload: { content: content || null, contentType, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null, replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview },
         originalTimestamp: timestamp,
       })
     }
@@ -169,14 +209,16 @@ function registerMessageHandlers(ctx) {
         content_type: contentType, format: format || null, encrypted_payload: encryptedPayload,
         file_url: fileUrl || null, file_name: fileName || null,
         timestamp: message.timestamp,
+        reply_to_id: normalizedReply.replyToId, reply_preview: normalizedReply.replyPreviewJson,
       })
     } catch { /* DB 저장 실패 시 무시 */ }
 
     cacheOwnFileIfAny()
 
-    // 렌더러에는 복호화된 내용으로 반환
+    // 렌더러에는 복호화된 내용으로 반환 (답장 메타는 평문 객체로 함께 반환해 즉시 인용 렌더)
     return {
       ...message, content: content || null, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null,
+      replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview,
       ...(sent ? {} : { pending: true }),
     }
   })
