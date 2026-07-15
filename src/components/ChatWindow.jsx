@@ -1,12 +1,13 @@
 // src/components/ChatWindow.jsx
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, BellOff, ChevronDown, Search } from 'lucide-react'
 import useChatStore, { getRoomKey } from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import Message from './Message'
 import MessageInput from './MessageInput'
 import ChatSearchBar from './chat/ChatSearchBar'
-import { isFirstUnreadMessage, getUnreadMessages } from '../utils/unreadDivider'
+import { getUnreadMessages } from '../utils/unreadDivider'
+import { buildMessageRenderItems } from '../utils/buildMessageRenderItems'
 
 export default function ChatWindow() {
   const currentRoom = useChatStore(state => state.currentRoom)
@@ -60,6 +61,17 @@ export default function ChatWindow() {
   // 안읽음 점프 버튼(#39)용 — 구분선 렌더링과 동일한 순수 함수로 계산해 기준이 어긋나지 않게 한다.
   const unreadMessages = getUnreadMessages(currentMessages, lastReadTimestamp, myPeerId)
   const firstUnreadMessageId = unreadMessages[0]?.id || null
+
+  // 수정 시작 핸들러 — 매 렌더마다 새 함수가 생기면 Message 의 React.memo 가 무력화되므로
+  // ref 기반으로 안정화한다(messageInputRef 는 렌더 간 동일 참조라 의존성이 없다).
+  const handleStartEdit = useCallback((msg) => messageInputRef.current?.startEdit(msg), [])
+
+  // 렌더 아이템 목록(날짜/안읽음 구분선 + 연속 이미지 그룹 구조)을 구조가 바뀔 때만 재계산한다.
+  // 자주 바뀌는 isHighlighted/searchQuery 는 여기 넣지 않고 렌더 시 각 Message 에 props 로 전달한다.
+  const renderItems = useMemo(
+    () => buildMessageRenderItems(currentMessages, lastReadTimestamp, myPeerId),
+    [currentMessages, lastReadTimestamp, myPeerId]
+  )
 
   const chatTitle = currentRoom.type === 'global'
     ? '전체 채팅'
@@ -488,95 +500,34 @@ export default function ChatWindow() {
                 <span className="text-xs text-vsc-muted">이전 메시지 불러오는 중...</span>
               </div>
             )}
-            {(() => {
-              const elements = []
-              let i = 0
-              while (i < currentMessages.length) {
-                const message = currentMessages[i]
-                const prevMessage = i > 0 ? currentMessages[i - 1] : null
-                const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
-                const messageContentType = message.contentType || message.content_type
-                const messageSenderId = message.fromId || message.from_id
-
-                // 날짜 구분선: 이전 메시지와 날짜가 다르면 표시
-                const messageDate = new Date(message.timestamp)
-                const messageDateStr = messageDate.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                const prevDateStr = prevMessage
-                  ? new Date(prevMessage.timestamp).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                  : null
-                if (prevDateStr !== null && messageDateStr !== prevDateStr) {
-                  const year = messageDate.getFullYear()
-                  const month = String(messageDate.getMonth() + 1).padStart(2, '0')
-                  const day = String(messageDate.getDate()).padStart(2, '0')
-                  elements.push(
-                    <div key={`date-${message.id}`} className="flex items-center gap-2 px-4 py-2 my-1">
-                      <div className="flex-1 border-t border-vsc-border" />
-                      <span className="text-xs text-vsc-muted shrink-0">{year}년 {month}월 {day}일</span>
-                      <div className="flex-1 border-t border-vsc-border" />
-                    </div>
-                  )
-                }
-
-                const shouldShowDivider = isFirstUnreadMessage(message, prevMessage, lastReadTimestamp, isMyMessage)
-
-                if (shouldShowDivider) {
-                  elements.push(
-                    <div key={`divider-${message.id}`} className="flex items-center gap-2 px-4 py-1 my-1">
-                      <div className="flex-1 border-t border-red-400/50" />
-                      <span className="text-xs text-red-400 font-semibold shrink-0">여기서부터 새 메시지</span>
-                      <div className="flex-1 border-t border-red-400/50" />
-                    </div>
-                  )
-                }
-
-                // 연속 이미지 그룹 감지
-                if (messageContentType === 'image') {
-                  const imageGroup = [message]
-                  let j = i + 1
-                  while (j < currentMessages.length) {
-                    const next = currentMessages[j]
-                    const nextContentType = next.contentType || next.content_type
-                    const nextSenderId = next.fromId || next.from_id
-                    if (nextContentType === 'image' && nextSenderId === messageSenderId) {
-                      imageGroup.push(next)
-                      j++
-                    } else break
-                  }
-
-                  if (imageGroup.length > 1) {
-                    // 연속 이미지 그룹 → 첫 번째만 Message로 렌더, 나머지는 그리드에 포함
-                    const isGrouped = prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId
-                    elements.push(
-                      <Message
-                        key={message.id}
-                        message={message}
-                        onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
-                        isHighlighted={highlightedMessageId === message.id}
-                        isGrouped={isGrouped}
-                        extraImages={imageGroup.slice(1)}
-                        searchQuery={showSearch ? searchQuery : ''}
-                      />
-                    )
-                    i = j
-                    continue
-                  }
-                }
-
-                // 일반 메시지
-                elements.push(
-                  <Message
-                    key={message.id}
-                    message={message}
-                    onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
-                    isHighlighted={highlightedMessageId === message.id}
-                    isGrouped={prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId}
-                    searchQuery={showSearch ? searchQuery : ''}
-                  />
-                )
-                i++
-              }
-              return elements
-            })()}
+            {renderItems.map(item => (
+              <React.Fragment key={item.message.id}>
+                {/* 날짜 구분선: 이전 메시지와 날짜가 다르면 표시 */}
+                {item.showDateDivider && (
+                  <div className="flex items-center gap-2 px-4 py-2 my-1">
+                    <div className="flex-1 border-t border-vsc-border" />
+                    <span className="text-xs text-vsc-muted shrink-0">{item.dateLabel}</span>
+                    <div className="flex-1 border-t border-vsc-border" />
+                  </div>
+                )}
+                {/* 안읽음 구분선(#39) */}
+                {item.showUnreadDivider && (
+                  <div className="flex items-center gap-2 px-4 py-1 my-1">
+                    <div className="flex-1 border-t border-red-400/50" />
+                    <span className="text-xs text-red-400 font-semibold shrink-0">여기서부터 새 메시지</span>
+                    <div className="flex-1 border-t border-red-400/50" />
+                  </div>
+                )}
+                <Message
+                  message={item.message}
+                  onStartEdit={handleStartEdit}
+                  isHighlighted={highlightedMessageId === item.message.id}
+                  isGrouped={item.isGrouped}
+                  extraImages={item.extraImages}
+                  searchQuery={showSearch ? searchQuery : ''}
+                />
+              </React.Fragment>
+            ))}
             </>
           )}
 
