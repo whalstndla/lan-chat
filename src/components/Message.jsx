@@ -14,6 +14,8 @@ import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
 import useFileDownload from '../hooks/useFileDownload'
 import { highlightText } from '../utils/highlightText'
+import { highlightMentions } from '../utils/highlightMentions'
+import { parseStoredMentions, resolveMentionNickname } from '../utils/mentions'
 
 // timestamp → "오후 2:30" 형식
 function formatTime(timestamp) {
@@ -127,6 +129,18 @@ function extractFirstUrl(text) {
   return match ? match[0] : null
 }
 
+// 멘션(#29) 하이라이트 + 링크 파싱을 함께 적용한 일반 텍스트 렌더링.
+// highlightMentions 가 먼저 "@닉네임" 부분을 배지로 감싸고, 나머지 순수 문자열 구간에만
+// parseLinksInText 를 적용해 링크 자동 인식을 그대로 유지한다(#37 검색 하이라이트와 동일하게
+// 두 처리를 동시에 적용하려면 별도 합성이 필요해, 이 함수로 그 합성을 담당한다).
+function renderTextWithMentions(text, mentionedNicknames) {
+  const withMentions = highlightMentions(text, mentionedNicknames)
+  if (typeof withMentions === 'string') return parseLinksInText(withMentions)
+  return withMentions.map((part, index) => (
+    <React.Fragment key={index}>{typeof part === 'string' ? parseLinksInText(part) : part}</React.Fragment>
+  ))
+}
+
 // 북마크 목록(#34)에 표시할 미리보기 문자열 계산 — 첨부 타입은 텍스트 대신 안내 문구.
 const BOOKMARK_PREVIEW_MAX_LENGTH = 100
 function getBookmarkPreview(message, contentType, fileName) {
@@ -141,6 +155,7 @@ function getBookmarkPreview(message, contentType, fileName) {
 
 function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
   const myPeerId = useUserStore(state => state.myPeerId)
+  const myNickname = useUserStore(state => state.myNickname)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   // 리액션 — 스토어의 reactions 맵을 구독 (하이드레이션 + 실시간 갱신 반영)
   const reactions = useChatStore(state => state.reactions[message.id]) || {}
@@ -169,6 +184,25 @@ function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = 
     () => parseReplyPreview(message.replyPreview ?? message.reply_preview),
     [message.replyPreview, message.reply_preview]
   )
+
+  // 멘션(#29) — 라이브(camelCase 배열)/DB(JSON 문자열) 양쪽 경로 모두 허용.
+  const mentionedPeerIds = useMemo(() => parseStoredMentions(message.mentions), [message.mentions])
+  const isMeMentioned = mentionedPeerIds.includes(myPeerId)
+
+  // 멘션된 닉네임을 JSON 직렬화한 "원시 문자열"로만 좁게 구독 — onlinePeers/pastDMPeers 배열
+  // 전체가 아니라 실제로 이 메시지가 멘션한 닉네임 목록만 선택한다. 문자열은 값 비교(===)라서
+  // 계산 결과가 같으면(=멘션 대상 피어의 닉네임이 안 바뀌었으면) 무관한 피어 상태 변화로
+  // 리렌더되지 않는다(위 senderProfileImageUrl 과 동일한 이유로 좁게 구독). 닉네임에 공백 등
+  // 임의 문자가 섞여도 안전하도록 구분자 기반 join/split 대신 JSON 직렬화를 사용한다.
+  const mentionedNicknamesKey = usePeerStore(state => {
+    if (mentionedPeerIds.length === 0) return '[]'
+    return JSON.stringify(
+      mentionedPeerIds
+        .map(peerId => resolveMentionNickname(peerId, { myPeerId, myNickname, onlinePeers: state.onlinePeers, pastDMPeers: state.pastDMPeers }))
+        .filter(Boolean)
+    )
+  })
+  const mentionedNicknames = useMemo(() => JSON.parse(mentionedNicknamesKey), [mentionedNicknamesKey])
 
   // 텍스트 메시지에서 첫 번째 URL 추출 (링크 프리뷰용)
   const firstUrl = useMemo(() => {
@@ -232,7 +266,15 @@ function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = 
     <>
       <div
         data-message-id={message.id}
-        className={`flex gap-3 px-4 ${isGrouped ? 'py-0.5' : 'py-1.5'} hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${isHighlighted ? 'bg-yellow-500/10 border-l-2 border-yellow-400 transition-colors duration-300' : 'transition-colors duration-300'}`}
+        className={`flex gap-3 px-4 ${isGrouped ? 'py-0.5' : 'py-1.5'} hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${
+          isHighlighted
+            ? 'bg-yellow-500/10 border-l-2 border-yellow-400 transition-colors duration-300'
+            // 멘션(#29) — 내가 언급된 메시지는 검색 점프 하이라이트보다 약하게, 과하지 않은
+            // accent 톤 배경으로만 구분한다(검색 하이라이트가 우선).
+            : isMeMentioned
+              ? 'bg-vsc-accent/5 border-l-2 border-vsc-accent/30 transition-colors duration-300'
+              : 'transition-colors duration-300'
+        }`}
       >
         {/* 아바타 */}
         {isGrouped ? (
@@ -312,15 +354,15 @@ function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = 
             {!message.decryptionFailed && (contentType === 'text' || !contentType) && (
               <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words min-w-0 overflow-hidden">
                 {message.format === 'markdown' ? (
-                  <MarkdownRenderer content={message.content} />
+                  <MarkdownRenderer content={message.content} mentionedNicknames={mentionedNicknames} />
                 ) : (
                   <span className="whitespace-pre-wrap">
                     {searchQuery.trim()
-                      // 검색 중에는 검색어 하이라이트를 우선한다(#37) — 링크 파싱과 동시에
+                      // 검색 중에는 검색어 하이라이트를 우선한다(#37) — 멘션/링크 파싱과 동시에
                       // 적용하려면 별도 처리가 필요해, 검색 바가 열려있는 동안에는 텍스트
-                      // 안의 링크가 일시적으로 클릭 불가능해지는 단순한 트레이드오프를 택했다.
+                      // 안의 멘션/링크가 일시적으로 강조·클릭 불가능해지는 단순한 트레이드오프를 택했다.
                       ? highlightText(message.content || '', searchQuery)
-                      : parseLinksInText(message.content || '')}
+                      : renderTextWithMentions(message.content || '', mentionedNicknames)}
                   </span>
                 )}
               </div>
