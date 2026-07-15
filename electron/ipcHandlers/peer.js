@@ -10,7 +10,8 @@ const { connectToPeer, disconnectAll, disconnectFromPeer } = require('../peer/ws
 const { closeAllServerClients } = require('../peer/wsServer')
 const { connectManualPeer } = require('../peer/manualConnect')
 const { getFilePort } = require('../peer/fileServer')
-const { loadPeerCache, deletePeerCache } = require('../storage/queries')
+const { loadPeerCache, deletePeerCache, updatePinnedKey } = require('../storage/queries')
+const { importPublicKey } = require('../crypto/keyManager')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 const { PeerManager } = require('../peer/manager')
 const {
@@ -48,6 +49,8 @@ function registerPeerHandlers(ctx) {
       // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
       if (ctx.state.wsServerInfo) closeAllServerClients(ctx.state.wsServerInfo)
       ctx.state.peerPublicKeyMap.clear()
+      // 이전 세대의 키 변경 보류 상태도 초기화 — 새 발견 사이클에서 stale 경고가 남지 않게 한다(#59).
+      ctx.state.pendingKeyChangeMap.clear()
       clearAllPeerConnectRetryState(ctx)
       // 글로벌 세대 증가 — 이전 세대의 연결에서 발생하는 stale close/peer-left를 무시하기 위함
       ctx.state.discoveryEpoch++
@@ -371,6 +374,34 @@ function registerPeerHandlers(ctx) {
     })
     writePeerDebugLog('main.manualConnect.result', { host, wsPort, result })
     return result
+  })
+
+  // TOFU 키 변경 승인(#59) — 사용자가 "상대 보안키가 바뀌었다"는 경고를 명시적으로 신뢰.
+  // 보류(pendingKeyChangeMap)돼 있던 새 공개키를 고정 키로 교체하고 세션 맵을 새 키로 갱신한다.
+  // 이 IPC 호출(=사용자의 명시적 승인) 없이는 키가 절대 자동 교체되지 않는다.
+  ipcMain.handle('trust-peer-key', (_event, params) => {
+    const { peerId } = params || {}
+    if (!peerId) return { success: false, error: 'peerId 가 필요합니다' }
+    const newPublicKey = ctx.state.pendingKeyChangeMap.get(peerId)
+    if (!newPublicKey) {
+      // 이미 해제됐거나(정상 복귀) 보류 중인 변경이 없음 — 조용히 성공 처리.
+      return { success: false, error: '보류 중인 키 변경이 없습니다' }
+    }
+    try {
+      if (ctx.state.database) {
+        updatePinnedKey(ctx.state.database, { peerId, publicKey: newPublicKey })
+      }
+      // 세션 맵을 새 키로 교체 — 이제부터 이 피어와의 암/복호화가 새 키로 이뤄진다.
+      ctx.state.peerPublicKeyMap.set(peerId, importPublicKey(newPublicKey))
+      ctx.state.pendingKeyChangeMap.delete(peerId)
+      writePeerDebugLog('main.trustPeerKey.approved', { peerId })
+      // 신뢰 직후, 보류돼 있던 오프라인 메시지를 새 키로 재전송 시도한다.
+      flushPendingMessages(ctx, peerId)
+      return { success: true }
+    } catch (err) {
+      writePeerDebugLog('main.trustPeerKey.error', { peerId, error: err.message })
+      return { success: false, error: err.message }
+    }
   })
 }
 

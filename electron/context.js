@@ -22,6 +22,11 @@ function createAppContext(config) {
       tray: null,
       isQuitting: false,
       peerPublicKeyMap: new Map(),
+      // TOFU 키 고정(#59) — 고정된 키와 불일치하는 hello 를 받았을 때, 사용자가 아직
+      // 승인하지 않은 "보류 중인 새 공개키"를 peerId → publicKeyBase64 로 담아둔다.
+      // 사용자가 trust-peer-key 로 명시적으로 승인해야만 이 키가 고정 키/세션 맵으로
+      // 반영되며, 그전까지는 절대 자동 교체되지 않는다.
+      pendingKeyChangeMap: new Map(),
       flushingPeers: new Set(),
       peerConnectInFlightSet: new Set(),
       peerConnectRetryTimerMap: new Map(),

@@ -215,6 +215,8 @@ function registerAuthHandlers(ctx) {
     disconnectAll()
     if (ctx.state.wsServerInfo) closeAllServerClients(ctx.state.wsServerInfo)
     ctx.state.peerPublicKeyMap.clear()
+    // TOFU 키 변경 보류 상태도 로그아웃 시 폐기 — 다음 세션에 stale 경고가 남지 않게 한다(#59).
+    ctx.state.pendingKeyChangeMap.clear()
     clearAllPeerConnectRetryState(ctx)
     clearAllPendingFileRequests(ctx)
     clearAllFileChunkTransfers(ctx)
