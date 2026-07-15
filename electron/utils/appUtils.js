@@ -7,7 +7,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const { getProfile } = require('../storage/profile')
-const { saveFileCache, getFileCache, deleteMessage } = require('../storage/queries')
+const { saveFileCache, getFileCache, deleteMessage, getLatestGlobalMessageTimestamp } = require('../storage/queries')
 const { getPendingMessages, deletePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
 const { getFilePort } = require('../peer/fileServer')
@@ -148,6 +148,24 @@ function sendPeerMessage(ctx, targetPeerId, messageObj) {
 function broadcastPeerMessage(ctx, messageObj) {
   getConnectedPeerIds(ctx).forEach((targetPeerId) => {
     sendPeerMessage(ctx, targetPeerId, messageObj)
+  })
+}
+
+// #31 전체채팅 히스토리 동기화 — 연결(hello 핸드셰이크) 완료 직후 1회 호출.
+// 내 DB 의 가장 최근 전체채팅 timestamp 를 실어 상대에게 history-sync-request 를 보낸다.
+// 상대는 그보다 최신(>=)인 전체채팅을 history-sync-response 로 돌려주고, 그 응답 수신은
+// 새 요청을 만들지 않으므로 증폭/무한루프가 없다(요청은 오직 이 지점에서만 발생).
+// 양쪽이 서로 요청해도(역방향 연결 포함) 수신측 dedup(INSERT OR IGNORE + 렌더러 id 검사)으로 안전.
+function sendHistorySyncRequest(ctx, targetPeerId) {
+  if (!ctx.state.database) return false
+  let sinceTimestamp = 0
+  try {
+    sinceTimestamp = getLatestGlobalMessageTimestamp(ctx.state.database)
+  } catch { /* DB 조회 실패 시 0(전체 요청)으로 폴백 */ }
+  return sendPeerMessage(ctx, targetPeerId, {
+    type: 'history-sync-request',
+    fromId: ctx.state.peerId,
+    sinceTimestamp,
   })
 }
 
@@ -537,6 +555,7 @@ module.exports = {
   hasPeerConnection,
   sendPeerMessage,
   broadcastPeerMessage,
+  sendHistorySyncRequest,
   incrementBadge,
   clearBadge,
   showNotification,

@@ -14,6 +14,7 @@ const { getFilePort } = require('../../fileServer')
 const {
   sendToRenderer,
   sendPeerMessage,
+  sendHistorySyncRequest,
   flushPendingMessages,
   buildMyKeyExchangePayload,
   getMyAdvertisedAddresses,
@@ -58,6 +59,11 @@ module.exports = function handleHelloV2({ message, ctx, reply }) {
     // v0.8.0+: reply 도 v2 hello 포맷. (buildMyKeyExchangePayload 는 내부적으로 buildMyHelloPayload 호출)
     const currentNicknameForReply = getProfile(ctx.state.database)?.nickname || ''
     reply(buildMyKeyExchangePayload(ctx, ctx.state.peerId, currentNicknameForReply))
+
+    // #31 전체채팅 히스토리 동기화 — hello 핸드셰이크 완료(=피어 ready) 직후 1회 요청 송신.
+    // 이 시점엔 공개키 저장 + (인바운드) 소켓 태깅이 끝나 sendPeerMessage 로 도달 가능하다.
+    // 요청은 여기서만 발생하며 응답 수신은 새 요청을 만들지 않아 무한루프가 없다.
+    sendHistorySyncRequest(ctx, hello.peerId)
 
     // 피어 캐시
     if (ctx.state.database && hello.addresses[0] && hello.wsPort && hello.peerId !== ctx.state.peerId) {

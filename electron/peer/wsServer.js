@@ -3,10 +3,13 @@ const { WebSocketServer, WebSocket } = require('ws')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
 // 허용되는 메시지 타입 화이트리스트 — Phase 1c: 'hello' (wire v2) 추가
+// #31: 'history-sync-request'/'history-sync-response' 추가 (additive — 구버전은 이 목록에
+// 없어 drop = graceful degradation, WIRE_VERSION 불변).
 const ALLOWED_MESSAGE_TYPES = [
   'key-exchange', 'hello', 'typing', 'typing-stop', 'delete-message', 'nickname-changed',
   'read-receipt', 'message', 'dm', 'reaction', 'edit-message', 'status-changed',
   'file-request', 'file-data', 'file-request-error',
+  'history-sync-request', 'history-sync-response',
 ]
 
 // IP별 연결 수 추적 (DoS 방지)

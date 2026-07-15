@@ -22,6 +22,8 @@ const keyExchange = require('./handlers/keyExchange')
 const hello = require('./handlers/hello')
 const dm = require('./handlers/dm')
 const globalMessage = require('./handlers/message')
+const historySyncRequest = require('./handlers/historySyncRequest')
+const historySyncResponse = require('./handlers/historySyncResponse')
 
 // type → handler 매핑. 알려지지 않은 type 은 무시됨.
 const HANDLERS = {
@@ -40,6 +42,9 @@ const HANDLERS = {
   'hello': hello,                    // v2 (수신 지원만, 송신은 v0.9.0부터)
   'dm': dm,
   'message': globalMessage,
+  // #31 전체채팅 히스토리 동기화 (additive — 구버전은 화이트리스트에서 drop = graceful degradation)
+  'history-sync-request': historySyncRequest,
+  'history-sync-response': historySyncResponse,
 }
 
 const { perfEnabled } = require('../../utils/perf')
