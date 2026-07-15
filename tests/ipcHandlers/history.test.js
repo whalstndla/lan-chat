@@ -375,3 +375,72 @@ describe('get-global-message-rank / get-dm-message-rank — 검색 결과 점프
     expect(handler(null, { peerId: 'peer2', timestamp: 1000 })).toBe(1)
   })
 })
+
+// 답장/인용(#28) — get-dm-history 가 reply_to_id/reply_preview 를 보존하는지 검증.
+// DM 은 reply 메타를 암호화 페이로드 안에 실어 보내므로, (1) 평문 컬럼에 저장된 경우와
+// (2) 키 교환 이전 암호문만 저장된(컬럼 null) 경우 모두 복호화로 복원되어야 한다.
+describe('get-dm-history — 답장 메타(#28) 보존', () => {
+  let db
+  const peer1 = generateKeyPair()
+  const peer2 = generateKeyPair()
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    __handlers.clear()
+  })
+
+  afterEach(() => closeDatabase(db))
+
+  function buildCtx() {
+    return {
+      state: {
+        database: db,
+        peerId: 'peer1',
+        myPrivateKey: peer1.privateKey,
+        peerPublicKeyMap: new Map([['peer2', peer2.publicKey]]),
+        localIP: 'localhost',
+      },
+    }
+  }
+
+  it('평문 reply 컬럼에 저장된 답장 메타를 그대로 반환한다', () => {
+    const ctx = buildCtx()
+    const sharedSecret = deriveSharedSecret(peer1.privateKey, peer2.publicKey)
+    const encryptedPayload = encryptDM(
+      { content: '답장 내용', contentType: 'text', fileUrl: null, fileName: null, replyToId: 'orig-1', replyPreview: { fromName: '상대', snippet: '원본' } },
+      sharedSecret, 'peer1', 'peer2'
+    )
+    saveMessage(db, {
+      id: 'dm-reply', type: 'dm', from_id: 'peer1', from_name: '나', to_id: 'peer2',
+      content: null, content_type: 'text', encrypted_payload: encryptedPayload,
+      file_url: null, file_name: null, timestamp: 1000,
+      reply_to_id: 'orig-1', reply_preview: JSON.stringify({ fromName: '상대', snippet: '원본' }),
+    })
+
+    registerHistoryHandlers(ctx)
+    const result = __handlers.get('get-dm-history')(null, { peerId1: 'peer1', peerId2: 'peer2' })
+    expect(result[0].reply_to_id).toBe('orig-1')
+    expect(JSON.parse(result[0].reply_preview)).toEqual({ fromName: '상대', snippet: '원본' })
+  })
+
+  it('컬럼이 비어있어도(키 교환 이전 암호문) 복호화 페이로드에서 답장 메타를 복원한다', () => {
+    const ctx = buildCtx()
+    const sharedSecret = deriveSharedSecret(peer1.privateKey, peer2.publicKey)
+    const encryptedPayload = encryptDM(
+      { content: '답장 내용', contentType: 'text', fileUrl: null, fileName: null, replyToId: 'orig-2', replyPreview: { fromName: '상대', snippet: '스니펫' } },
+      sharedSecret, 'peer2', 'peer1'
+    )
+    // saveCiphertextOnly 경로 재현 — reply 컬럼은 null, 데이터는 암호문 안에만 존재
+    saveMessage(db, {
+      id: 'dm-cipher', type: 'dm', from_id: 'peer2', from_name: '상대', to_id: 'peer1',
+      content: null, content_type: 'text', encrypted_payload: encryptedPayload,
+      file_url: null, file_name: null, timestamp: 2000,
+    })
+
+    registerHistoryHandlers(ctx)
+    const result = __handlers.get('get-dm-history')(null, { peerId1: 'peer1', peerId2: 'peer2' })
+    expect(result[0].reply_to_id).toBe('orig-2')
+    expect(JSON.parse(result[0].reply_preview)).toEqual({ fromName: '상대', snippet: '스니펫' })
+  })
+})

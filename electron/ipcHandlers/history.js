@@ -67,6 +67,11 @@ function decryptDMRecord(ctx, msg, peerId1, peerId2, sharedSecret) {
         contentType: decryptedPayload.contentType || msg.content_type,
         fileUrl: rewriteFileUrl(ctx, decryptedPayload.fileUrl || msg.file_url, msg.from_id),
         fileName: decryptedPayload.fileName || msg.file_name,
+        // 답장(#28) — 평문 컬럼(reply_to_id/reply_preview)이 우선이지만, 키 교환 이전에
+        // 암호문만 저장된 행은 컬럼이 비어있으므로 복호화 페이로드에서 복원한다.
+        reply_to_id: msg.reply_to_id || decryptedPayload.replyToId || null,
+        reply_preview: msg.reply_preview
+          || (decryptedPayload.replyPreview ? JSON.stringify(decryptedPayload.replyPreview) : null),
       }
     } catch (err) {
       console.warn(`[히스토리] 복호화 처리 실패: msgId=${msg.id}`, err.message)
