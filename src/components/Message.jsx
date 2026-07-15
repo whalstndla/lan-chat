@@ -1,6 +1,6 @@
 // src/components/Message.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, Pencil, Loader2, Download, FolderOpen, Reply } from 'lucide-react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, Pencil, Loader2, Download, FolderOpen, Reply, X } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
 import { parseReplyPreview } from '../utils/replyPreview'
 import LinkPreviewCard from './LinkPreviewCard'
@@ -216,6 +216,16 @@ function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = 
   const { src: resolvedFileUrl, status: imgStatus, onLoad: onImgLoad, onError: onImgError } =
     useImageSrcWithFallback(message.id, fileUrl, wsFileCachedUrl, loadError)
 
+  // 청크 전송 진행률(#44/#45/#49) — 수신 중일 때만 존재. 말풍선 스피너를 퍼센트로 표시하고
+  // 취소 버튼을 노출한다.
+  const transferProgress = useChatStore(state => state.fileTransferProgress[message.id])
+  const transferPercent = transferProgress && transferProgress.total > 0
+    ? Math.min(100, Math.floor((transferProgress.received / transferProgress.total) * 100))
+    : null
+  function handleCancelTransfer() {
+    window.electronAPI.cancelFileTransfer(message.id)
+  }
+
   // 발신자 아바타 URL 계산 — 내 메시지는 내 프로필, 상대는 위에서 좁게 구독한 프로필 URL 사용
   const avatarUrl = isMyMessage ? myProfileImageUrl : senderProfileImageUrl
 
@@ -375,8 +385,21 @@ function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = 
                   onClick={() => imgStatus === 'loaded' && setLightboxData({ url: resolvedFileUrl, messageId: message.id })}
                 >
                   {imgStatus === 'loading' && (
-                    <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-vsc-muted">
                       <Loader2 size={20} className="animate-spin" />
+                      {transferPercent !== null && (
+                        <>
+                          <span className="text-[10px] tabular-nums">{transferPercent}%</span>
+                          <button
+                            onClick={(event) => { event.stopPropagation(); handleCancelTransfer() }}
+                            aria-label="전송 취소"
+                            title="전송 취소"
+                            className="flex items-center gap-0.5 text-[10px] text-vsc-muted hover:text-red-400 cursor-pointer"
+                          >
+                            <X size={11} /> 취소
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                   {imgStatus === 'failed' && (

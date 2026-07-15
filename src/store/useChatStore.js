@@ -114,9 +114,12 @@ const useChatStore = create((set, get) => ({
   sendOriginalImages: loadSendOriginalImages(),
   drafts: {}, // { roomKey: markdown } — 방 전환 시 작성 중이던 메시지를 보존하기 위한 임시 저장소
   cachedFileUrls: {}, // { messageId: 'file://...' } — WebSocket으로 수신한 파일 캐시 경로
-  // { messageId: 'notFound' | 'tooLarge' | 'timeout' | ... } — file-request 실패 통보.
+  // { messageId: 'notFound' | 'tooLarge' | 'timeout' | 'canceled' | ... } — file-request 실패 통보.
   // 렌더러가 'loading' 에서 'failed' 로 즉시 전환하기 위해 사용.
   fileLoadErrors: {},
+  // { messageId: { received, total } } — 청크 전송 진행률(#44/#45/#49). 말풍선에 % 표시.
+  // 캐시 완료(setCachedFileUrl)/실패(setFileLoadError) 시 해당 항목을 제거한다.
+  fileTransferProgress: {},
   // { messageId: { emoji: [peerId, ...] } } — 메시지별 이모지 리액션. 히스토리 로드 시
   // 배치 하이드레이션(setReactions) 되고, 실시간 토글/수신은 updateReaction 으로 반영.
   reactions: {},
@@ -301,21 +304,43 @@ const useChatStore = create((set, get) => ({
 
   setCachedFileUrl: (messageId, localPath) =>
     set((state) => {
+      // 캐시 완료 → 진행률 항목 제거(스피너/퍼센트 종료).
+      const updatedProgress = { ...state.fileTransferProgress }
+      delete updatedProgress[messageId]
       // 캐시 URL 도착 시 같은 messageId 의 기존 실패 상태는 해제 (재시도 회복 케이스).
       if (!state.fileLoadErrors[messageId]) {
-        return { cachedFileUrls: { ...state.cachedFileUrls, [messageId]: localPath } }
+        return {
+          cachedFileUrls: { ...state.cachedFileUrls, [messageId]: localPath },
+          fileTransferProgress: updatedProgress,
+        }
       }
       const updatedErrors = { ...state.fileLoadErrors }
       delete updatedErrors[messageId]
       return {
         cachedFileUrls: { ...state.cachedFileUrls, [messageId]: localPath },
         fileLoadErrors: updatedErrors,
+        fileTransferProgress: updatedProgress,
       }
     }),
 
   setFileLoadError: (messageId, reason) =>
+    set((state) => {
+      // 실패/취소 → 진행률 항목 제거.
+      const updatedProgress = { ...state.fileTransferProgress }
+      delete updatedProgress[messageId]
+      return {
+        fileLoadErrors: { ...state.fileLoadErrors, [messageId]: reason || 'unknown' },
+        fileTransferProgress: updatedProgress,
+      }
+    }),
+
+  // 청크 전송 진행률 갱신(#44/#45/#49) — file-progress 이벤트 수신 시 호출.
+  setFileTransferProgress: (messageId, received, total) =>
     set((state) => ({
-      fileLoadErrors: { ...state.fileLoadErrors, [messageId]: reason || 'unknown' },
+      fileTransferProgress: {
+        ...state.fileTransferProgress,
+        [messageId]: { received, total },
+      },
     })),
 
   // 리액션 배치 하이드레이션 — get-reactions IPC 응답({messageId: [{peer_id, emoji}, ...]})을
@@ -476,6 +501,9 @@ const useChatStore = create((set, get) => ({
       pendingScrollMessageId: null,
       globalHistoryExpanded: false,
       dmHistoryExpanded: {},
+      cachedFileUrls: {},
+      fileLoadErrors: {},
+      fileTransferProgress: {},
     })
   },
 }))

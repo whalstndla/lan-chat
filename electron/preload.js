@@ -126,6 +126,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('file-request-error')
     ipcRenderer.on('file-request-error', (_, data) => callback(data))
   },
+  // 청크 전송 진행률(#44/#45/#49) — { messageId, received, total }. 말풍선에 % 표시.
+  onFileProgress: (callback) => {
+    ipcRenderer.removeAllListeners('file-progress')
+    ipcRenderer.on('file-progress', (_, data) => callback(data))
+  },
+  // 진행 중인 파일 전송 취소 — 송신측 루프 중단 + 로컬 부분 폐기.
+  cancelFileTransfer: (messageId) => ipcRenderer.invoke('cancel-file-transfer', messageId),
   subscribeToPeerLeft: (callback) => {
     ipcRenderer.removeAllListeners('peer-left')
     ipcRenderer.on('peer-left', (_, peerId) => callback(peerId))
@@ -183,6 +190,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('peer-connecting')
     ipcRenderer.removeAllListeners('file-cached')
     ipcRenderer.removeAllListeners('file-request-error')
+    ipcRenderer.removeAllListeners('file-progress')
     ipcRenderer.removeAllListeners('read-receipt')
     ipcRenderer.removeAllListeners('navigate-to-room')
     ipcRenderer.removeAllListeners('reaction-updated')

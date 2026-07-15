@@ -159,6 +159,11 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
         useChatStore.getState().setFileLoadError(messageId, reason)
       })
 
+      // 청크 전송 진행률(#44/#45/#49) — 말풍선 스피너를 퍼센트로 갱신.
+      window.electronAPI.onFileProgress(({ messageId, received, total }) => {
+        useChatStore.getState().setFileTransferProgress(messageId, received, total)
+      })
+
       window.electronAPI.onPeerNicknameChanged(({ peerId: changedPeerId, nickname: newNickname }) => {
         usePeerStore.getState().updatePeerNickname(changedPeerId, newNickname)
         const { currentRoom, setCurrentRoom } = useChatStore.getState()
