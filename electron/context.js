@@ -45,6 +45,11 @@ function createAppContext(config) {
       // 유휴 자동 자리비움(auto-away) 이 현재 적용 중인지 여부 — 사용자가 명시적으로
       // 상태를 변경(update-status)하면 false 로 리셋된다(#41).
       isAutoAway: false,
+      // 수신 메시지 중복 제거용 최근 메시지 id 집합 — wsServer/wsClient 양 인바운드 경로가
+      // 공유한다(#57). 고유 id 를 가진 콘텐츠성 메시지(message/dm)의 재수신을 한 곳에서 차단해,
+      // 향후 ack 재전송·히스토리 동기화가 같은 메시지를 다시 보내도 이중 처리되지 않게 한다.
+      // 상한(FIFO 방출)은 messageHandler.js 의 MAX_RECENT_MESSAGE_IDS 로 유지된다.
+      recentInboundMessageIds: new Set(),
     },
   }
 }

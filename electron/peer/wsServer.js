@@ -24,9 +24,6 @@ const MAX_PAYLOAD_BYTES = 200 * 1024 * 1024
 // 기본 heartbeat 주기 (ms)
 const DEFAULT_HEARTBEAT_INTERVAL = 10000
 
-// 중복 메시지 ID 허용 최대 크기
-const MAX_RECENT_MESSAGE_IDS = 1000
-
 // 재시작 후에도 같은 포트를 사용하기 위한 고정 포트 범위
 // — 포트가 바뀌면 상대방 autoReconnect가 실패하므로 고정 범위 우선 시도
 // — 범위 내 모든 포트가 사용 중이면 랜덤 포트로 폴백
@@ -60,9 +57,6 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
       server.once('error', onBindError)
       server.once('listening', () => {
         server.off('error', onBindError)
-
-        // Replay Attack 방어: 최근 수신된 메시지 ID 집합 (서버 인스턴스당 유지)
-        const recentMessageIds = new Set()
 
         server.on('connection', (socket, req) => {
           // IP별 연결 수 제한
@@ -122,16 +116,8 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
               // 알 수 없는 메시지 타입은 무시 (fallthrough 방지)
               if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) return
 
-              // Replay Attack 방어: 동일 ID 메시지 재수신 시 무시
-              if (message.id) {
-                if (recentMessageIds.has(message.id)) return
-                // Set 크기 초과 시 가장 오래된 항목(첫 번째 값) 삭제
-                if (recentMessageIds.size >= MAX_RECENT_MESSAGE_IDS) {
-                  const oldestId = recentMessageIds.values().next().value
-                  recentMessageIds.delete(oldestId)
-                }
-                recentMessageIds.add(message.id)
-              }
+              // 동일 ID 메시지 재수신(replay/재전송) 차단은 wsServer/wsClient 공용 진입점인
+              // messageHandler.js 의 handleIncomingMessage 로 이동했다(#57). 여기서는 판정하지 않는다.
 
               // 메시지에서 fromId가 있으면 소켓에 peerId 태깅 (서버 inbound 피어 추적용)
               if (message.fromId) {

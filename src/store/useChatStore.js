@@ -183,6 +183,11 @@ const useChatStore = create((set, get) => ({
 
   addGlobalMessage: (message) =>
     set((state) => {
+      // 이미 화면에 있는 id 면 무시 — 향후 히스토리 동기화/재전송이 같은 메시지를 다시 올려도
+      // 두 번 표시되지 않게 한다(#57). id 가 없는 메시지는 중복 판정 대상이 아니다.
+      if (message?.id && state.globalMessages.some((m) => m.id === message.id)) {
+        return state
+      }
       const updated = [...state.globalMessages, message]
       // 과거를 로드해 확장된 방에서는 트림하지 않는다 — 지금 보고 있는 과거 메시지 증발 방지(#10).
       if (state.globalHistoryExpanded) return { globalMessages: updated }
@@ -200,6 +205,10 @@ const useChatStore = create((set, get) => ({
   addDMMessage: (peerId, message) =>
     set((state) => {
       const existing = state.dmMessages[peerId] || []
+      // 이미 있는 id 면 무시 — 히스토리 동기화/재전송 시 중복 표시 방지(#57).
+      if (message?.id && existing.some((m) => m.id === message.id)) {
+        return state
+      }
       const appended = [...existing, message]
       // 과거를 로드해 확장된 방(#10)에서는 트림하지 않는다. 그 외에는 최근 LIVE_TAIL_CAP 개만 유지.
       const trimmed = state.dmHistoryExpanded[peerId]
