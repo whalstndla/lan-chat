@@ -221,7 +221,11 @@ async function createWindow() {
     minHeight: MIN_HEIGHT,
     show: !startHidden,
     backgroundColor: '#1e1e1e',
-    titleBarStyle: 'hiddenInset',
+    // macOS: hiddenInset 로 신호등만 남기고 렌더러 커스텀 헤더(App.jsx TitleBar)를 그 옆에 배치.
+    // win/linux: 네이티브 프레임을 그대로 사용(frame: true, 기본값과 동일) — 별도 재설계 없이
+    // 신호등 여백만 렌더러에서 제거하면 되므로(#72), 여기서는 darwin 전용 옵션만 분기한다.
+    // (수동 확인 필요: win/linux 에서 커스텀 헤더 + 네이티브 타이틀바가 자연스럽게 공존하는지)
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : { frame: true }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
