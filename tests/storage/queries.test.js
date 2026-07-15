@@ -8,6 +8,8 @@ const {
   getLatestGlobalMessageTimestamp,
   getGlobalMessagesForExport,
   getDMMessagesForExport,
+  saveFileCache,
+  clearAllFileCachePaths,
 } = require('../../electron/storage/queries')
 
 describe('메시지 쿼리', () => {
@@ -279,5 +281,30 @@ describe('getGlobalMessagesForExport / getDMMessagesForExport — 내보내기�
 
     const result = getDMMessagesForExport(db, 'peer1', 'peer2', 10, 0)
     expect(result.map(m => m.id)).toEqual(['dm-1', 'dm-2'])
+  })
+})
+
+describe('clearAllFileCachePaths — 캐시 비우기(#74)와 DB 컬럼 정리', () => {
+  let db
+
+  beforeEach(() => { db = initDatabase(':memory:'); migrateDatabase(db) })
+  afterEach(() => { closeDatabase(db) })
+
+  it('cached_file_path 가 있는 메시지의 컬럼을 모두 NULL 로 비우고, 지운 개수를 반환한다', () => {
+    saveMessage(db, { id: 'm1', type: 'message', from_id: 'p1', from_name: 'A', to_id: null, content: null, content_type: 'image', encrypted_payload: null, file_url: null, file_name: 'a.png', timestamp: 1 })
+    saveMessage(db, { id: 'm2', type: 'message', from_id: 'p1', from_name: 'A', to_id: null, content: '텍스트만', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 2 })
+    saveFileCache(db, { messageId: 'm1', cachedPath: '/cache/m1.png' })
+
+    const { clearedCount } = clearAllFileCachePaths(db)
+    expect(clearedCount).toBe(1)
+    expect(db.prepare('SELECT cached_file_path FROM messages WHERE id = ?').get('m1').cached_file_path).toBeNull()
+    // 메시지 자체는 지워지지 않는다 — 캐시 비우기는 메시지 삭제가 아니다.
+    expect(db.prepare('SELECT count(*) c FROM messages').get().c).toBe(2)
+  })
+
+  it('캐시 경로가 없으면 아무 것도 지우지 않는다', () => {
+    saveMessage(db, { id: 'm1', type: 'message', from_id: 'p1', from_name: 'A', to_id: null, content: '내용', content_type: 'text', encrypted_payload: null, file_url: null, file_name: null, timestamp: 1 })
+    const { clearedCount } = clearAllFileCachePaths(db)
+    expect(clearedCount).toBe(0)
   })
 })

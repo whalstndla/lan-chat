@@ -1,15 +1,16 @@
 // electron/ipcHandlers/data.js
-// 데이터 관리 IPC 핸들러 — 전체 메시지 삭제, DM 삭제, 채팅 내보내기(#74)
+// 데이터 관리 IPC 핸들러 — 전체 메시지 삭제, DM 삭제, 채팅 내보내기, 저장소 사용량/캐시 비우기(#74)
 
 const { ipcMain, dialog, app } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const {
   clearAllMessages, clearAllDMs,
-  getGlobalMessagesForExport, getDMMessagesForExport,
+  getGlobalMessagesForExport, getDMMessagesForExport, clearAllFileCachePaths,
 } = require('../storage/queries')
 const { deriveSharedSecretForPeer, decryptDMRecord } = require('./history')
 const { formatMessagesAsText, formatMessageForJson } = require('../utils/exportFormatter')
+const { computeStorageUsage } = require('../utils/storageUsage')
 
 // 삭제된 메시지가 참조하던 file_cache 파일들을 정리 — 다른 메시지가 참조할 수 없는
 // messageId 1:1 캐시 파일이므로(cacheOwnFile/cacheReceivedFile 참고) 참조 카운트 없이
@@ -125,6 +126,30 @@ function registerDataHandlers(ctx) {
     } catch (err) {
       return { ok: false, error: 'writeError', message: err.message }
     }
+  })
+
+  // 저장소 사용량 조회(#74) — DB(+ -wal/-shm), files/, file_cache/, sounds/ 각 크기.
+  ipcMain.handle('get-storage-usage', () => computeStorageUsage(ctx.config.appDataPath))
+
+  // 캐시 비우기(#74) — file_cache/ 안 파일을 모두 삭제한다. 이미지/파일 "표시용" 캐시일 뿐이라
+  // 메시지·DB 는 전혀 건드리지 않는다 — 다음에 해당 미디어를 열람하면 상대가 온라인일 때
+  // 자동으로 재요청해 복구된다(cacheReceivedFile). cached_file_path 컬럼도 함께 비워 디스크와
+  // DB 상태를 일치시킨다(clearAllFileCachePaths) — sweepOrphanedFileCache/deleteMessageAndCachedFile
+  // 등 기존 Phase 2 정리 로직과 동일하게 "참조하는 DB 컬럼이 없으면 orphan 없음"을 유지한다.
+  ipcMain.handle('clear-file-cache', () => {
+    const cacheDir = path.join(ctx.config.appDataPath, 'file_cache')
+    let removedCount = 0
+    try {
+      for (const fileName of fs.readdirSync(cacheDir)) {
+        try {
+          fs.unlinkSync(path.join(cacheDir, fileName))
+          removedCount++
+        } catch { /* 개별 파일 삭제 실패는 무시하고 계속 진행 */ }
+      }
+    } catch { /* 디렉토리 없음 등 무시 */ }
+
+    const { clearedCount } = clearAllFileCachePaths(ctx.state.database)
+    return { ok: true, removedCount, clearedCount }
   })
 }
 

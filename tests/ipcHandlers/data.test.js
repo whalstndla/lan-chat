@@ -173,3 +173,64 @@ describe('export-chat-history — 채팅 내보내기(#74)', () => {
     expect(await handler(null, { scope: 'global', format: 'csv' })).toEqual({ ok: false, error: 'invalidFormat' })
   })
 })
+
+describe('get-storage-usage / clear-file-cache — 저장소 사용량 + 캐시 비우기(#74)', () => {
+  let db
+  let tempDir
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lan-chat-storage-ipc-'))
+    __handlers.clear()
+  })
+
+  afterEach(() => {
+    closeDatabase(db)
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  function buildCtx() {
+    return { state: { database: db }, config: { appDataPath: tempDir } }
+  }
+
+  it('get-storage-usage 는 appDataPath 기준 디렉토리 크기를 반환한다', async () => {
+    fs.writeFileSync(path.join(tempDir, 'chat.db'), Buffer.alloc(1000))
+    const ctx = buildCtx()
+    registerDataHandlers(ctx)
+    const usage = await __handlers.get('get-storage-usage')()
+    expect(usage.database.bytes).toBe(1000)
+    expect(usage.total.bytes).toBe(1000)
+  })
+
+  it('clear-file-cache 는 file_cache/ 파일을 모두 삭제하고 cached_file_path 컬럼도 비운다', () => {
+    const cacheDir = path.join(tempDir, 'file_cache')
+    fs.mkdirSync(cacheDir, { recursive: true })
+    const cachedPath = path.join(cacheDir, 'msg-1.png')
+    fs.writeFileSync(cachedPath, Buffer.from([0x01]))
+
+    saveMessage(db, {
+      id: 'msg-1', type: 'message', from_id: 'me', from_name: '나', to_id: null,
+      content: null, content_type: 'image', encrypted_payload: null,
+      file_url: null, file_name: 'a.png', timestamp: Date.now(),
+    })
+    saveFileCache(db, { messageId: 'msg-1', cachedPath })
+
+    const ctx = buildCtx()
+    registerDataHandlers(ctx)
+    const result = __handlers.get('clear-file-cache')()
+
+    expect(result).toEqual({ ok: true, removedCount: 1, clearedCount: 1 })
+    expect(fs.existsSync(cachedPath)).toBe(false)
+    // 메시지 자체는 그대로 남는다 — 캐시 비우기는 메시지 삭제가 아니다.
+    expect(db.prepare('SELECT * FROM messages WHERE id = ?').get('msg-1')).toBeTruthy()
+    expect(db.prepare('SELECT cached_file_path FROM messages WHERE id = ?').get('msg-1').cached_file_path).toBeNull()
+  })
+
+  it('file_cache 디렉토리가 없어도 에러 없이 통과한다', () => {
+    const ctx = buildCtx()
+    registerDataHandlers(ctx)
+    const result = __handlers.get('clear-file-cache')()
+    expect(result).toEqual({ ok: true, removedCount: 0, clearedCount: 0 })
+  })
+})

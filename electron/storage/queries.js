@@ -267,6 +267,15 @@ function saveFileCache(db, { messageId, cachedPath }) {
   db.prepare('UPDATE messages SET cached_file_path = ? WHERE id = ?').run(cachedPath, messageId)
 }
 
+// 파일 캐시 전체 초기화(#74) — "캐시 비우기" 로 file_cache/ 안 파일을 모두 지울 때, DB 의
+// cached_file_path 컬럼도 함께 비워 디스크와 DB 상태를 일치시킨다. 메시지 자체(내용/파일명)는
+// 그대로 남으며, 다음 열람 시 상대에게 파일을 재요청하는 지연 로딩 경로(cacheReceivedFile)로
+// 자연스럽게 이어진다 — "메시지 삭제"와 달리 대화 기록에는 영향이 없다.
+function clearAllFileCachePaths(db) {
+  const result = db.prepare('UPDATE messages SET cached_file_path = NULL WHERE cached_file_path IS NOT NULL').run()
+  return { clearedCount: result.changes }
+}
+
 // 파일 캐시 경로 조회 — 없으면 null 반환
 function getFileCache(db, messageId) {
   const row = db.prepare('SELECT cached_file_path FROM messages WHERE id = ?').get(messageId)
@@ -356,4 +365,4 @@ function setVerified(db, peerId, verified) {
   db.prepare('UPDATE peer_keys SET verified = ? WHERE peer_id = ?').run(verified ? 1 : 0, peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessagesForExport, getDMMessagesForExport, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache, getPinnedKey, pinKey, updatePinnedKey, setVerified }
+module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessagesForExport, getDMMessagesForExport, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, clearAllFileCachePaths, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache, getPinnedKey, pinKey, updatePinnedKey, setVerified }

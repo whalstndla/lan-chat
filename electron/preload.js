@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 채팅 내보내기(#74) — { scope: 'global'|'dm', peerId?, format: 'txt'|'json' }
   exportChatHistory: (params) => ipcRenderer.invoke('export-chat-history', params),
 
+  // 저장소 사용량 조회 + 캐시 비우기(#74) — 캐시 비우기는 메시지/DB 를 지우지 않고
+  // file_cache/ 표시용 캐시 파일만 정리한다(다음 열람 시 온라인이면 자동 재요청).
+  getStorageUsage: () => ipcRenderer.invoke('get-storage-usage'),
+  clearFileCache: () => ipcRenderer.invoke('clear-file-cache'),
+
   // 파일 저장 — ArrayBuffer를 Uint8Array로 변환 후 전송 (IPC 직렬화 안전)
   saveFile: (fileBuffer, fileName) => ipcRenderer.invoke('save-file', { fileBuffer: new Uint8Array(fileBuffer), fileName }),
 

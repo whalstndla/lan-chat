@@ -1,6 +1,6 @@
 // src/components/SettingsPanel.jsx
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download, FileDown } from 'lucide-react'
+import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download, HardDrive, FileDown } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useUserStore from '../store/useUserStore'
 import usePeerStore from '../store/usePeerStore'
@@ -109,6 +109,36 @@ export default function SettingsPanel({ onClose }) {
     setAutoLaunchSettings((prev) => ({ ...prev, ...nextSettings }))
     const result = await window.electronAPI.setAutoLaunchSettings?.(nextSettings)
     if (result) setAutoLaunchSettings(result)
+  }
+
+  // 저장소 사용량(#74) — DB(+ -wal/-shm), files/, file_cache/, sounds/ 각 크기. '데이터 관리' 탭
+  // 진입 시에만 조회한다(다른 탭에서는 굳이 디스크를 스캔할 필요 없음).
+  const [storageUsage, setStorageUsage] = useState(null)
+  const [confirmClearCache, setConfirmClearCache] = useState(false)
+  const [cacheClearMessage, setCacheClearMessage] = useState(null)
+
+  async function refreshStorageUsage() {
+    const usage = await window.electronAPI.getStorageUsage?.()
+    if (usage) setStorageUsage(usage)
+  }
+
+  useEffect(() => {
+    if (activeMenu !== 'data') return
+    let cancelled = false
+    window.electronAPI.getStorageUsage?.().then((usage) => { if (!cancelled) setStorageUsage(usage) })
+    return () => { cancelled = true }
+  }, [activeMenu])
+
+  // 캐시 비우기(#74) — file_cache/ 표시용 캐시만 지운다. 메시지·DB 는 그대로 유지되며,
+  // 다음 열람 시 상대가 온라인이면 자동으로 재요청해 복구된다("메시지 삭제"와는 다르다).
+  async function handleClearFileCache() {
+    const result = await window.electronAPI.clearFileCache?.()
+    setConfirmClearCache(false)
+    setCacheClearMessage(
+      result?.ok ? `캐시 파일 ${result.removedCount}개를 삭제했습니다.` : '캐시 비우기에 실패했습니다.'
+    )
+    await refreshStorageUsage()
+    setTimeout(() => setCacheClearMessage(null), 3000)
   }
 
   // 채팅 내보내기(#74) — 범위(전체채팅/DM) + 형식(txt/json) 선택 후 저장 다이얼로그로 내보낸다.
@@ -466,6 +496,43 @@ export default function SettingsPanel({ onClose }) {
         <>
           {renderSubPageHeader('데이터 관리')}
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+            {/* 저장소 사용량(#74) — DB/파일/캐시/사운드 각 크기 표시 + 캐시 비우기 */}
+            <div className="pb-3 mb-1 border-b border-vsc-border space-y-2">
+              <label className="text-vsc-muted text-xs flex items-center gap-1"><HardDrive size={11} />저장소 사용량</label>
+              {storageUsage ? (
+                <div className="bg-vsc-panel rounded p-2 space-y-1 text-[11px]">
+                  <div className="flex justify-between text-vsc-muted"><span>메시지 DB</span><span className="text-vsc-text">{storageUsage.database.readable}</span></div>
+                  <div className="flex justify-between text-vsc-muted"><span>보낸 파일</span><span className="text-vsc-text">{storageUsage.files.readable}</span></div>
+                  <div className="flex justify-between text-vsc-muted"><span>받은 파일 캐시</span><span className="text-vsc-text">{storageUsage.fileCache.readable}</span></div>
+                  <div className="flex justify-between text-vsc-muted"><span>알림 소리</span><span className="text-vsc-text">{storageUsage.sounds.readable}</span></div>
+                  <div className="flex justify-between font-semibold pt-1 border-t border-vsc-border"><span className="text-vsc-text">합계</span><span className="text-vsc-accent">{storageUsage.total.readable}</span></div>
+                </div>
+              ) : (
+                <p className="text-[10px] text-vsc-muted">계산 중...</p>
+              )}
+
+              {confirmClearCache ? (
+                <div className="bg-vsc-panel border border-vsc-border rounded p-2 space-y-2">
+                  <p className="text-[10px] text-vsc-muted leading-relaxed">
+                    받은 이미지/파일의 표시용 캐시만 삭제합니다. 채팅 기록이나 메시지는 지워지지 않으며,
+                    다음에 열람하면 상대가 온라인일 때 자동으로 다시 받아옵니다.
+                  </p>
+                  <div className="flex gap-2">
+                    <button onClick={handleClearFileCache}
+                      className="cursor-pointer flex-1 py-1 rounded bg-red-600 hover:bg-red-500 text-white text-xs transition-colors">캐시 비우기</button>
+                    <button onClick={() => setConfirmClearCache(false)}
+                      className="cursor-pointer flex-1 py-1 rounded bg-vsc-border hover:bg-vsc-sidebar text-vsc-muted text-xs transition-colors">취소</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmClearCache(true)}
+                  className="cursor-pointer w-full flex items-center gap-2 px-2 py-2 rounded text-xs text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text transition-colors">
+                  <Trash2 size={12} />캐시 비우기 (메시지는 삭제되지 않음)
+                </button>
+              )}
+              {cacheClearMessage && <p className="text-[10px] text-green-400">{cacheClearMessage}</p>}
+            </div>
+
             {/* 채팅 내보내기(#74) — 전체채팅/DM 기록을 txt/json 파일로 백업 */}
             <div className="pb-3 mb-1 border-b border-vsc-border space-y-2">
               <label className="text-vsc-muted text-xs flex items-center gap-1"><FileDown size={11} />채팅 내보내기</label>
