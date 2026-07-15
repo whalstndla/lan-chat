@@ -22,7 +22,6 @@ const fileChunkStart = require('./handlers/fileChunkStart')
 const fileChunk = require('./handlers/fileChunk')
 const fileChunkEnd = require('./handlers/fileChunkEnd')
 const fileCancel = require('./handlers/fileCancel')
-const keyExchange = require('./handlers/keyExchange')
 const hello = require('./handlers/hello')
 const dm = require('./handlers/dm')
 const globalMessage = require('./handlers/message')
@@ -47,8 +46,9 @@ const HANDLERS = {
   'file-chunk': fileChunk,
   'file-chunk-end': fileChunkEnd,
   'file-cancel': fileCancel,
-  'key-exchange': keyExchange,       // v1 (현재 기본 전송 포맷)
-  'hello': hello,                    // v2 (수신 지원만, 송신은 v0.9.0부터)
+  // v1 'key-exchange' 수신 핸들러는 제거됨(#69) — 현재 앱(v0.8.0+)은 항상 v2 hello 를 보낸다.
+  // v1 전용 구버전(≤v0.7.x) 피어와는 연결 단절(의도된 정리).
+  'hello': hello,                    // v2 핸드셰이크 (현재 정본)
   'dm': dm,
   'message': globalMessage,
   // #31 전체채팅 히스토리 동기화 (additive — 구버전은 화이트리스트에서 drop = graceful degradation)

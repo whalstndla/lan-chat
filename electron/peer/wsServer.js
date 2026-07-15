@@ -2,11 +2,13 @@
 const { WebSocketServer, WebSocket } = require('ws')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 
-// 허용되는 메시지 타입 화이트리스트 — Phase 1c: 'hello' (wire v2) 추가
+// 허용되는 메시지 타입 화이트리스트 — 핸드셰이크는 v2 'hello' (wire v2)만 허용한다.
+// v1 'key-exchange' 는 제거됨(#69) — 목록에 없어 wsServer 진입 시점에 drop 되므로
+// 무검증 v1 수용(다운그레이드 공격면)이 사라진다. v1 전용 구버전(≤v0.7.x)과는 연결 단절.
 // #31: 'history-sync-request'/'history-sync-response' 추가 (additive — 구버전은 이 목록에
 // 없어 drop = graceful degradation, WIRE_VERSION 불변).
 const ALLOWED_MESSAGE_TYPES = [
-  'key-exchange', 'hello', 'typing', 'typing-stop', 'delete-message', 'nickname-changed',
+  'hello', 'typing', 'typing-stop', 'delete-message', 'nickname-changed',
   'read-receipt', 'message', 'dm', 'reaction', 'edit-message', 'status-changed',
   'file-request', 'file-data', 'file-request-error',
   // 청크 스트리밍 전송 (#44/#45/#49) — additive. 구버전은 이 목록에 없어 drop = 레거시 폴백.

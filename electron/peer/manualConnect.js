@@ -6,9 +6,8 @@
 // 설계 핵심: 아직 상대 peerId 를 모르므로 wsClient.connectToPeer 의 connectionMap
 // (peerId 를 키로 사용) 을 임시 값으로 오염시키지 않는다. 대신 이 모듈이 직접
 // 1회성 "probe" WebSocket 을 열어 hello(v2) 페이로드만 보내고 응답을 기다린다.
-// 응답(hello 또는 legacy key-exchange)이 도착하면 그 메시지를 기존
-// ctx.state.handleIncomingMessage 로 그대로 전달한다 — 이후 처리는
-// electron/peer/inbound/handlers/hello.js(or keyExchange.js) 의 기존
+// 응답(v2 hello)이 도착하면 그 메시지를 기존 ctx.state.handleIncomingMessage 로
+// 그대로 전달한다 — 이후 처리는 electron/peer/inbound/handlers/hello.js 의 기존
 // "역방향 연결" 로직이 실제 peerId 로 정식 연결(autoReconnect 포함)을 자동으로
 // 맺어준다. probe 소켓은 응답을 받는 즉시 폐기하므로 connectionMap 오염이 없다.
 
@@ -23,11 +22,11 @@ const MANUAL_CONNECT_PORT_RANGE_END = 49161
 // WebSocket 핸드셰이크(open) 대기 한도 — 대부분의 실패(포트 미사용 등)는 즉시
 // ECONNREFUSED 로 끝나므로 실사용 지연은 훨씬 짧다.
 const PROBE_OPEN_TIMEOUT_MS = 3000
-// open 이후 상대방의 hello/key-exchange 응답 대기 한도
+// open 이후 상대방의 hello 응답 대기 한도
 const PROBE_REPLY_TIMEOUT_MS = 5000
 
 // host:wsPort 하나에 대한 1회성 probe. hello 페이로드 전송 후 상대 응답
-// (type: 'hello' 또는 'key-exchange') 수신 시 resolve, 그 외에는 reject(Error)
+// (type: 'hello') 수신 시 resolve, 그 외에는 reject(Error)
 function probeOnce({ host, wsPort, buildHelloPayload, onReply }) {
   return new Promise((resolve, reject) => {
     let settled = false
@@ -76,12 +75,13 @@ function probeOnce({ host, wsPort, buildHelloPayload, onReply }) {
       } catch {
         return // 잘못된 JSON 무시
       }
-      // hello(v2)/key-exchange(v1) 만 핸드셰이크 응답으로 인정 — 그 외 타입은 무시하고 계속 대기
-      if (message.type !== 'hello' && message.type !== 'key-exchange') return
+      // v2 hello 만 핸드셰이크 응답으로 인정(#69) — v1 key-exchange 는 더 이상 수용하지 않는다.
+      // 그 외 타입은 무시하고 계속 대기.
+      if (message.type !== 'hello') return
       writePeerDebugLog('manualConnect.probe.reply', {
         host, wsPort, messageType: message.type, fromId: message.fromId || null,
       })
-      // 기존 hello/key-exchange 인바운드 핸들러로 위임 — 실제 peerId 로 세션 확정 +
+      // 기존 hello 인바운드 핸들러로 위임 — 실제 peerId 로 세션 확정 +
       // 역방향 연결(autoReconnect)이 이 호출 안에서 시작된다.
       onReply(message)
       finish(resolve, undefined)
