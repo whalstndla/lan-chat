@@ -43,10 +43,10 @@ describe('maskNotificationBody — 본문 숨김', () => {
 
 describe('resolveNotificationDecision — ctx/DB 통합 판정', () => {
   let db
-  beforeEach(() => {
+  beforeEach(async () => {
     db = initDatabase(':memory:')
     migrateDatabase(db)
-    saveProfile(db, { username: 'test', nickname: '테스트', password: 'pw123' })
+    await saveProfile(db, { username: 'test', nickname: '테스트', password: 'pw123' })
   })
   afterEach(() => closeDatabase(db))
 

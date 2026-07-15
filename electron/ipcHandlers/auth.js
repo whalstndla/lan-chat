@@ -107,7 +107,7 @@ function registerAuthHandlers(ctx) {
   })
 
   // 최초 설정 — 닉네임/아이디/비밀번호 입력 + 마스터키 신규 생성.
-  ipcMain.handle('register', (_, { username, nickname: nick, password }) => {
+  ipcMain.handle('register', async (_, { username, nickname: nick, password }) => {
     if (!username?.trim() || !nick?.trim() || !password) {
       return { success: false, error: '모든 항목을 입력해주세요.' }
     }
@@ -118,12 +118,12 @@ function registerAuthHandlers(ctx) {
     try {
       // legacy 키체인 wrap 파일이 있으면 먼저 마이그레이션 (v0.9.x 사용자)
       if (legacyKeyFileExists(appDataPath)) {
-        migrateLegacyMasterKey(appDataPath, ctx.state.safeStorage, password)
-        ctx.state.masterKey = loadWrappedMasterKey(appDataPath, password)
+        await migrateLegacyMasterKey(appDataPath, ctx.state.safeStorage, password)
+        ctx.state.masterKey = await loadWrappedMasterKey(appDataPath, password)
         writePeerDebugLog('auth.legacyMigration.success', {})
       } else {
         ctx.state.masterKey = createMasterKey()
-        saveWrappedMasterKey(appDataPath, ctx.state.masterKey, password)
+        await saveWrappedMasterKey(appDataPath, ctx.state.masterKey, password)
       }
 
       openSessionDatabase(ctx, dbPath, appDataPath)
@@ -135,7 +135,7 @@ function registerAuthHandlers(ctx) {
         return { success: true, nickname: existing.nickname }
       }
 
-      saveProfile(ctx.state.database, { username: username.trim(), nickname: nick.trim(), password })
+      await saveProfile(ctx.state.database, { username: username.trim(), nickname: nick.trim(), password })
       ensurePeerId(ctx)
       updatePeerId(ctx.state.database, ctx.state.peerId)
       return { success: true }
@@ -146,16 +146,16 @@ function registerAuthHandlers(ctx) {
   })
 
   // 로그인 — 비밀번호로 마스터키 unwrap + DB 검증.
-  ipcMain.handle('login', (_, { username, password }) => {
+  ipcMain.handle('login', async (_, { username, password }) => {
     if (!password) return { success: false, error: '비밀번호를 입력해주세요.' }
 
     try {
       // v0.9.x legacy 키체인 wrap 자동 마이그레이션
       if (!masterKeyFileExists(appDataPath) && legacyKeyFileExists(appDataPath)) {
-        migrateLegacyMasterKey(appDataPath, ctx.state.safeStorage, password)
+        await migrateLegacyMasterKey(appDataPath, ctx.state.safeStorage, password)
       }
 
-      const masterKey = loadWrappedMasterKey(appDataPath, password)
+      const masterKey = await loadWrappedMasterKey(appDataPath, password)
       if (!masterKey) {
         return { success: false, error: '비밀번호가 올바르지 않습니다.' }
       }
@@ -168,7 +168,7 @@ function registerAuthHandlers(ctx) {
         teardownSession(ctx)
         return { success: false, error: '프로필이 없습니다. 먼저 등록해주세요.' }
       }
-      if (!verifyPassword(ctx.state.database, username, password)) {
+      if (!(await verifyPassword(ctx.state.database, username, password))) {
         teardownSession(ctx)
         return { success: false, error: '아이디 또는 비밀번호가 틀렸습니다.' }
       }
@@ -198,13 +198,13 @@ function registerAuthHandlers(ctx) {
   })
 
   // 비밀번호 변경 — 마스터키는 그대로, KEK 만 새 비밀번호로 다시 wrap.
-  ipcMain.handle('update-password', (_, { currentPassword, newPassword }) => {
+  ipcMain.handle('update-password', async (_, { currentPassword, newPassword }) => {
     const profile = getProfile(ctx.state.database)
     if (!profile) return { success: false, error: '프로필이 없습니다.' }
-    const result = updatePassword(ctx.state.database, profile.username, currentPassword, newPassword)
+    const result = await updatePassword(ctx.state.database, profile.username, currentPassword, newPassword)
     if (!result.success) return result
     try {
-      const ok = rewrapMasterKey(appDataPath, currentPassword, newPassword)
+      const ok = await rewrapMasterKey(appDataPath, currentPassword, newPassword)
       if (!ok) return { success: false, error: '마스터키 재포장 실패' }
     } catch (err) {
       return { success: false, error: '마스터키 재포장 실패: ' + err.message }

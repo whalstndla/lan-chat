@@ -5,10 +5,10 @@ const { saveProfile, getNotificationSettings, saveNotificationSettings } = requi
 
 describe('알림 설정 — scope/hideBody', () => {
   let db
-  beforeEach(() => {
+  beforeEach(async () => {
     db = initDatabase(':memory:')
     migrateDatabase(db)
-    saveProfile(db, { username: 'test', nickname: '테스트', password: 'pw123' })
+    await saveProfile(db, { username: 'test', nickname: '테스트', password: 'pw123' })
   })
   afterEach(() => closeDatabase(db))
 
