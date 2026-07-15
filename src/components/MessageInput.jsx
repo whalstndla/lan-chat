@@ -9,9 +9,11 @@ import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
 import useChatStore, { getRoomKey } from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
+import usePeerStore from '../store/usePeerStore'
 import { isCompressibleImageType, compressImageFile } from '../utils/imageCompression'
 import { findLastEditableOwnMessage } from '../utils/lastEditableMessage'
 import { buildReplyPreview } from '../utils/replyPreview'
+import { parseMentions } from '../utils/mentions'
 
 // 메시지 최대 길이 — electron/ipcHandlers/message.js 의 MAX_CONTENT_LENGTH 와 동일 값을 유지.
 // 전송 전 클라이언트에서 미리 검증해, 초과 시 IPC 실패 응답을 기다리지 않고 즉시 안내한다.
@@ -425,6 +427,14 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     // send 페이로드에 실을 optional 메타이며, IME 핵심 로직(clearContent/keepEditorFocus)과 무관.
     const replySnapshot = replyTarget
 
+    // @멘션(#29) — 전송 시점에 메시지 텍스트에서 "@닉네임" 토큰을 파싱해 peerId 배열을 계산한다.
+    // 실시간 자동완성/드롭다운이 아니라 send 페이로드 구성 단계의 순수 계산이라
+    // IME 핵심 로직(clearContent/keepEditorFocus/composing)과 무관하다. usePeerStore 가
+    // main 보다 "알려진 피어 닉네임" 을 더 단순하고 정확하게 알고 있어 렌더러에서 계산한다.
+    const { onlinePeers, pastDMPeers } = usePeerStore.getState()
+    const peerNicknameList = [...onlinePeers, ...pastDMPeers].map(peer => ({ peerId: peer.peerId, nickname: peer.nickname }))
+    const mentions = parseMentions(content, peerNicknameList, { excludePeerId: useUserStore.getState().myPeerId })
+
     // IPC 응답을 기다린 뒤 초기화하면 사용자가 시작한 다음 한글 조합까지 지워질 수 있다.
     // 전송할 내용을 먼저 보관하고 에디터는 즉시 비워 이전 전송의 후처리가 새 입력을 건드리지 않게 한다.
     editor.commands.clearContent()
@@ -444,6 +454,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           format: 'markdown',
           replyToId: replySnapshot?.id || null,
           replyPreview: replySnapshot?.preview || null,
+          mentions,
         })
       } else {
         sentMessage = await window.electronAPI.sendDM({
@@ -453,6 +464,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           format: 'markdown',
           replyToId: replySnapshot?.id || null,
           replyPreview: replySnapshot?.preview || null,
+          mentions,
         })
       }
       // main 이 입력 검증 실패 시 { ok: false, error } 를 반환한다 — 스토어에 넣지 않고 안전하게 처리.

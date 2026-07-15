@@ -29,6 +29,8 @@ module.exports = function handleGlobalMessage({ message, ctx }) {
       // 답장(#28) — 전체채팅은 평문 와이어 필드로 도착. 구버전 송신자는 이 필드가 없어 null.
       reply_to_id: message.replyToId || null,
       reply_preview: message.replyPreview ? JSON.stringify(message.replyPreview) : null,
+      // @멘션(#29) — 전체채팅은 평문 와이어 필드로 도착. 구버전 송신자는 이 필드가 없어 null.
+      mentions: Array.isArray(message.mentions) && message.mentions.length > 0 ? JSON.stringify(message.mentions) : null,
     })
   } catch { /* DB 저장 실패 시 무시 — 렌더러 전달은 계속 */ }
 

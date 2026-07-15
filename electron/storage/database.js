@@ -55,7 +55,8 @@ function initDatabase(dbPath, masterKey) {
       timestamp         INTEGER NOT NULL,
       format            TEXT,
       reply_to_id       TEXT,
-      reply_preview     TEXT
+      reply_preview     TEXT,
+      mentions          TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
     CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type, from_id, to_id);
@@ -104,6 +105,9 @@ function migrateDatabase(db) {
     // additive 하위호환: 구버전 클라이언트는 이 컬럼/필드를 무시한다.
     'ALTER TABLE messages ADD COLUMN reply_to_id TEXT',
     'ALTER TABLE messages ADD COLUMN reply_preview TEXT',
+    // @멘션(#29) — 멘션된 peerId 배열(JSON 문자열). additive 하위호환: 구버전 클라이언트는
+    // 이 컬럼/필드를 무시하고, 이 값이 없는 메시지는 멘션 없음으로 취급한다.
+    'ALTER TABLE messages ADD COLUMN mentions TEXT',
   ]
   for (const sql of messagesMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }

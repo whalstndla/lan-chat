@@ -59,6 +59,10 @@ module.exports = function handleDm({ message, ctx }) {
         // file_url/file_name 처럼 평문 컬럼으로 저장한다.
         reply_to_id: decryptedPayload.replyToId || null,
         reply_preview: decryptedPayload.replyPreview ? JSON.stringify(decryptedPayload.replyPreview) : null,
+        // @멘션(#29) — DM 은 mentions 도 암호화 페이로드 안에 있으므로 복호화된 값을
+        // 평문 컬럼으로 저장한다.
+        mentions: Array.isArray(decryptedPayload.mentions) && decryptedPayload.mentions.length > 0
+          ? JSON.stringify(decryptedPayload.mentions) : null,
       })
     } catch (err) {
       console.error(`[DM 수신] DB 저장 실패: ${message.id}`, err.message)
@@ -92,6 +96,8 @@ module.exports = function handleDm({ message, ctx }) {
       // 답장 메타(#28)도 복호화된 평문 객체로 렌더러에 전달해 인용을 즉시 렌더한다.
       replyToId: decryptedPayload.replyToId || null,
       replyPreview: decryptedPayload.replyPreview || null,
+      // @멘션(#29)도 복호화된 평문 배열로 렌더러에 전달해 하이라이트/멘션 배경을 즉시 렌더한다.
+      mentions: decryptedPayload.mentions || null,
     })
 
     if (decryptedPayload.fileUrl) {

@@ -72,6 +72,10 @@ function decryptDMRecord(ctx, msg, peerId1, peerId2, sharedSecret) {
         reply_to_id: msg.reply_to_id || decryptedPayload.replyToId || null,
         reply_preview: msg.reply_preview
           || (decryptedPayload.replyPreview ? JSON.stringify(decryptedPayload.replyPreview) : null),
+        // @멘션(#29) — reply 와 동일한 우선순위 규칙(평문 컬럼 우선, 없으면 복호화 페이로드에서 복원).
+        mentions: msg.mentions
+          || (Array.isArray(decryptedPayload.mentions) && decryptedPayload.mentions.length > 0
+            ? JSON.stringify(decryptedPayload.mentions) : null),
       }
     } catch (err) {
       console.warn(`[히스토리] 복호화 처리 실패: msgId=${msg.id}`, err.message)

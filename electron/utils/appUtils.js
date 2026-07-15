@@ -290,6 +290,9 @@ async function flushPendingMessages(ctx, targetPeerId, retryCount = 0) {
             // 답장 메타(#28)도 pending 재전송 시 동일하게 암호화 페이로드에 실어 보낸다.
             replyToId: messagePayload.replyToId || null,
             replyPreview: messagePayload.replyPreview || null,
+            // @멘션(#29)도 동일하게 재전송 시 암호화 페이로드에 실어 보낸다 — DB 행은 최초
+            // 저장 시점에 이미 평문 컬럼으로 저장돼 있으므로 여기서는 와이어 페이로드만 채운다.
+            mentions: messagePayload.mentions || [],
           },
           sharedSecret,
           ctx.state.peerId,
