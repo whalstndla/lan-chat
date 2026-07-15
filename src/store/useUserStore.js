@@ -1,13 +1,15 @@
 // src/store/useUserStore.js
 import { create } from 'zustand'
 import { DEFAULT_THEME, resolveTheme, applyThemeToDocument } from '../utils/theme'
+import { DEFAULT_FONT_SIZE, fontSizeToScale, applyFontScaleToDocument } from '../utils/fontScale'
 
-// 테마(#73)는 계정 데이터가 아니라 "이 기기의 UI 선호값" 이다 — useChatStore 의
+// 테마/폰트 크기(#73)는 계정 데이터가 아니라 "이 기기의 UI 선호값" 이다 — useChatStore 의
 // mutedRooms/sendOriginalImages 와 같은 이유로 DB(IPC)가 아닌 localStorage 에 저장한다.
 // 로그인 전 화면(SetupScreen/LoginScreen)에서도 즉시 적용돼야 하는데, DB는 로그인 이후
 // 마스터키 언랩 전에는 열 수 없어 애초에 DB 경로를 쓸 수 없다. 같은 이유로 reset()/logout
-// 에도 영향받지 않는다(아래 reset() 이 이 필드를 건드리지 않음).
+// 에도 영향받지 않는다(아래 reset() 이 이 두 필드를 건드리지 않음).
 const THEME_STORAGE_KEY = 'appTheme'
+const FONT_SIZE_STORAGE_KEY = 'appFontSize'
 
 function loadTheme() {
   try {
@@ -20,6 +22,22 @@ function loadTheme() {
 function saveTheme(theme) {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme)
+  } catch {
+    // localStorage 접근 실패 시 무시
+  }
+}
+
+function loadFontSize() {
+  try {
+    return localStorage.getItem(FONT_SIZE_STORAGE_KEY) || DEFAULT_FONT_SIZE
+  } catch {
+    return DEFAULT_FONT_SIZE
+  }
+}
+
+function saveFontSize(fontSize) {
+  try {
+    localStorage.setItem(FONT_SIZE_STORAGE_KEY, fontSize)
   } catch {
     // localStorage 접근 실패 시 무시
   }
@@ -83,12 +101,21 @@ const useUserStore = create((set) => ({
     applyThemeToDocument(resolveTheme(theme, getSystemPrefersDark()))
     set({ theme })
   },
+
+  // 폰트 크기(#73) — 'small' | 'medium' | 'large'.
+  fontSize: loadFontSize(),
+  setFontSize: (fontSize) => {
+    saveFontSize(fontSize)
+    applyFontScaleToDocument(fontSizeToScale(fontSize))
+    set({ fontSize })
+  },
 }))
 
-// 모듈 로드 시점(=main.jsx 가 App 을 렌더링하기도 전)에 저장된 테마를 즉시 DOM 에 반영해
-// FOUC(기본 다크가 잠깐 보였다가 저장된 라이트로 바뀌는 깜빡임)를 최대한 줄인다.
+// 모듈 로드 시점(=main.jsx 가 App 을 렌더링하기도 전)에 저장된 테마/폰트크기를 즉시 DOM 에
+// 반영해 FOUC(기본 다크가 잠깐 보였다가 저장된 라이트로 바뀌는 깜빡임)를 최대한 줄인다.
 // App.jsx 가 이 스토어를 import 하므로 React 렌더 이전에 항상 실행된다.
 applyThemeToDocument(resolveTheme(useUserStore.getState().theme, getSystemPrefersDark()))
+applyFontScaleToDocument(fontSizeToScale(useUserStore.getState().fontSize))
 
 // OS 다크모드 선호가 바뀌면(테마 설정이 'system' 일 때만) 즉시 재반영한다.
 if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {

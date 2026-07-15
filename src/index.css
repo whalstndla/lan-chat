@@ -17,6 +17,9 @@
   --vsc-accent:    78, 201, 176;   /* #4ec9b0 */
   --vsc-selected:  55, 55, 61;     /* #37373d */
   --vsc-hover:     42, 45, 46;     /* #2a2d2e */
+
+  /* 폰트 크기 설정(#73) 배율 — 기본 1(보통). SettingsPanel 에서 useUserStore.setFontSize 로 갱신. */
+  --app-font-scale: 1;
 }
 
 /* 라이트 팔레트 — 시각 검증 불가 환경(샌드박스)에서 만든 "합리적 시작점"이다.
@@ -31,6 +34,13 @@
   --vsc-accent:    13, 148, 136;   /* #0d9488 */
   --vsc-selected:  219, 238, 235;  /* #dbeeeb */
   --vsc-hover:     236, 236, 236;  /* #ececec */
+}
+
+/* 루트 font-size 를 배율만큼 조정 — Tailwind 의 text-xs/text-sm 등은 rem 기반이라
+   컴포넌트를 건드리지 않고도 채팅 텍스트를 포함한 전체 UI 글자 크기가 함께 스케일된다.
+   기본 배율 1 일 때 16px 로, 이전(브라우저 기본값)과 동일하게 렌더된다. */
+html {
+  font-size: calc(16px * var(--app-font-scale));
 }
 
 * {
@@ -57,14 +67,14 @@ body {
   user-select: text;
 }
 
-/* Tiptap 에디터 스타일 */
+/* Tiptap 에디터 스타일 — font-size 는 --app-font-scale(#73) 로 함께 스케일된다(채팅 입력창도 채팅 가독성의 일부). */
 .tiptap-editor .ProseMirror {
   outline: none;
   min-height: 40px;
   max-height: 128px;
   overflow-y: auto;
   padding: 10px 12px;
-  font-size: 14px;
+  font-size: calc(14px * var(--app-font-scale));
   color: rgb(var(--vsc-text));
   line-height: 1.5;
 }
@@ -85,7 +95,7 @@ body {
   left: 12px;
   top: 10px;
   color: rgb(var(--vsc-muted));
-  font-size: 14px;
+  font-size: calc(14px * var(--app-font-scale));
   line-height: 1.5;
   pointer-events: none;
 }
@@ -100,7 +110,7 @@ body {
   padding: 1px 4px;
   border-radius: 3px;
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 12px;
+  font-size: calc(12px * var(--app-font-scale));
 }
 .tiptap-editor .ProseMirror pre {
   background: rgb(var(--vsc-bg));

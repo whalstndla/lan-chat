@@ -23,6 +23,13 @@ const THEME_OPTIONS_UI = [
   { value: 'system', label: '시스템' },
 ]
 
+// 채팅 가독성용 글자 크기 옵션(#73) — 루트 font-size 배율(rem 기반)로 전체 UI에 적용된다.
+const FONT_SIZE_OPTIONS_UI = [
+  { value: 'small', label: '작게' },
+  { value: 'medium', label: '보통' },
+  { value: 'large', label: '크게' },
+]
+
 const SOUND_OPTIONS = [
   { value: 'notification1', label: '소리 1' },
   { value: 'notification2', label: '소리 2' },
@@ -63,9 +70,10 @@ export default function SettingsPanel({ onClose }) {
   const { setNotificationSettings } = useUserStore()
   const { play: playNotification } = useNotificationSound()
 
-  // 테마(#73)
+  // 테마/폰트 크기(#73)
   const theme = useUserStore(state => state.theme)
-  const { setTheme } = useUserStore()
+  const fontSize = useUserStore(state => state.fontSize)
+  const { setTheme, setFontSize } = useUserStore()
 
   // 현재 선택된 메뉴 (null이면 메뉴 목록 표시)
   const [activeMenu, setActiveMenu] = useState(null)
@@ -531,6 +539,22 @@ export default function SettingsPanel({ onClose }) {
                     onClick={() => setTheme(option.value)}
                     className={`flex-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
                       theme === option.value ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
+                    }`}
+                  >{option.label}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* 글자 크기(#73) — 채팅 가독성용. 루트 font-size 배율로 전체 UI에 함께 적용된다. */}
+            <div className="space-y-1">
+              <label className="text-vsc-muted text-xs block">글자 크기</label>
+              <div className="flex gap-1">
+                {FONT_SIZE_OPTIONS_UI.map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => setFontSize(option.value)}
+                    className={`flex-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+                      fontSize === option.value ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
                     }`}
                   >{option.label}</button>
                 ))}
