@@ -31,6 +31,36 @@ describe('shouldNotify — 알림 범위 판정', () => {
   })
 })
 
+// @멘션(#29) 알림 override — 멘션이면 뮤트/scope='dm' 억제를 우회하지만, dnd 와 scope='off'는
+// 사용자의 명시적 "완전 차단" 의도이므로 여전히 절대적으로 존중한다.
+describe('shouldNotify — @멘션(#29) override', () => {
+  it('뮤트된 방이어도 멘션이면 알림을 허용한다(멘션이 뮤트보다 강함)', () => {
+    expect(shouldNotify({ roomType: 'dm', scope: 'all', isMuted: true, isDnd: false, isMentioned: true })).toBe(true)
+  })
+
+  it("scope='dm' 이어도 전체채팅에서 멘션되면 알림을 허용한다(DM-only 범위 우회)", () => {
+    expect(shouldNotify({ roomType: 'global', scope: 'dm', isMuted: false, isDnd: false, isMentioned: true })).toBe(true)
+  })
+
+  it('멘션이어도 dnd(방해금지) 상태면 억제한다(dnd 는 존중)', () => {
+    expect(shouldNotify({ roomType: 'dm', scope: 'all', isMuted: false, isDnd: true, isMentioned: true })).toBe(false)
+  })
+
+  it("멘션이어도 scope='off' 면 억제한다(전체 알림 끄기는 존중)", () => {
+    expect(shouldNotify({ roomType: 'global', scope: 'off', isMuted: false, isDnd: false, isMentioned: true })).toBe(false)
+  })
+
+  it("scope='mention' 이면 멘션이 아닌 메시지는 억제하고, 멘션된 메시지만 허용한다", () => {
+    expect(shouldNotify({ roomType: 'global', scope: 'mention', isMuted: false, isDnd: false, isMentioned: false })).toBe(false)
+    expect(shouldNotify({ roomType: 'dm', scope: 'mention', isMuted: false, isDnd: false, isMentioned: false })).toBe(false)
+    expect(shouldNotify({ roomType: 'global', scope: 'mention', isMuted: false, isDnd: false, isMentioned: true })).toBe(true)
+  })
+
+  it('isMentioned 미지정(기존 호출부)은 기본값 false 로 동작해 기존 동작을 그대로 유지한다', () => {
+    expect(shouldNotify({ roomType: 'dm', scope: 'all', isMuted: true, isDnd: false })).toBe(false)
+  })
+})
+
 describe('maskNotificationBody — 본문 숨김', () => {
   it('hideBody 가 true 면 실제 내용 대신 고정 문구를 반환한다', () => {
     expect(maskNotificationBody(true, '비밀 회의 자료입니다')).toBe('새 메시지')
@@ -94,5 +124,25 @@ describe('resolveNotificationDecision — ctx/DB 통합 판정', () => {
     const result = resolveNotificationDecision(ctx, { roomType: 'global', roomKey: 'global', fallbackBody: '안녕' })
     expect(result.notify).toBe(true)
     expect(result.body).toBe('안녕')
+  })
+
+  it('@멘션(#29) — 뮤트된 방이어도 isMentioned=true 면 알림을 허용한다', () => {
+    const ctx = buildCtx(['peer-a'])
+    const result = resolveNotificationDecision(ctx, { roomType: 'dm', roomKey: 'peer-a', fallbackBody: '안녕', isMentioned: true })
+    expect(result.notify).toBe(true)
+  })
+
+  it("@멘션(#29) — notification_scope='dm' 이어도 전체채팅 멘션은 허용한다", () => {
+    db.prepare('UPDATE profile SET notification_scope = ? WHERE id = 1').run('dm')
+    const ctx = buildCtx()
+    const result = resolveNotificationDecision(ctx, { roomType: 'global', roomKey: 'global', fallbackBody: '안녕', isMentioned: true })
+    expect(result.notify).toBe(true)
+  })
+
+  it("@멘션(#29) — notification_scope='mention' 이면 멘션 아닌 메시지는 억제되고 멘션은 허용된다", () => {
+    db.prepare('UPDATE profile SET notification_scope = ? WHERE id = 1').run('mention')
+    const ctx = buildCtx()
+    expect(resolveNotificationDecision(ctx, { roomType: 'global', roomKey: 'global', fallbackBody: 'x', isMentioned: false }).notify).toBe(false)
+    expect(resolveNotificationDecision(ctx, { roomType: 'dm', roomKey: 'peer-a', fallbackBody: 'x', isMentioned: true }).notify).toBe(true)
   })
 })

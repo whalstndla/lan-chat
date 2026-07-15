@@ -23,10 +23,12 @@ const SOUND_OPTIONS = [
   { value: 'custom', label: '직접 업로드' },
 ]
 
-// 알림 범위 옵션 — 멘션 전용은 멘션 기능(Phase 5) 이후 추가 예정
+// 알림 범위 옵션(#29) — '멘션만'은 내가 언급된 메시지에만 알림을 받는다.
+// notificationPolicy.shouldNotify 의 scope='mention' 분기와 매핑된다.
 const NOTIFICATION_SCOPE_OPTIONS = [
   { value: 'all', label: '전체' },
   { value: 'dm', label: 'DM만' },
+  { value: 'mention', label: '멘션만' },
   { value: 'off', label: '끄기' },
 ]
 

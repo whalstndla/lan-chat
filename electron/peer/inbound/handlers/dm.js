@@ -68,6 +68,9 @@ module.exports = function handleDm({ message, ctx }) {
       console.error(`[DM 수신] DB 저장 실패: ${message.id}`, err.message)
     }
 
+    // @멘션(#29) — 이 DM 에 내 peerId 가 언급됐는지. 알림 정책의 뮤트 override 판단에 사용한다.
+    const isMentioned = Array.isArray(decryptedPayload.mentions) && decryptedPayload.mentions.includes(ctx.state.peerId)
+
     if (ctx.state.mainWindow && !ctx.state.mainWindow.isFocused()) {
       // 안읽음 배지는 뮤트/알림 범위/방해금지 여부와 무관하게 항상 증가한다(#4).
       incrementBadge(ctx)
@@ -75,6 +78,7 @@ module.exports = function handleDm({ message, ctx }) {
         roomType: 'dm',
         roomKey: message.fromId,
         fallbackBody: decryptedPayload.content || '파일을 보냈습니다.',
+        isMentioned,
       })
       if (notify) {
         showNotification(

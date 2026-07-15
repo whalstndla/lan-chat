@@ -34,6 +34,10 @@ module.exports = function handleGlobalMessage({ message, ctx }) {
     })
   } catch { /* DB 저장 실패 시 무시 — 렌더러 전달은 계속 */ }
 
+  // @멘션(#29) — 이 메시지에 내 peerId 가 언급됐는지. 알림 정책(notificationPolicy)의
+  // 뮤트/scope='dm' override 판단에 사용한다.
+  const isMentioned = Array.isArray(message.mentions) && message.mentions.includes(ctx.state.peerId)
+
   if (ctx.state.mainWindow && !ctx.state.mainWindow.isFocused()) {
     // 안읽음 배지는 뮤트/알림 범위/방해금지 여부와 무관하게 항상 증가한다(#4).
     incrementBadge(ctx)
@@ -41,6 +45,7 @@ module.exports = function handleGlobalMessage({ message, ctx }) {
       roomType: 'global',
       roomKey: 'global',
       fallbackBody: message.content || '파일을 보냈습니다.',
+      isMentioned,
     })
     if (notify) {
       showNotification(ctx, message.from || '알 수 없음', body, { type: 'global' })
