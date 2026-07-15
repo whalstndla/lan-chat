@@ -19,6 +19,7 @@ const LOCAL_CAPABILITIES = Object.freeze([
   'edit-delete',        // 메시지 수정/삭제
   'status',             // 상태 메시지
   'nickname-change',    // 닉네임 실시간 변경
+  'file-chunk',         // 파일 청크 스트리밍 전송 (#44/#45/#49). 미지원 피어는 단발 file-data 로 폴백.
 ])
 
 function buildHello({

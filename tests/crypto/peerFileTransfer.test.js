@@ -5,6 +5,8 @@ const {
   deriveFileTransferKey,
   encryptFileForPeer,
   decryptFileFromPeer,
+  encryptChunkWithKey,
+  decryptChunkWithKey,
 } = require('../../electron/crypto/peerFileTransfer')
 
 function makeKeyPair() {
@@ -92,5 +94,66 @@ describe('encryptFileForPeer / decryptFileFromPeer', () => {
     const e1 = encryptFileForPeer(Buffer.from('x'), sAB, 'a', 'b')
     const e2 = encryptFileForPeer(Buffer.from('x'), sAB, 'a', 'b')
     expect(e1).not.toBe(e2)
+  })
+})
+
+describe('encryptChunkWithKey / decryptChunkWithKey (청크 단위)', () => {
+  let A, B, key
+  beforeEach(() => {
+    A = makeKeyPair(); B = makeKeyPair()
+    // 전송당 1회 도출한 키를 청크마다 재사용하는 실제 흐름을 모사.
+    key = deriveFileTransferKey(shared(A.privateKey, B.publicKey), 'alice', 'bob')
+  })
+
+  it('청크 round-trip — 각 청크가 자체 IV/tag 로 암복호화', () => {
+    const chunk = crypto.randomBytes(1024 * 1024) // 1MB
+    const envelope = encryptChunkWithKey(chunk, key)
+    expect(typeof envelope).toBe('string')
+    const decrypted = decryptChunkWithKey(envelope, key)
+    expect(decrypted.equals(chunk)).toBe(true)
+  })
+
+  it('여러 청크를 순서대로 이어붙이면 원본 복원', () => {
+    const original = crypto.randomBytes(2_500_000)
+    const CHUNK = 1024 * 1024
+    const parts = []
+    for (let offset = 0; offset < original.length; offset += CHUNK) {
+      const env = encryptChunkWithKey(original.subarray(offset, offset + CHUNK), key)
+      parts.push(decryptChunkWithKey(env, key))
+    }
+    expect(Buffer.concat(parts).equals(original)).toBe(true)
+  })
+
+  it('같은 청크/키라도 IV 가 매번 달라 envelope 매번 다름', () => {
+    const chunk = Buffer.from('동일 청크')
+    expect(encryptChunkWithKey(chunk, key)).not.toBe(encryptChunkWithKey(chunk, key))
+  })
+
+  it('변조된 청크는 인증 태그가 막아 throw', () => {
+    const env = encryptChunkWithKey(Buffer.from('hello chunk'), key)
+    const buf = Buffer.from(env, 'base64')
+    buf[buf.length - 1] ^= 0x01
+    expect(() => decryptChunkWithKey(buf.toString('base64'), key)).toThrow()
+  })
+
+  it('다른 키로 복호화 시 throw', () => {
+    const C = makeKeyPair()
+    const otherKey = deriveFileTransferKey(shared(A.privateKey, C.publicKey), 'alice', 'carol')
+    const env = encryptChunkWithKey(Buffer.from('x'), key)
+    expect(() => decryptChunkWithKey(env, otherKey)).toThrow()
+  })
+
+  it('키 길이가 32바이트가 아니면 throw', () => {
+    expect(() => encryptChunkWithKey(Buffer.from('x'), Buffer.alloc(16))).toThrow()
+    expect(() => decryptChunkWithKey('AAAA', Buffer.alloc(16))).toThrow()
+  })
+
+  it('너무 짧은 청크 envelope 은 거부', () => {
+    expect(() => decryptChunkWithKey(Buffer.alloc(10).toString('base64'), key)).toThrow()
+  })
+
+  it('빈 청크(0바이트)도 round-trip', () => {
+    const env = encryptChunkWithKey(Buffer.alloc(0), key)
+    expect(decryptChunkWithKey(env, key).length).toBe(0)
   })
 })
