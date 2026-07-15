@@ -311,6 +311,10 @@ async function flushPendingMessages(ctx, targetPeerId, retryCount = 0) {
           fileUrl: null,
           fileName: null,
           timestamp: pending.created_at,
+          // 오프라인 큐에서 지연 재전송되는 메시지 — 원래 전송 시점(최대 7일 전) timestamp 를
+          // 그대로 유지하므로, 수신측 신선도(replay) 검증에서 예외 처리되도록 표시한다.
+          // (수신측 messageHandler.isStaleInboundMessage 가 이 플래그를 보고 통과시킨다.)
+          deferred: true,
         }
         const sent = sendPeerMessage(ctx, targetPeerId, message)
         if (sent) {
