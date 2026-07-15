@@ -8,7 +8,8 @@ const { startWsServer, stopWsServer } = require('./peer/wsServer')
 const { disconnectAll } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { collectLocalIpv4Addresses, selectPrimaryLocalIpv4 } = require('./peer/networkUtils')
-const { loadOrCreateKeyPair, exportPublicKey } = require('./crypto/keyManager')
+// 장기 신원키(myPrivateKey/myPublicKeyBase64)는 부팅이 아니라 로그인 이후(masterKey 확보 시점)에
+// auth.js 가 loadOrCreateEncryptedKeyPair 로 로드한다(#61). 부팅 경로에서는 개인키를 다루지 않는다.
 const { closeDatabase } = require('./storage/database')
 const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath, flushPeerDebugLogNow } = require('./utils/peerDebugLogger')
 const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
@@ -136,10 +137,9 @@ async function initApp() {
     interfaces: os.networkInterfaces(),
   })
 
-  // ECDH 키 쌍 로드 (최초 실행 시 자동 생성)
-  const { privateKey, publicKey } = loadOrCreateKeyPair(appDataPath)
-  ctx.state.myPrivateKey = privateKey
-  ctx.state.myPublicKeyBase64 = exportPublicKey(publicKey)
+  // ECDH 신원 키는 여기서 로드하지 않는다(#61). masterKey 로 wrap 된 private_key.enc 를
+  // 로그인/등록 성공 직후(auth.js)에 언랩해 ctx.state.myPrivateKey/myPublicKeyBase64 에 세팅하고,
+  // 그 다음에야 renderer 가 start-peer-discovery 를 호출한다 — 즉 개인키는 항상 discovery 보다 먼저 준비된다.
 
   // 파일 서버 시작 (파일 + 프로필 이미지 제공)
   await startFileServer(profileFolderPath)

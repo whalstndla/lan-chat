@@ -25,6 +25,7 @@ const {
   masterKeyFileExists,
   legacyKeyFileExists,
 } = require('../crypto/masterKey')
+const { loadOrCreateEncryptedKeyPair, exportPublicKey } = require('../crypto/keyManager')
 const { stopBroadcastDiscovery } = require('../peer/broadcastDiscovery')
 const { stopPeerDiscovery } = require('../peer/discovery')
 const { disconnectAll } = require('../peer/wsClient')
@@ -70,6 +71,15 @@ function openSessionDatabase(ctx, dbPath, appDataPath) {
   }
 }
 
+// 마스터키 확보 이후 장기 신원키(ECDH 개인키)를 로드/생성/마이그레이션해 ctx.state 에 세팅.
+// 반드시 discovery 시작(start-peer-discovery) 전에 호출돼야 hello/키교환/DM 이 정상 동작한다.
+// masterKey 는 password 를 바꿔도 동일하게 유지되므로 private_key.enc 는 재포장이 필요 없다.
+function loadIdentityKeyPair(ctx, appDataPath) {
+  const { privateKey, publicKey } = loadOrCreateEncryptedKeyPair(appDataPath, ctx.state.masterKey)
+  ctx.state.myPrivateKey = privateKey
+  ctx.state.myPublicKeyBase64 = exportPublicKey(publicKey)
+}
+
 // peerId 복원 또는 신규 생성.
 function ensurePeerId(ctx) {
   const profile = getProfile(ctx.state.database)
@@ -91,6 +101,10 @@ function teardownSession(ctx) {
     try { ctx.state.masterKey.fill(0) } catch {}
     ctx.state.masterKey = null
   }
+  // 장기 신원키도 세션 종료 시 메모리에서 폐기 — 개인키가 로그인 세션 동안만 상주하도록 한다(#61).
+  // KeyObject 는 Buffer 처럼 0 덮어쓰기가 불가하므로 참조를 끊어 GC 에 맡긴다.
+  ctx.state.myPrivateKey = null
+  ctx.state.myPublicKeyBase64 = null
   // 마스터키 폐기 시 복호화된 평문 버퍼 캐시도 비워 메모리에 평문 잔재가 남지 않게 한다.
   try { clearDecryptedCache() } catch {}
   ctx.state.peerId = null
@@ -131,6 +145,9 @@ function registerAuthHandlers(ctx) {
       }
 
       openSessionDatabase(ctx, dbPath, appDataPath)
+
+      // 신원키 로드/생성 — discovery 시작 전에 개인키가 준비되도록 여기서 세팅한다(#61).
+      loadIdentityKeyPair(ctx, appDataPath)
 
       // legacy 마이그레이션 케이스: 기존 프로필 인정
       const existing = getProfile(ctx.state.database)
@@ -176,6 +193,9 @@ function registerAuthHandlers(ctx) {
         teardownSession(ctx)
         return { success: false, error: '아이디 또는 비밀번호가 틀렸습니다.' }
       }
+
+      // 검증 통과 후 신원키 로드 — discovery 시작 전에 개인키가 준비되도록 한다(#61).
+      loadIdentityKeyPair(ctx, appDataPath)
 
       ensurePeerId(ctx)
       return { success: true, nickname: profile.nickname }
