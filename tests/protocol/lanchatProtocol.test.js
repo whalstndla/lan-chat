@@ -10,7 +10,7 @@ jest.mock('electron', () => ({
   },
 }))
 
-const { buildLanChatUrl, guessMime, SCHEME, createDecryptedCache } = require('../../electron/protocol/lanchatProtocol')
+const { buildLanChatUrl, guessMime, SCHEME, createDecryptedCache, parseRange } = require('../../electron/protocol/lanchatProtocol')
 
 // 테스트 헬퍼 — 지정 바이트 크기의 Buffer 생성
 function buf(size, fill = 0) {
@@ -38,10 +38,55 @@ describe('guessMime', () => {
     ['movie.webm', 'video/webm'],
     ['sound.mp3', 'audio/mpeg'],
     ['sound.wav', 'audio/wav'],
+    ['clip.mkv', 'video/x-matroska'],
+    ['clip.avi', 'video/x-msvideo'],
     ['unknown.bin', 'application/octet-stream'],
     ['noext', 'application/octet-stream'],
   ])('%s → %s', (fileName, expected) => {
     expect(guessMime(fileName)).toBe(expected)
+  })
+})
+
+describe('parseRange', () => {
+  const TOTAL = 1000
+
+  it('bytes=0- → 0부터 끝까지', () => {
+    expect(parseRange('bytes=0-', TOTAL)).toEqual({ start: 0, end: 999 })
+  })
+
+  it('bytes=100-199 → 구간 그대로(inclusive)', () => {
+    expect(parseRange('bytes=100-199', TOTAL)).toEqual({ start: 100, end: 199 })
+  })
+
+  it('bytes=-500 → 마지막 500바이트(suffix)', () => {
+    expect(parseRange('bytes=-500', TOTAL)).toEqual({ start: 500, end: 999 })
+  })
+
+  it('end 가 파일 끝을 넘으면 마지막 바이트로 클램프', () => {
+    expect(parseRange('bytes=900-5000', TOTAL)).toEqual({ start: 900, end: 999 })
+  })
+
+  it('suffix 길이가 파일보다 크면 전체로 클램프', () => {
+    expect(parseRange('bytes=-5000', TOTAL)).toEqual({ start: 0, end: 999 })
+  })
+
+  it.each([
+    ['헤더 없음(null)', null],
+    ['빈 문자열', ''],
+    ['접두어 없음', '100-199'],
+    ['잘못된 단위', 'items=0-10'],
+    ['양쪽 공백', 'bytes=-'],
+    ['다중 range 미지원', 'bytes=0-99,200-299'],
+    ['start 가 파일 범위 밖', 'bytes=1000-1100'],
+    ['start > end', 'bytes=500-100'],
+    ['suffix 0바이트', 'bytes=-0'],
+    ['숫자 아님', 'bytes=abc-def'],
+  ])('%s → null', (_label, header) => {
+    expect(parseRange(header, TOTAL)).toBeNull()
+  })
+
+  it('totalSize 가 0 이하이면 null', () => {
+    expect(parseRange('bytes=0-', 0)).toBeNull()
   })
 })
 

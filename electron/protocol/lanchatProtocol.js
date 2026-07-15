@@ -33,6 +33,8 @@ const MIME_BY_EXT = {
   '.mov': 'video/quicktime',
   '.m4v': 'video/x-m4v',
   '.ogv': 'video/ogg',
+  '.mkv': 'video/x-matroska',
+  '.avi': 'video/x-msvideo',
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
@@ -119,6 +121,43 @@ function clearDecryptedCache() {
   decryptedCache.clear()
 }
 
+// HTTP Range 헤더 파서 (단일 range 만 지원).
+//   지원 형식: "bytes=100-199"(구간), "bytes=0-"(start~끝), "bytes=-500"(마지막 N바이트)
+//   반환: { start, end } (둘 다 inclusive) 또는 null
+//   null 을 반환하는 경우(→ 호출부가 200 전체 응답으로 폴백):
+//     - 헤더 없음 / 형식 오류 / 다중 range / 불만족(start 가 파일 범위 밖) 등
+// 참고: multipart(다중 range)는 미지원 — 미디어 재생/seek 은 단일 range 로 충분하다.
+function parseRange(rangeHeader, totalSize) {
+  if (typeof rangeHeader !== 'string' || typeof totalSize !== 'number' || totalSize <= 0) return null
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim())
+  if (!match) return null
+  const startStr = match[1]
+  const endStr = match[2]
+  // 양쪽 모두 비어 있으면 형식 오류
+  if (startStr === '' && endStr === '') return null
+
+  let start
+  let end
+  if (startStr === '') {
+    // suffix range — 마지막 N 바이트. 파일보다 크면 전체로 클램프.
+    const suffixLength = parseInt(endStr, 10)
+    if (!(suffixLength > 0)) return null
+    start = Math.max(0, totalSize - suffixLength)
+    end = totalSize - 1
+  } else {
+    start = parseInt(startStr, 10)
+    end = endStr === '' ? totalSize - 1 : parseInt(endStr, 10)
+    // end 가 파일 끝을 넘으면 마지막 바이트로 클램프
+    if (end > totalSize - 1) end = totalSize - 1
+  }
+
+  if (Number.isNaN(start) || Number.isNaN(end)) return null
+  // 불만족 range — 폴백(200)에 맡긴다
+  if (start < 0 || start > end || start >= totalSize) return null
+
+  return { start, end }
+}
+
 // app.whenReady() 이전에 호출되어야 함.
 function registerLanChatScheme() {
   protocol.registerSchemesAsPrivileged([
@@ -172,10 +211,41 @@ function registerLanChatHandler(ctx) {
         decryptedCache.put(cachedPath, plaintext)
       }
 
+      const contentType = guessMime(cachedPath)
+      const totalSize = plaintext.length
+
+      // Range 요청 처리 — AES-GCM 암호문은 부분 읽기가 불가하므로, (캐시에서 얻은)
+      // 전체 평문을 메모리에 두고 요청된 바이트 구간만 slice 해 206 으로 응답한다.
+      // 한계: 서버측은 여전히 파일 전체를 복호화해 메모리에 올린다(청크 스트리밍 아님).
+      // 진짜 청크 스트리밍은 청크 암호화 포맷이 필요하다(후속 Phase 4.4). 이번 변경의
+      // 이득은 브라우저측 진행형 재생/seek + 렌더러 피크 메모리 감소다.
+      const rangeHeader = request.headers.get('range')
+      const range = parseRange(rangeHeader, totalSize)
+      if (range) {
+        const { start, end } = range
+        // subarray 는 복사 없이 뷰만 반환 — 응답은 읽기 전용이라 안전.
+        const chunk = plaintext.subarray(start, end + 1)
+        return new Response(chunk, {
+          status: 206,
+          headers: {
+            'Content-Type': contentType,
+            'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': String(chunk.length),
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        })
+      }
+
+      // Range 없는 요청 — 기존처럼 200 전체 응답. Accept-Ranges 헤더로 브라우저에
+      // range 가능함을 알려 진행형 재생/seek 을 유도한다(비-미디어에도 무해).
       return new Response(plaintext, {
         status: 200,
         headers: {
-          'Content-Type': guessMime(cachedPath),
+          'Content-Type': contentType,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(totalSize),
           'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff',
         },
@@ -199,4 +269,5 @@ module.exports = {
   guessMime,
   createDecryptedCache,
   clearDecryptedCache,
+  parseRange,
 }
