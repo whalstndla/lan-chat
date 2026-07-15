@@ -8,6 +8,7 @@ import { Markdown } from 'tiptap-markdown'
 import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
 import useChatStore, { getRoomKey } from '../store/useChatStore'
+import { isCompressibleImageType, compressImageFile } from '../utils/imageCompression'
 
 // 메시지 최대 길이 — electron/ipcHandlers/message.js 의 MAX_CONTENT_LENGTH 와 동일 값을 유지.
 // 전송 전 클라이언트에서 미리 검증해, 초과 시 IPC 실패 응답을 기다리지 않고 즉시 안내한다.
@@ -73,7 +74,12 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const fileInputRef = useRef(null)
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
+  // 붙여넣기 미리보기 항목 고유 id 발급용 카운터 — 압축 예상 크기 비동기 계산 결과를
+  // 정확한 항목에 반영하기 위해 index 대신 고유 id 로 매칭한다(연속 붙여넣기/제거 시에도 안전).
+  const pastePreviewIdCounterRef = useRef(0)
   const currentRoom = useChatStore(state => state.currentRoom)
+  const sendOriginalImages = useChatStore(state => state.sendOriginalImages)
+  const setSendOriginalImages = useChatStore(state => state.setSendOriginalImages)
   // 방별 draft 보존용 — 매 키 입력마다 store 에 쓰지 않고, 최신 마크다운을 ref 에만 저장해뒀다가
   // 방 전환/blur 시점에만 store.setDraft 로 flush 한다(IME 안전: 순수 ref 대입이라 조합에 영향 없음).
   const latestMarkdownRef = useRef('')
@@ -121,19 +127,46 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         }
         if (newFiles.length === 0) return false
         event.preventDefault()
+        // 미리보기 항목마다 고유 id 발급 — 아래 압축 예상 크기 비동기 계산 결과를 index 가 아닌
+        // id 로 매칭해, 계산 도중 다른 항목이 추가/제거돼도 엉뚱한 항목이 갱신되지 않게 한다.
+        const addedPreviews = newFiles.map(file => ({
+          id: (pastePreviewIdCounterRef.current += 1),
+          previewUrl: URL.createObjectURL(file),
+          fileName: file.name || '이미지.png',
+          fileSize: file.size,
+          // 압축 파이프라인 대상 여부(#47) — GIF/SVG 등은 원본 그대로 전송되므로 예상 크기를
+          // 계산하지 않는다.
+          willCompress: isCompressibleImageType(file.type),
+          estimatedCompressedSize: null, // 아래에서 비동기로 채워짐
+        }))
         // 기존 미리보기에 누적 추가
         setPastePreview(prev => {
           const existingFiles = prev ? prev.files : []
           const existingPreviews = prev ? prev.previews : []
-          const addedPreviews = newFiles.map(file => ({
-            previewUrl: URL.createObjectURL(file),
-            fileName: file.name || '이미지.png',
-            fileSize: file.size,
-          }))
           return {
             files: [...existingFiles, ...newFiles],
             previews: [...existingPreviews, ...addedPreviews],
           }
+        })
+        // 압축 후 예상 크기를 미리보기에 참고용으로 표시(#47) — 실제 전송 시점의 압축 여부는
+        // sendFile 이 그때의 sendOriginalImages 값을 다시 확인해 결정하므로, 이 계산 결과 자체를
+        // 전송에 재사용하지는 않는다(순수 참고 표시).
+        newFiles.forEach((file, index) => {
+          const previewId = addedPreviews[index].id
+          if (!addedPreviews[index].willCompress) return
+          compressImageFile(file).then(compressed => {
+            setPastePreview(prev => {
+              if (!prev) return prev
+              const targetIndex = prev.previews.findIndex(p => p.id === previewId)
+              if (targetIndex === -1) return prev
+              const updatedPreviews = [...prev.previews]
+              updatedPreviews[targetIndex] = {
+                ...updatedPreviews[targetIndex],
+                estimatedCompressedSize: compressed ? compressed.size : updatedPreviews[targetIndex].fileSize,
+              }
+              return { ...prev, previews: updatedPreviews }
+            })
+          }).catch(() => {})
         })
         return true
       },
@@ -383,6 +416,14 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         uploadFile = new File([file], file.name, { type: 'application/octet-stream' })
       }
     }
+    // 이미지 리사이즈/재인코딩(#47) — HEIC 변환 이후 단계에 둬서 HEIC→JPEG 로 바뀐 파일도 동일하게
+    // 압축 대상이 되게 한다. "원본 전송" 설정이 켜져 있으면 건너뛰고, 실패/비대상(GIF 등)이면
+    // compressImageFile 이 null 을 반환해 원본 uploadFile 을 그대로 유지한다(HEIC 변환 실패
+    // 폴백과 동일한 안전 철학 — 압축이 실패해도 전송 자체는 막지 않는다).
+    if (!useChatStore.getState().sendOriginalImages) {
+      const compressed = await compressImageFile(uploadFile)
+      if (compressed) uploadFile = compressed
+    }
     const arrayBuffer = await uploadFile.arrayBuffer()
     const saveResult = await window.electronAPI.saveFile(arrayBuffer, uploadFile.name)
     if (!saveResult || !saveResult.ok) {
@@ -493,6 +534,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         onConfirm={confirmPasteSend}
         onCancel={cancelPaste}
         onRemoveItem={removePasteItem}
+        sendOriginalImages={sendOriginalImages}
+        onToggleSendOriginal={setSendOriginalImages}
       />
 
       <div className="flex flex-col bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors duration-150">

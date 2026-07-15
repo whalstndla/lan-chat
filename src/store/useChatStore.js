@@ -20,6 +20,26 @@ function saveMutedRooms(mutedRooms) {
   }
 }
 
+// localStorage에서 "원본 이미지 전송" 설정 복원(#47) — 기본값은 압축 활성화(false).
+// mutedRooms 와 마찬가지로 계정 데이터가 아닌 이 기기의 UI 선호값이라 resetAll/로그아웃 시에도
+// 초기화하지 않는다.
+function loadSendOriginalImages() {
+  try {
+    return localStorage.getItem('sendOriginalImages') === 'true'
+  } catch {
+    return false
+  }
+}
+
+// localStorage에 "원본 이미지 전송" 설정 저장
+function saveSendOriginalImages(value) {
+  try {
+    localStorage.setItem('sendOriginalImages', value ? 'true' : 'false')
+  } catch {
+    // localStorage 접근 실패 시 무시
+  }
+}
+
 // localStorage에서 북마크 상태 복원 — 피어 전파 없는 로컬 전용 기능(#34)
 function loadBookmarks() {
   try {
@@ -59,6 +79,9 @@ const useChatStore = create((set, get) => ({
   lastReadTimestamps: {},
   typingUsers: {}, // { peerId: { nickname, timestamp } }
   mutedRooms: loadMutedRooms(), // { roomKey: boolean } — 채팅방별 알림 뮤트 상태
+  // 이미지 전송 시 압축(리사이즈+재인코딩) 대신 원본을 그대로 보낼지 여부(#47).
+  // 기본값 false = 압축 적용. localStorage 로 기기에 영속(계정 데이터 아님, resetAll 대상 아님).
+  sendOriginalImages: loadSendOriginalImages(),
   drafts: {}, // { roomKey: markdown } — 방 전환 시 작성 중이던 메시지를 보존하기 위한 임시 저장소
   cachedFileUrls: {}, // { messageId: 'file://...' } — WebSocket으로 수신한 파일 캐시 경로
   // { messageId: 'notFound' | 'tooLarge' | 'timeout' | ... } — file-request 실패 통보.
@@ -84,6 +107,13 @@ const useChatStore = create((set, get) => ({
 
   // 채팅방 뮤트 여부 확인 (액션이 아닌 셀렉터로 사용)
   isRoomMuted: (roomKey) => !!get().mutedRooms[roomKey],
+
+  // 이미지 전송 시 원본 그대로 전송할지 토글(#47) — PastePreviewDialog 체크박스에서 호출.
+  setSendOriginalImages: (value) =>
+    set(() => {
+      saveSendOriginalImages(value)
+      return { sendOriginalImages: value }
+    }),
 
   setCurrentRoom: (room) => set({ currentRoom: room }),
 
