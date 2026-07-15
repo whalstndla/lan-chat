@@ -44,6 +44,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getStorageUsage: () => ipcRenderer.invoke('get-storage-usage'),
   clearFileCache: () => ipcRenderer.invoke('clear-file-cache'),
 
+  // 기본 다운로드 폴더 설정(#74) — 미지정 시 OS 기본 다운로드 폴더 사용
+  getDownloadFolder: () => ipcRenderer.invoke('get-download-folder'),
+  setDownloadFolder: () => ipcRenderer.invoke('set-download-folder'),
+
   // 파일 저장 — ArrayBuffer를 Uint8Array로 변환 후 전송 (IPC 직렬화 안전)
   saveFile: (fileBuffer, fileName) => ipcRenderer.invoke('save-file', { fileBuffer: new Uint8Array(fileBuffer), fileName }),
 

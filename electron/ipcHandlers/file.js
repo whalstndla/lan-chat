@@ -12,6 +12,7 @@ const { encryptBuffer, decryptBuffer, isEncryptedFile } = require('../crypto/fil
 const { MAX_CHUNKED_FILE_BYTES } = require('../utils/appUtils')
 const { cancelInboundTransferByMessageId } = require('../peer/fileChunkTransfer')
 const { resolveDownloadFileName } = require('../utils/downloadUtils')
+const { loadDownloadFolderPath, saveDownloadFolderPath, resolveDownloadFolderPath } = require('../utils/downloadFolder')
 
 function registerFileHandlers(ctx) {
   const tempFilePath = path.join(ctx.config.appDataPath, 'files')
@@ -83,7 +84,9 @@ function registerFileHandlers(ctx) {
       }
 
       const defaultFileName = resolveDownloadFileName(fileInfo.fileName, fileInfo.cachedFilePath)
-      const defaultPath = path.join(app.getPath('downloads'), defaultFileName)
+      // 사용자가 설정에서 기본 다운로드 폴더를 지정했으면 그 폴더를, 아니면 OS 기본 다운로드 폴더를 사용(#74).
+      const downloadFolder = resolveDownloadFolderPath(ctx.config.appDataPath, app.getPath('downloads'))
+      const defaultPath = path.join(downloadFolder, defaultFileName)
 
       const saveDialogOptions = { defaultPath }
       const { canceled, filePath } = ctx.state.mainWindow
@@ -113,6 +116,24 @@ function registerFileHandlers(ctx) {
   ipcMain.handle('cancel-file-transfer', (_, messageId) => {
     cancelInboundTransferByMessageId(ctx, messageId)
     return { ok: true }
+  })
+
+  // 기본 다운로드 폴더 설정(#74) 조회 — 사용자 지정 폴더와 OS 기본 다운로드 폴더를 함께 반환해
+  // 렌더러가 "지정 폴더 없음 = OS 기본값 사용 중"을 표시할 수 있게 한다.
+  ipcMain.handle('get-download-folder', () => ({
+    folderPath: loadDownloadFolderPath(ctx.config.appDataPath),
+    osDefaultPath: app.getPath('downloads'),
+  }))
+
+  // 기본 다운로드 폴더 설정 변경 — 폴더 선택 다이얼로그를 띄우고 선택 결과를 저장한다.
+  ipcMain.handle('set-download-folder', async () => {
+    const dialogOptions = { properties: ['openDirectory'] }
+    const { canceled, filePaths } = ctx.state.mainWindow
+      ? await dialog.showOpenDialog(ctx.state.mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions)
+    if (canceled || !filePaths?.[0]) return { ok: false, canceled: true }
+    saveDownloadFolderPath(ctx.config.appDataPath, filePaths[0])
+    return { ok: true, folderPath: filePaths[0] }
   })
 }
 

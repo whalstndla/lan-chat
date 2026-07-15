@@ -1,6 +1,6 @@
 // src/components/SettingsPanel.jsx
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download, HardDrive, FileDown } from 'lucide-react'
+import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download, HardDrive, FolderOpen, FileDown } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useUserStore from '../store/useUserStore'
 import usePeerStore from '../store/usePeerStore'
@@ -139,6 +139,19 @@ export default function SettingsPanel({ onClose }) {
     )
     await refreshStorageUsage()
     setTimeout(() => setCacheClearMessage(null), 3000)
+  }
+
+  // 기본 다운로드 폴더 설정(#74) — 미지정 시 OS 기본 다운로드 폴더 사용
+  const [downloadFolder, setDownloadFolderInfo] = useState(null) // { folderPath, osDefaultPath }
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI.getDownloadFolder?.().then((value) => { if (!cancelled) setDownloadFolderInfo(value) })
+    return () => { cancelled = true }
+  }, [])
+
+  async function handleChooseDownloadFolder() {
+    const result = await window.electronAPI.setDownloadFolder?.()
+    if (result?.ok) setDownloadFolderInfo((prev) => ({ ...prev, folderPath: result.folderPath }))
   }
 
   // 채팅 내보내기(#74) — 범위(전체채팅/DM) + 형식(txt/json) 선택 후 저장 다이얼로그로 내보낸다.
@@ -531,6 +544,18 @@ export default function SettingsPanel({ onClose }) {
                 </button>
               )}
               {cacheClearMessage && <p className="text-[10px] text-green-400">{cacheClearMessage}</p>}
+            </div>
+
+            {/* 기본 다운로드 폴더 설정(#74) */}
+            <div className="pb-3 mb-1 border-b border-vsc-border space-y-1">
+              <label className="text-vsc-muted text-xs flex items-center gap-1"><FolderOpen size={11} />다운로드 폴더</label>
+              <p className="text-[10px] text-vsc-muted break-all">
+                {downloadFolder?.folderPath || `OS 기본값 사용 중${downloadFolder?.osDefaultPath ? ` (${downloadFolder.osDefaultPath})` : ''}`}
+              </p>
+              <button onClick={handleChooseDownloadFolder}
+                className="cursor-pointer w-full px-2 py-1.5 rounded text-xs bg-vsc-panel border border-vsc-border text-vsc-text hover:bg-vsc-hover transition-colors">
+                폴더 선택
+              </button>
             </div>
 
             {/* 채팅 내보내기(#74) — 전체채팅/DM 기록을 txt/json 파일로 백업 */}
