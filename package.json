@@ -13,17 +13,45 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "jest": {
-    "testEnvironment": "node",
-    "testTimeout": 10000,
-    "testPathIgnorePatterns": [
-      "/node_modules/",
-      "/tests/peer/harness/"
-    ],
-    "transform": {
-      "^.+\\.jsx?$": "babel-jest"
-    },
-    "transformIgnorePatterns": [
-      "node_modules/(?!(zustand|uuid)/)"
+    "projects": [
+      {
+        "displayName": "node",
+        "testEnvironment": "node",
+        "testTimeout": 10000,
+        "testMatch": [
+          "<rootDir>/tests/**/*.test.js"
+        ],
+        "testPathIgnorePatterns": [
+          "/node_modules/",
+          "/tests/peer/harness/"
+        ],
+        "transform": {
+          "^.+\\.jsx?$": "babel-jest"
+        },
+        "transformIgnorePatterns": [
+          "node_modules/(?!(zustand|uuid)/)"
+        ]
+      },
+      {
+        "displayName": "jsdom",
+        "testEnvironment": "jsdom",
+        "testTimeout": 10000,
+        "testMatch": [
+          "<rootDir>/tests/renderer/**/*.test.jsx"
+        ],
+        "testPathIgnorePatterns": [
+          "/node_modules/"
+        ],
+        "transform": {
+          "^.+\\.jsx?$": "babel-jest"
+        },
+        "transformIgnorePatterns": [
+          "node_modules/(?!(zustand|uuid)/)"
+        ],
+        "setupFilesAfterEnv": [
+          "<rootDir>/tests/renderer/setupTests.js"
+        ]
+      }
     ]
   },
   "keywords": [],
@@ -129,6 +157,9 @@
   "devDependencies": {
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.2",
+    "@babel/preset-react": "^7.29.7",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.27",
     "babel-jest": "^30.3.0",
@@ -137,6 +168,7 @@
     "electron": "^40.8.0",
     "electron-builder": "^26.8.1",
     "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.4.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "vite": "^7.3.1",
