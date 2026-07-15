@@ -1,0 +1,39 @@
+name: CI
+
+# push/PR 시 테스트 + 렌더러 빌드를 검증한다.
+# 로컬 검증 커맨드(npm ci && npm test && npx vite build)와 동일한 순서를 유지한다.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # better-sqlite3-multiple-ciphers 네이티브 빌드를 위해 로컬 개발 환경과 동일한
+      # Node 버전을 사용한다(로컬: v22.x). npm 캐시는 package-lock.json 기준으로 적용.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # npm ci 의 postinstall(electron-builder install-app-deps)이 better-sqlite3-multiple-ciphers 를
+      # Electron ABI 로 먼저 빌드한다. 이후 pretest(npm rebuild)가 테스트 실행용(Node ABI)으로
+      # 다시 빌드해준다 — 로컬의 `npm test` 와 동일한 흐름이며 별도 처리가 필요 없다.
+      - name: Install dependencies
+        run: npm ci
+
+      # pretest 훅이 better-sqlite3-multiple-ciphers 를 Node ABI 로 재빌드한 뒤 jest 를 실행한다.
+      - name: Run tests
+        run: npm test
+
+      # 렌더러(Vite) 프로덕션 빌드가 깨지지 않는지 확인.
+      - name: Build renderer
+        run: npx vite build
