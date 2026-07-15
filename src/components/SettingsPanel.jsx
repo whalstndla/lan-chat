@@ -1,6 +1,6 @@
 // src/components/SettingsPanel.jsx
 import React, { useState, useRef, useEffect, useMemo } from 'react'
-import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download, HardDrive, FolderOpen, FileDown } from 'lucide-react'
+import { X, LogOut, Camera, Check, Volume2, Play, Trash2, User, Bell, Database, Info, ChevronLeft, Download, HardDrive, FolderOpen, FileDown, Monitor } from 'lucide-react'
 import useAuthStore from '../store/useAuthStore'
 import useUserStore from '../store/useUserStore'
 import usePeerStore from '../store/usePeerStore'
@@ -11,8 +11,16 @@ import useNotificationSound from '../hooks/useNotificationSound'
 const MENU_ITEMS = [
   { id: 'profile', label: '프로필', icon: User },
   { id: 'notification', label: '알림', icon: Bell },
+  { id: 'display', label: '화면', icon: Monitor },
   { id: 'data', label: '데이터 관리', icon: Database },
   { id: 'app', label: '앱 정보', icon: Info },
+]
+
+// 테마 옵션(#73) — 다크가 기본값. '시스템'은 OS 다크모드 선호(prefers-color-scheme)를 따른다.
+const THEME_OPTIONS_UI = [
+  { value: 'dark', label: '다크' },
+  { value: 'light', label: '라이트' },
+  { value: 'system', label: '시스템' },
 ]
 
 const SOUND_OPTIONS = [
@@ -54,6 +62,10 @@ export default function SettingsPanel({ onClose }) {
   const notificationHideBody = useUserStore(state => state.notificationHideBody)
   const { setNotificationSettings } = useUserStore()
   const { play: playNotification } = useNotificationSound()
+
+  // 테마(#73)
+  const theme = useUserStore(state => state.theme)
+  const { setTheme } = useUserStore()
 
   // 현재 선택된 메뉴 (null이면 메뉴 목록 표시)
   const [activeMenu, setActiveMenu] = useState(null)
@@ -501,6 +513,29 @@ export default function SettingsPanel({ onClose }) {
                 className="accent-vsc-accent cursor-pointer"
               />
             </label>
+          </div>
+        </>
+      )}
+
+      {activeMenu === 'display' && (
+        <>
+          {renderSubPageHeader('화면')}
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+            {/* 테마(#73) — 다크가 기본값. '시스템'은 OS 다크모드 선호를 따른다. */}
+            <div className="space-y-1">
+              <label className="text-vsc-muted text-xs block">테마</label>
+              <div className="flex gap-1">
+                {THEME_OPTIONS_UI.map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => setTheme(option.value)}
+                    className={`flex-1 px-2 py-1 rounded text-xs transition-colors cursor-pointer ${
+                      theme === option.value ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
+                    }`}
+                  >{option.label}</button>
+                ))}
+              </div>
+            </div>
           </div>
         </>
       )}
