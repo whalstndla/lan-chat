@@ -7,12 +7,12 @@ import MarkdownRenderer from './MarkdownRenderer'
 import ImageLightbox from './message/ImageLightbox'
 import CopyButton from './message/CopyButton'
 import ReactionPicker from './message/ReactionPicker'
+import ReactionBadges from './message/ReactionBadges'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
 import useFileDownload from '../hooks/useFileDownload'
 import { highlightText } from '../utils/highlightText'
-import { resolvePeerNickname } from '../utils/resolvePeerNickname'
 
 // timestamp → "오후 2:30" 형식
 function formatTime(timestamp) {
@@ -137,16 +137,21 @@ function getBookmarkPreview(message, contentType, fileName) {
     : content
 }
 
-export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
+function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
   const myPeerId = useUserStore(state => state.myPeerId)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
   // 리액션 — 스토어의 reactions 맵을 구독 (하이드레이션 + 실시간 갱신 반영)
   const reactions = useChatStore(state => state.reactions[message.id]) || {}
   // 북마크(#34) 여부 — 스토어의 bookmarks 맵을 구독
   const isBookmarked = useChatStore(state => !!state.bookmarks[message.id])
-  const onlinePeers = usePeerStore(state => state.onlinePeers)
-  const pastDMPeers = usePeerStore(state => state.pastDMPeers)
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
+  const senderId = message.fromId || message.from_id
+  // 발신자 아바타 URL — onlinePeers 배열 전체가 아니라 "이 발신자의 프로필 이미지 URL"(primitive)만
+  // 좁게 구독한다. 이렇게 하면 무관한 피어 한 명의 상태 변화에 모든 메시지가 리렌더되던 문제가
+  // 사라지고, React.memo 와 결합해 실제로 이 발신자의 아바타가 바뀔 때만 리렌더된다.
+  const senderProfileImageUrl = usePeerStore(state =>
+    isMyMessage ? null : state.onlinePeers.find(p => p.peerId === senderId)?.profileImageUrl
+  )
   const [lightboxData, setLightboxData] = useState(null) // { url, messageId }
   const { downloadFile, savedPath, revealInFolder } = useFileDownload()
 
@@ -154,7 +159,6 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   const contentType = message.contentType || message.content_type
   const fileUrl = message.fileUrl || message.file_url
   const fileName = message.fileName || message.file_name
-  const senderId = message.fromId || message.from_id
 
   // 텍스트 메시지에서 첫 번째 URL 추출 (링크 프리뷰용)
   const firstUrl = useMemo(() => {
@@ -168,9 +172,8 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   const { src: resolvedFileUrl, status: imgStatus, onLoad: onImgLoad, onError: onImgError } =
     useImageSrcWithFallback(message.id, fileUrl, wsFileCachedUrl, loadError)
 
-  // 발신자 아바타 URL 계산
-  const senderPeer = onlinePeers.find(p => p.peerId === senderId)
-  const avatarUrl = isMyMessage ? myProfileImageUrl : senderPeer?.profileImageUrl
+  // 발신자 아바타 URL 계산 — 내 메시지는 내 프로필, 상대는 위에서 좁게 구독한 프로필 URL 사용
+  const avatarUrl = isMyMessage ? myProfileImageUrl : senderProfileImageUrl
 
   async function handleDelete() {
     const allMessages = extraImages.length > 0
@@ -424,23 +427,10 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
             <LinkPreviewCard url={firstUrl} />
           )}
 
-          {/* 리액션 배지 표시 — hover 시 반응자 닉네임 툴팁(#38) */}
+          {/* 리액션 배지 표시 — hover 시 반응자 닉네임 툴팁(#38). onlinePeers/pastDMPeers 구독은
+              ReactionBadges 안으로 이동해, 리액션이 있는 메시지에서만 피어 상태를 구독한다. */}
           {Object.keys(reactions).length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              {Object.entries(reactions).map(([emoji, peerIds]) => (
-                <button key={emoji} onClick={() => handleReaction(emoji)}
-                  className={`relative group/reaction-badge inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border cursor-pointer transition-colors ${
-                    peerIds.includes(myPeerId)
-                      ? 'bg-vsc-accent/20 border-vsc-accent text-vsc-accent'
-                      : 'bg-vsc-panel border-vsc-border text-vsc-muted hover:border-vsc-accent'
-                  }`}>
-                  <span>{emoji}</span><span>{peerIds.length}</span>
-                  <span className="hidden group-hover/reaction-badge:block absolute bottom-full mb-1 left-1/2 -translate-x-1/2 whitespace-nowrap bg-vsc-sidebar border border-vsc-border rounded px-2 py-1 text-[11px] text-vsc-text shadow-lg z-20">
-                    {peerIds.map(peerId => resolvePeerNickname(peerId, { myPeerId, onlinePeers, pastDMPeers })).join(', ')}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <ReactionBadges reactions={reactions} myPeerId={myPeerId} onReact={handleReaction} />
           )}
 
           {/* 다운로드 저장 완료 안내 — 클릭 시 폴더에서 보기 */}
@@ -466,3 +456,9 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
     </>
   )
 }
+
+// React.memo — ChatWindow 가 넘기는 props(message/onStartEdit/isHighlighted/isGrouped/
+// extraImages/searchQuery)가 얕은 비교로 동일하면 부모 리렌더 시에도 다시 그리지 않는다.
+// onStartEdit 는 useCallback, extraImages 는 구조 memo(빈 배열은 공유 상수)로 참조가 안정화돼 있어
+// 새 메시지 도착/무관한 피어 변화 시 기존 메시지들이 리렌더되지 않는다.
+export default React.memo(Message)
