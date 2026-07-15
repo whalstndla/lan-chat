@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage, dialog, shell } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage, dialog, shell, screen } = require('electron')
 // safeStorage 는 v0.9.x 키체인 wrap 마스터키를 비밀번호 wrap 으로 마이그레이션할 때만 사용.
 // v0.10.0 부터는 OS 키체인 의존 없이 사용자 비밀번호 KDF 만으로 마스터키 보호.
 const path = require('path')
@@ -23,6 +23,8 @@ const { createIncomingMessageHandler } = require('./messageHandler')
 const { registerAllIpcHandlers } = require('./ipcHandlers/index')
 const { sendToRenderer, clearBadge, checkAndNotifyUpdated } = require('./utils/appUtils')
 const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/lanchatProtocol')
+// 창 크기/위치 기억(#71) — 저장된 bounds 를 디스플레이 범위와 대조해 복원한다.
+const { resolveWindowState, saveWindowState, DEFAULT_WIDTH, DEFAULT_HEIGHT, MIN_WIDTH, MIN_HEIGHT } = require('./storage/windowState')
 
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
@@ -195,11 +197,16 @@ async function createWindow() {
     return
   }
 
+  // 창 크기/위치 복원(#71) — 저장된 위치가 현재 연결된 디스플레이 중 어디에도 없으면
+  // (모니터 분리 등) resolveWindowState 가 null 을 반환해 기본 크기로 폴백한다.
+  const restoredBounds = resolveWindowState(appDataPath, screen.getAllDisplays())
+
   ctx.state.mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    minWidth: 700,
-    minHeight: 500,
+    width: restoredBounds?.width ?? DEFAULT_WIDTH,
+    height: restoredBounds?.height ?? DEFAULT_HEIGHT,
+    ...(restoredBounds ? { x: restoredBounds.x, y: restoredBounds.y } : {}),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     backgroundColor: '#1e1e1e',
     titleBarStyle: 'hiddenInset',
     webPreferences: {
@@ -209,6 +216,21 @@ async function createWindow() {
       sandbox: false,
     },
   })
+
+  // 창 크기/위치 변경을 디바운스 저장(#71) — resize/move 마다 디스크에 쓰지 않도록 500ms 유예.
+  // getNormalBounds() 는 최대화/최소화/전체화면 상태에서도 항상 "일반 상태" bounds 를 반환하므로
+  // 별도의 isMaximized 가드 없이도 항상 정상적인 복원 값이 저장된다.
+  let saveWindowStateTimer = null
+  const persistWindowStateNow = () => {
+    if (!ctx.state.mainWindow || ctx.state.mainWindow.isDestroyed()) return
+    saveWindowState(appDataPath, ctx.state.mainWindow.getNormalBounds())
+  }
+  const scheduleWindowStateSave = () => {
+    clearTimeout(saveWindowStateTimer)
+    saveWindowStateTimer = setTimeout(persistWindowStateNow, 500)
+  }
+  ctx.state.mainWindow.on('resize', scheduleWindowStateSave)
+  ctx.state.mainWindow.on('move', scheduleWindowStateSave)
 
   // 네비게이션 가드 — 렌더러가 신뢰불가 콘텐츠(피어 마크다운 링크 등)로 세션을
   // 외부 페이지로 끌고 가거나 임의의 새 BrowserWindow 를 여는 것을 차단한다.
@@ -234,6 +256,9 @@ async function createWindow() {
       event.preventDefault()
       ctx.state.mainWindow.hide()
     }
+    // 숨김/실제 종료 어느 경로든 디바운스 타이머를 기다리지 않고 마지막 위치를 즉시 저장한다(#71).
+    clearTimeout(saveWindowStateTimer)
+    persistWindowStateNow()
   })
 
   // 창 포커스 시 badge 초기화
