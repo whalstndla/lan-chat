@@ -28,6 +28,7 @@ const {
 const { stopBroadcastDiscovery } = require('../peer/broadcastDiscovery')
 const { stopPeerDiscovery } = require('../peer/discovery')
 const { disconnectAll } = require('../peer/wsClient')
+const { clearDecryptedCache } = require('../protocol/lanchatProtocol')
 const { closeAllServerClients } = require('../peer/wsServer')
 const { clearAllPeerConnectRetryState, clearAllPendingFileRequests, sweepOrphanedFileCache } = require('../utils/appUtils')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
@@ -89,6 +90,8 @@ function teardownSession(ctx) {
     try { ctx.state.masterKey.fill(0) } catch {}
     ctx.state.masterKey = null
   }
+  // 마스터키 폐기 시 복호화된 평문 버퍼 캐시도 비워 메모리에 평문 잔재가 남지 않게 한다.
+  try { clearDecryptedCache() } catch {}
   ctx.state.peerId = null
   // 로그아웃 시 auto-away 추적 상태도 초기화 — 다음 로그인 세션에 영향 없도록(#41)
   ctx.state.isAutoAway = false
