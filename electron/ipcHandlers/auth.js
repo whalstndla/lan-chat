@@ -93,6 +93,7 @@ function ensurePeerId(ctx) {
 
 // 세션 종료 — 마스터키 / DB 메모리에서 폐기.
 function teardownSession(ctx) {
+  ctx.state.isSessionClosing = true
   if (ctx.state.database) {
     try { closeDatabase(ctx.state.database) } catch {}
     ctx.state.database = null
@@ -153,12 +154,14 @@ function registerAuthHandlers(ctx) {
       const existing = getProfile(ctx.state.database)
       if (existing) {
         ensurePeerId(ctx)
+        ctx.state.isSessionClosing = false
         return { success: true, nickname: existing.nickname }
       }
 
       await saveProfile(ctx.state.database, { username: username.trim(), nickname: nick.trim(), password })
       ensurePeerId(ctx)
       updatePeerId(ctx.state.database, ctx.state.peerId)
+      ctx.state.isSessionClosing = false
       return { success: true }
     } catch (err) {
       teardownSession(ctx)
@@ -198,6 +201,7 @@ function registerAuthHandlers(ctx) {
       loadIdentityKeyPair(ctx, appDataPath)
 
       ensurePeerId(ctx)
+      ctx.state.isSessionClosing = false
       return { success: true, nickname: profile.nickname }
     } catch (err) {
       teardownSession(ctx)
@@ -210,6 +214,9 @@ function registerAuthHandlers(ctx) {
 
   // 로그아웃 — 마스터키/DB 메모리에서 폐기 + 연결 종료.
   ipcMain.handle('logout', async () => {
+    // 진행 중인 start-peer-discovery가 stop 대기에서 깨어나도 이전 세션 요청으로 판정하게 한다.
+    ctx.state.isSessionClosing = true
+    ctx.state.discoveryEpoch++
     stopBroadcastDiscovery()
     try { await stopPeerDiscovery() } catch {}
     disconnectAll()
@@ -220,7 +227,6 @@ function registerAuthHandlers(ctx) {
     clearAllPeerConnectRetryState(ctx)
     clearAllPendingFileRequests(ctx)
     clearAllFileChunkTransfers(ctx)
-    ctx.state.discoveryEpoch++
     teardownSession(ctx)
   })
 

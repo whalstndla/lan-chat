@@ -299,6 +299,133 @@ describe('search-dm-messages — DM 전체 기간 검색', () => {
   })
 })
 
+// 검색 결과 점프는 timestamp만으로 경계를 계산하면 같은 밀리초에 저장된 메시지 중
+// 대상 ID가 누락될 수 있다. 대상 ID와 rowid를 한 SQL 문에서 고정하는 회귀 테스트.
+describe('메시지 ID 기반 검색 결과 히스토리 조회', () => {
+  let db
+  const peer1 = generateKeyPair()
+  const peer2 = generateKeyPair()
+
+  beforeEach(() => {
+    db = initDatabase(':memory:')
+    migrateDatabase(db)
+    __handlers.clear()
+  })
+
+  afterEach(() => closeDatabase(db))
+
+  function buildCtx() {
+    return {
+      state: {
+        database: db,
+        peerId: 'peer1',
+        myPrivateKey: peer1.privateKey,
+        peerPublicKeyMap: new Map([['peer2', peer2.publicKey]]),
+        localIP: 'localhost',
+      },
+    }
+  }
+
+  function savePlainMessage({ id, type, fromId, toId = null, content, timestamp }) {
+    saveMessage(db, {
+      id,
+      type,
+      from_id: fromId,
+      from_name: fromId === 'peer1' ? '나' : '상대',
+      to_id: toId,
+      content,
+      content_type: 'text',
+      encrypted_payload: null,
+      file_url: null,
+      file_name: null,
+      timestamp,
+    })
+  }
+
+  it('전체채팅 — 동일 timestamp에서도 대상 ID부터 최신 메시지까지 정확히 반환한다', () => {
+    savePlainMessage({ id: 'g-older', type: 'message', fromId: 'peer1', content: '과거', timestamp: 500 })
+    savePlainMessage({ id: 'g-same-before', type: 'message', fromId: 'peer1', content: '동률 이전', timestamp: 1000 })
+    savePlainMessage({ id: 'g-target', type: 'message', fromId: 'peer2', content: '대상', timestamp: 1000 })
+    savePlainMessage({ id: 'g-same-after', type: 'message', fromId: 'peer2', content: '동률 이후', timestamp: 1000 })
+    savePlainMessage({ id: 'g-newer', type: 'message', fromId: 'peer1', content: '최신', timestamp: 2000 })
+
+    registerHistoryHandlers(buildCtx())
+    const result = __handlers.get('get-global-history-through-message')(null, { messageId: 'g-target' })
+    const older = __handlers.get('get-global-history-before-message')(
+      null,
+      { messageId: 'g-target', limit: 50 }
+    )
+    const fullHistory = __handlers.get('get-global-history')(null, { limit: 100, offset: 0 })
+
+    expect(result.messages.map(message => message.id)).toEqual(['g-target', 'g-same-after', 'g-newer'])
+    expect(result.nextMessageId).toBeNull()
+    expect(older.map(message => message.id)).toEqual(['g-older', 'g-same-before'])
+    expect(fullHistory.map(message => message.id)).toEqual([
+      'g-older', 'g-same-before', 'g-target', 'g-same-after', 'g-newer',
+    ])
+  })
+
+  it('DM — 동일 timestamp 경계를 지키고 다른 상대와의 메시지는 섞지 않는다', () => {
+    savePlainMessage({ id: 'dm-same-before', type: 'dm', fromId: 'peer1', toId: 'peer2', content: '동률 이전', timestamp: 1000 })
+    savePlainMessage({ id: 'dm-target', type: 'dm', fromId: 'peer2', toId: 'peer1', content: '대상', timestamp: 1000 })
+    savePlainMessage({ id: 'dm-other-peer', type: 'dm', fromId: 'peer1', toId: 'peer3', content: '다른 상대', timestamp: 1000 })
+    savePlainMessage({ id: 'dm-same-after', type: 'dm', fromId: 'peer1', toId: 'peer2', content: '동률 이후', timestamp: 1000 })
+    savePlainMessage({ id: 'dm-newer', type: 'dm', fromId: 'peer2', toId: 'peer1', content: '최신', timestamp: 2000 })
+
+    registerHistoryHandlers(buildCtx())
+    const result = __handlers.get('get-dm-history-through-message')(
+      null,
+      { peerId: 'peer2', messageId: 'dm-target' }
+    )
+    const older = __handlers.get('get-dm-history-before-message')(
+      null,
+      { peerId: 'peer2', messageId: 'dm-target', limit: 50 }
+    )
+    const fullHistory = __handlers.get('get-dm-history')(
+      null,
+      { peerId1: 'peer1', peerId2: 'peer2', limit: 100, offset: 0 }
+    )
+
+    expect(result.messages.map(message => message.id)).toEqual(['dm-target', 'dm-same-after', 'dm-newer'])
+    expect(result.messages.map(message => message.content)).toEqual(['대상', '동률 이후', '최신'])
+    expect(result.nextMessageId).toBeNull()
+    expect(older.map(message => message.id)).toEqual(['dm-same-before'])
+    expect(fullHistory.map(message => message.id)).toEqual([
+      'dm-same-before', 'dm-target', 'dm-same-after', 'dm-newer',
+    ])
+  })
+
+  it('오래된 검색 결과도 최대 500개만 반환하고 다음 메시지 ID로 생략 구간을 알린다', () => {
+    savePlainMessage({
+      id: 'large-target',
+      type: 'message',
+      fromId: 'peer1',
+      content: '아주 오래된 대상',
+      timestamp: 1000,
+    })
+    for (let messageIndex = 1; messageIndex <= 600; messageIndex += 1) {
+      savePlainMessage({
+        id: `large-${messageIndex}`,
+        type: 'message',
+        fromId: 'peer2',
+        content: `메시지 ${messageIndex}`,
+        timestamp: 1000 + messageIndex,
+      })
+    }
+
+    registerHistoryHandlers(buildCtx())
+    const result = __handlers.get('get-global-history-through-message')(
+      null,
+      { messageId: 'large-target' }
+    )
+
+    expect(result.messages).toHaveLength(500)
+    expect(result.messages[0].id).toBe('large-target')
+    expect(result.messages.at(-1).id).toBe('large-499')
+    expect(result.nextMessageId).toBe('large-500')
+  })
+})
+
 // 검색 결과 점프용 rank 조회 핸들러 테스트(#36).
 describe('get-global-message-rank / get-dm-message-rank — 검색 결과 점프', () => {
   let db

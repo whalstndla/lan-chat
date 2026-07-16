@@ -23,6 +23,10 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
   useEffect(() => {
     if (authStatus !== 'authenticated' || !authenticatedNickname) return
 
+    // 로그아웃/컴포넌트 해제 뒤 이전 세션의 비동기 초기화가 store 를 다시 채우거나
+    // IPC 구독과 피어 탐색을 재등록하지 못하도록 각 await 경계에서 확인한다.
+    let isSubscriptionCancelled = false
+
     // 창이 백그라운드 상태였던 동안 보류된 read receipt 를 포커스 복귀 시점에 일괄 발송.
     // 현재 보고 있는 방이 DM 이 아니면 아무 것도 하지 않는다.
     const handleWindowFocus = () => {
@@ -32,6 +36,7 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       useChatStore.getState().resetUnread(peerId)
       window.electronAPI.getUnreadDMIds(peerId)
         .then(unreadIds => {
+          if (isSubscriptionCancelled) return
           if (unreadIds.length > 0) {
             window.electronAPI.sendReadReceipt(peerId, unreadIds).catch(() => {})
           }
@@ -42,38 +47,46 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
 
     const initChat = async () => {
       const { peerId, nickname, profileImageUrl } = await window.electronAPI.getMyInfo()
+      if (isSubscriptionCancelled) return
 
       // 방별 마지막 읽은 지점 복원(#39) — myPeerId 를 설정(initialize)하기 전에 먼저
       // 하이드레이션해야 한다. ChatWindow 의 "첫 진입 시 lastRead 캡처" 로직이 myPeerId
       // 변경으로 재실행될 때, 이미 스토어에 DB 값이 채워져 있어야 null 로 덮어쓰지 않는다.
       const roomReadState = await window.electronAPI.getRoomReadState()
+      if (isSubscriptionCancelled) return
       useChatStore.getState().setLastReadTimestamps(roomReadState)
 
       useUserStore.getState().initialize(peerId, nickname, profileImageUrl)
 
       const history = await window.electronAPI.getGlobalHistory()
+      if (isSubscriptionCancelled) return
       useChatStore.getState().setGlobalHistory(history)
 
       // 리액션 하이드레이션 — 화면에 로드된 메시지 ID들의 리액션을 배치 조회해 병합
       if (history.length > 0) {
         const reactionRows = await window.electronAPI.getReactions(history.map(m => m.id))
+        if (isSubscriptionCancelled) return
         useChatStore.getState().setReactions(reactionRows)
       }
 
       const dmPeers = await window.electronAPI.getDMPeers()
+      if (isSubscriptionCancelled) return
       usePeerStore.getState().setPastDMPeers(dmPeers)
 
       // 안읽은 개수 복원 — DB 의 read=0 카운트를 사이드바 배지에 반영 (재시작 시 0으로 보이던 문제)
       const unreadCounts = await window.electronAPI.getUnreadCounts()
+      if (isSubscriptionCancelled) return
       useChatStore.getState().setUnreadCounts(unreadCounts)
 
       const versionInfo = await window.electronAPI.getAppVersionInfo()
+      if (isSubscriptionCancelled) return
       if (versionInfo.updatedFromVersion) {
         setPatchNotesHighlight(versionInfo.currentVersion)
         setShowPatchNotes(true)
       }
 
       const notificationSettings = await window.electronAPI.getNotificationSettings()
+      if (isSubscriptionCancelled) return
       useUserStore.getState().setNotificationSettings(notificationSettings)
 
       // 뮤트된 채팅방 집합을 main 에 동기화 — 소리/OS알림 억제 판정 기준이 된다(#4).
@@ -236,6 +249,7 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
       })
 
       // 피어 발견 시작 — 구독 등록 후 시작해야 race condition 방지
+      if (isSubscriptionCancelled) return
       await window.electronAPI.startPeerDiscovery()
     }
 
@@ -246,6 +260,7 @@ export default function useChatSubscriptions({ authStatus, authenticatedNickname
     }, 1000)
 
     return () => {
+      isSubscriptionCancelled = true
       window.electronAPI.unsubscribeAll()
       clearInterval(typingCleanupInterval)
       window.removeEventListener('focus', handleWindowFocus)

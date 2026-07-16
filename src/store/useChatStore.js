@@ -7,6 +7,18 @@ import { create } from 'zustand'
 // slice(-N) 이 지금 보고 있는 과거 메시지를 잘라 증발시킨다(#10).
 const LIVE_TAIL_CAP = 500
 
+function appendLiveMessageEvent(state, roomKey, message) {
+  const sequence = state.nextLiveMessageSequence + 1
+  const existingEvents = state.liveMessageEvents[roomKey] || []
+  return {
+    nextLiveMessageSequence: sequence,
+    liveMessageEvents: {
+      ...state.liveMessageEvents,
+      [roomKey]: [...existingEvents, { sequence, message }],
+    },
+  }
+}
+
 // localStorage에서 뮤트 상태 복원
 function loadMutedRooms() {
   try {
@@ -102,6 +114,13 @@ const useChatStore = create((set, get) => ({
   currentRoom: { type: 'global' },
   globalMessages: [],
   dmMessages: {}, // { peerId: [메시지...] }
+  // addGlobalMessage/addDMMessage 로 실제 수신된 메시지만 기록한다. 송신자 시계가 느려 배열
+  // 중간에 삽입돼도 라이브 수신임은 유지하며, 명시적인 deferred 재전송은 안내에서 제외한다.
+  // 히스토리 prepend/교체/동기화는 이벤트를 만들지 않아 새 메시지 토스트가 오탐하지 않는다.
+  liveMessageEvents: {}, // { roomKey: [{ sequence, message }] }
+  nextLiveMessageSequence: 0,
+  // 전체 삭제/로그아웃 전 시작된 비동기 히스토리 응답이 새 세션에 데이터를 되살리지 못하게 한다.
+  chatSessionEpoch: 0,
   unreadCounts: {}, // { peerId: 숫자 }
   // { roomKey: timestamp | null } — 방(전체채팅='global', DM=peerId)별 마지막으로 읽은
   // 지점. 안읽음 구분선 위치 계산에 사용되며, DB(room_read_state 테이블)에 영속돼
@@ -153,7 +172,29 @@ const useChatStore = create((set, get) => ({
       return { sendOriginalImages: value }
     }),
 
-  setCurrentRoom: (room) => set({ currentRoom: room }),
+  setCurrentRoom: (room) =>
+    set((state) => {
+      const previousRoomKey = getRoomKey(state.currentRoom)
+      const nextRoomKey = getRoomKey(room)
+      if (previousRoomKey === nextRoomKey) return { currentRoom: room }
+
+      // 방을 떠나기 전에 처리되지 못한 UI 이벤트는 재입장 시 토스트로 재생하지 않는다.
+      const liveMessageEvents = { ...state.liveMessageEvents }
+      delete liveMessageEvents[previousRoomKey]
+      return { currentRoom: room, liveMessageEvents }
+    }),
+
+  // ChatWindow 가 처리한 sequence 이하만 제거한다. 처리 도중 추가된 더 최신 이벤트는 보존한다.
+  ackLiveMessageEvents: (roomKey, sequence) =>
+    set((state) => {
+      const existingEvents = state.liveMessageEvents[roomKey] || []
+      const remainingEvents = existingEvents.filter(event => event.sequence > sequence)
+      if (remainingEvents.length === existingEvents.length) return state
+      const liveMessageEvents = { ...state.liveMessageEvents }
+      if (remainingEvents.length === 0) delete liveMessageEvents[roomKey]
+      else liveMessageEvents[roomKey] = remainingEvents
+      return { liveMessageEvents }
+    }),
 
   // 방 전환/blur 시점에 작성 중이던 마크다운을 draft 로 저장. 빈 문자열이면 기존 draft 항목을
   // 제거해(에디터를 비운 채로 방을 떠난 경우) 다음 진입 시 빈 draft 가 복원되지 않게 한다.
@@ -218,10 +259,18 @@ const useChatStore = create((set, get) => ({
       // 오프라인 상대가 재접속하며 flush 한 지각 메시지는 과거 timestamp 를 유지한 채 오므로
       // 무조건 끝에 붙이지 않고 timestamp 순서에 맞는 위치에 삽입한다(#20).
       const updated = insertMessageInOrder(state.globalMessages, message)
+      const globalMessages = state.globalHistoryExpanded
+        ? updated
+        : (updated.length > LIVE_TAIL_CAP ? updated.slice(-LIVE_TAIL_CAP) : updated)
+      const liveMessageEvent = (
+        message?.deferred !== true &&
+        getRoomKey(state.currentRoom) === 'global'
+      )
+        ? appendLiveMessageEvent(state, 'global', message)
+        : {}
       // 과거를 로드해 확장된 방에서는 트림하지 않는다 — 지금 보고 있는 과거 메시지 증발 방지(#10).
-      if (state.globalHistoryExpanded) return { globalMessages: updated }
-      // 일반 라이브 상태에서는 최근 LIVE_TAIL_CAP 개만 유지 (메모리 누수 방지)
-      return { globalMessages: updated.length > LIVE_TAIL_CAP ? updated.slice(-LIVE_TAIL_CAP) : updated }
+      // 일반 라이브 상태에서는 최근 LIVE_TAIL_CAP 개만 유지 (메모리 누수 방지).
+      return { globalMessages, ...liveMessageEvent }
     }),
 
   // #31 히스토리 동기화 배치 병합 — 상대에게서 받은 과거 전체채팅 메시지들을 한 번에 병합한다.
@@ -261,8 +310,15 @@ const useChatStore = create((set, get) => ({
       const trimmed = state.dmHistoryExpanded[peerId]
         ? inserted
         : (inserted.length > LIVE_TAIL_CAP ? inserted.slice(-LIVE_TAIL_CAP) : inserted)
+      const liveMessageEvent = (
+        message?.deferred !== true &&
+        getRoomKey(state.currentRoom) === peerId
+      )
+        ? appendLiveMessageEvent(state, peerId, message)
+        : {}
       return {
         dmMessages: { ...state.dmMessages, [peerId]: trimmed },
+        ...liveMessageEvent,
       }
     }),
 
@@ -488,10 +544,12 @@ const useChatStore = create((set, get) => ({
   // 북마크가 그대로 노출되는 문제가 생긴다.
   resetAll: () => {
     saveBookmarksToStorage({})
-    set({
+    set((state) => ({
       currentRoom: { type: 'global' },
       globalMessages: [],
       dmMessages: {},
+      liveMessageEvents: {},
+      chatSessionEpoch: state.chatSessionEpoch + 1,
       unreadCounts: {},
       lastReadTimestamps: {},
       typingUsers: {},
@@ -504,7 +562,7 @@ const useChatStore = create((set, get) => ({
       cachedFileUrls: {},
       fileLoadErrors: {},
       fileTransferProgress: {},
-    })
+    }))
   },
 }))
 

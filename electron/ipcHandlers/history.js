@@ -3,7 +3,8 @@
 
 const { ipcMain } = require('electron')
 const {
-  getGlobalHistory, getDMHistory, getDMPeers, searchMessages,
+  getGlobalHistory, getGlobalHistoryThroughMessage, getGlobalHistoryBeforeMessage,
+  getDMHistory, getDMHistoryThroughMessage, getDMHistoryBeforeMessage, getDMPeers, searchMessages,
   getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank,
 } = require('../storage/queries')
 const { deriveSharedSecret, decryptDM } = require('../crypto/encryption')
@@ -96,12 +97,56 @@ function registerHistoryHandlers(ctx) {
     }))
   })
 
+  // 검색 결과 점프 — 대상 ID와 같은 timestamp의 메시지가 여러 개여도 정확한 범위를 반환한다.
+  ipcMain.handle('get-global-history-through-message', (_, { messageId } = {}) => {
+    const result = getGlobalHistoryThroughMessage(ctx.state.database, messageId)
+    return {
+      ...result,
+      messages: result.messages.map(msg => ({
+        ...msg,
+        file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id),
+      })),
+    }
+  })
+
+  ipcMain.handle('get-global-history-before-message', (_, { messageId, limit } = {}) => {
+    const history = getGlobalHistoryBeforeMessage(ctx.state.database, messageId, limit || 50)
+    return history.map(msg => ({
+      ...msg,
+      file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id),
+    }))
+  })
+
   // DM 기록 조회 (복호화 포함)
   ipcMain.handle('get-dm-history', (_, { peerId1, peerId2, limit, offset }) => {
     const history = getDMHistory(ctx.state.database, peerId1, peerId2, limit || 100, offset || 0)
     // 상대(peerId2)가 고정이므로 공유키는 루프 밖에서 1회만 도출해 재사용한다.
     const sharedSecret = deriveSharedSecretForPeer(ctx, peerId2)
     return history.map(msg => decryptDMRecord(ctx, msg, peerId1, peerId2, sharedSecret))
+  })
+
+  // DM 검색 결과 점프 — 렌더러가 전달한 상대와 현재 사용자 사이의 대화만 조회·복호화한다.
+  ipcMain.handle('get-dm-history-through-message', (_, { peerId, messageId } = {}) => {
+    const myPeerId = ctx.state.peerId
+    const result = getDMHistoryThroughMessage(ctx.state.database, myPeerId, peerId, messageId)
+    const sharedSecret = deriveSharedSecretForPeer(ctx, peerId)
+    return {
+      ...result,
+      messages: result.messages.map(msg => decryptDMRecord(ctx, msg, myPeerId, peerId, sharedSecret)),
+    }
+  })
+
+  ipcMain.handle('get-dm-history-before-message', (_, { peerId, messageId, limit } = {}) => {
+    const myPeerId = ctx.state.peerId
+    const history = getDMHistoryBeforeMessage(
+      ctx.state.database,
+      myPeerId,
+      peerId,
+      messageId,
+      limit || 50
+    )
+    const sharedSecret = deriveSharedSecretForPeer(ctx, peerId)
+    return history.map(msg => decryptDMRecord(ctx, msg, myPeerId, peerId, sharedSecret))
   })
 
   // 과거 DM 상대 목록 조회 (오프라인 포함)

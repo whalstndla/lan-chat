@@ -96,7 +96,11 @@ function ExtraImageThumb({ imageMessage, onClick }) {
 
   if (!src && status !== 'failed') return null
   return (
-    <div className="relative rounded overflow-hidden border border-vsc-border w-32 h-32 bg-vsc-bg" onClick={() => status === 'loaded' && onClick(src, imageMessage.id)}>
+    <div
+      data-message-id={imageMessage.id}
+      className="relative rounded overflow-hidden border border-vsc-border w-32 h-32 bg-vsc-bg"
+      onClick={() => status === 'loaded' && onClick(src, imageMessage.id)}
+    >
       {status === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
           <Loader2 size={18} className="animate-spin" />

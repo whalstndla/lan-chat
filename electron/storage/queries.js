@@ -1,4 +1,12 @@
 // electron/storage/queries.js
+const SEARCH_JUMP_HISTORY_LIMIT = 500
+const HISTORY_PAGE_LIMIT_MAX = 100
+
+function normalizeHistoryPageLimit(limit, fallback = 50) {
+  const numericLimit = Number(limit)
+  if (!Number.isInteger(numericLimit) || numericLimit <= 0) return fallback
+  return Math.min(numericLimit, HISTORY_PAGE_LIMIT_MAX)
+}
 function saveMessage(db, message) {
   db.prepare(`
     INSERT OR IGNORE INTO messages
@@ -24,9 +32,66 @@ function getGlobalHistory(db, limit = 100, offset = 0) {
   return db.prepare(`
     SELECT * FROM messages
     WHERE type = 'message'
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, rowid DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset).reverse()
+}
+
+// 검색 결과 점프용 — 메시지 ID를 기준으로 대상 메시지부터 최신 방향의 제한된 창을 조회한다.
+// timestamp가 같은 메시지는 저장 순서(rowid)로 경계를 고정해 대상이 누락되지 않게 한다.
+// 대상 조회와 범위 조회를 하나의 SQL 문에서 실행하므로 두 조회 사이에 새 메시지가 저장돼도
+// 서로 다른 시점의 결과가 섞이지 않는다.
+function getGlobalHistoryThroughMessage(db, messageId) {
+  const rows = db.prepare(`
+    WITH target AS (
+      SELECT timestamp AS target_timestamp, rowid AS target_rowid
+      FROM messages
+      WHERE id = ? AND type = 'message'
+    )
+    SELECT messages.*
+    FROM messages
+    CROSS JOIN target
+    WHERE messages.type = 'message'
+      AND (
+        messages.timestamp > target.target_timestamp
+        OR (
+          messages.timestamp = target.target_timestamp
+          AND messages.rowid >= target.target_rowid
+        )
+    )
+    ORDER BY messages.timestamp ASC, messages.rowid ASC
+    LIMIT ?
+  `).all(messageId, SEARCH_JUMP_HISTORY_LIMIT + 1)
+  return {
+    messages: rows.slice(0, SEARCH_JUMP_HISTORY_LIMIT),
+    nextMessageId: rows[SEARCH_JUMP_HISTORY_LIMIT]?.id || null,
+  }
+}
+
+// 커서 기반 이전 페이지 조회 — 라이브 메시지 삽입으로 전체 개수가 바뀌어도 OFFSET처럼
+// 건너뛰거나 중복되지 않도록 현재 가장 오래된 메시지 ID의 timestamp+rowid를 경계로 삼는다.
+function getGlobalHistoryBeforeMessage(db, messageId, limit = 50) {
+  const safeLimit = normalizeHistoryPageLimit(limit)
+  return db.prepare(`
+    WITH boundary AS (
+      SELECT timestamp AS boundary_timestamp, rowid AS boundary_rowid
+      FROM messages
+      WHERE id = ? AND type = 'message'
+    )
+    SELECT messages.*
+    FROM messages
+    CROSS JOIN boundary
+    WHERE messages.type = 'message'
+      AND (
+        messages.timestamp < boundary.boundary_timestamp
+        OR (
+          messages.timestamp = boundary.boundary_timestamp
+          AND messages.rowid < boundary.boundary_rowid
+        )
+      )
+    ORDER BY messages.timestamp DESC, messages.rowid DESC
+    LIMIT ?
+  `).all(messageId, safeLimit).reverse()
 }
 
 // #31 전체채팅 히스토리 동기화 — 특정 timestamp 이후(포함)의 전체채팅 메시지를 조회한다.
@@ -37,7 +102,7 @@ function getGlobalMessagesSince(db, sinceTimestamp, limit = 500) {
   return db.prepare(`
     SELECT * FROM messages
     WHERE type = 'message' AND timestamp >= ?
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, rowid DESC
     LIMIT ?
   `).all(sinceTimestamp, limit).reverse()
 }
@@ -56,9 +121,85 @@ function getDMHistory(db, peerId1, peerId2, limit = 100, offset = 0) {
     SELECT * FROM messages
     WHERE type = 'dm'
       AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
-    ORDER BY timestamp DESC
+    ORDER BY timestamp DESC, rowid DESC
     LIMIT ? OFFSET ?
   `).all(peerId1, peerId2, peerId2, peerId1, limit, offset).reverse()
+}
+
+// DM 검색 결과 점프용 — 지정한 상대와의 대화에 속한 대상 ID부터 최신 메시지까지 조회한다.
+// 전체채팅과 동일하게 timestamp 동률은 rowid로 정렬하고, 대상과 범위를 한 SQL 문에서 확정한다.
+function getDMHistoryThroughMessage(db, peerId1, peerId2, messageId) {
+  const rows = db.prepare(`
+    WITH target AS (
+      SELECT timestamp AS target_timestamp, rowid AS target_rowid
+      FROM messages
+      WHERE id = @messageId
+        AND type = 'dm'
+        AND (
+          (from_id = @peerId1 AND to_id = @peerId2)
+          OR (from_id = @peerId2 AND to_id = @peerId1)
+        )
+    )
+    SELECT messages.*
+    FROM messages
+    CROSS JOIN target
+    WHERE messages.type = 'dm'
+      AND (
+        (messages.from_id = @peerId1 AND messages.to_id = @peerId2)
+        OR (messages.from_id = @peerId2 AND messages.to_id = @peerId1)
+      )
+      AND (
+        messages.timestamp > target.target_timestamp
+        OR (
+          messages.timestamp = target.target_timestamp
+          AND messages.rowid >= target.target_rowid
+        )
+    )
+    ORDER BY messages.timestamp ASC, messages.rowid ASC
+    LIMIT @limit
+  `).all({
+    peerId1,
+    peerId2,
+    messageId,
+    limit: SEARCH_JUMP_HISTORY_LIMIT + 1,
+  })
+  return {
+    messages: rows.slice(0, SEARCH_JUMP_HISTORY_LIMIT),
+    nextMessageId: rows[SEARCH_JUMP_HISTORY_LIMIT]?.id || null,
+  }
+}
+
+function getDMHistoryBeforeMessage(db, peerId1, peerId2, messageId, limit = 50) {
+  const safeLimit = normalizeHistoryPageLimit(limit)
+  return db.prepare(`
+    WITH boundary AS (
+      SELECT timestamp AS boundary_timestamp, rowid AS boundary_rowid
+      FROM messages
+      WHERE id = @messageId
+        AND type = 'dm'
+        AND (
+          (from_id = @peerId1 AND to_id = @peerId2)
+          OR (from_id = @peerId2 AND to_id = @peerId1)
+        )
+    )
+    SELECT messages.*
+    FROM messages
+    CROSS JOIN boundary
+    WHERE messages.type = 'dm'
+      AND (
+        (messages.from_id = @peerId1 AND messages.to_id = @peerId2)
+        OR (messages.from_id = @peerId2 AND messages.to_id = @peerId1)
+      )
+      AND (
+        messages.timestamp < boundary.boundary_timestamp
+        OR (
+          messages.timestamp = boundary.boundary_timestamp
+          AND messages.rowid < boundary.boundary_rowid
+        )
+      )
+    ORDER BY messages.timestamp DESC, messages.rowid DESC
+    LIMIT @limit
+  `).all({ peerId1, peerId2, messageId, limit: safeLimit }).reverse()
 }
 
 function deleteMessage(db, messageId, fromId) {
@@ -365,4 +506,4 @@ function setVerified(db, peerId, verified) {
   db.prepare('UPDATE peer_keys SET verified = ? WHERE peer_id = ?').run(verified ? 1 : 0, peerId)
 }
 
-module.exports = { saveMessage, getGlobalHistory, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessagesForExport, getDMMessagesForExport, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, clearAllFileCachePaths, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache, getPinnedKey, pinKey, updatePinnedKey, setVerified }
+module.exports = { saveMessage, getGlobalHistory, getGlobalHistoryThroughMessage, getGlobalHistoryBeforeMessage, getGlobalMessagesSince, getLatestGlobalMessageTimestamp, getDMHistory, getDMHistoryThroughMessage, getDMHistoryBeforeMessage, deleteMessage, editMessage, getDMPeers, clearAllMessages, clearAllDMs, markMessagesAsRead, getUnreadDMMessageIds, getUnreadCountsByPeer, getRoomReadState, setRoomReadTimestamp, addReaction, removeReaction, getReactions, getReactionsByMessageIds, searchMessages, getAllDMMessagesForSearch, getGlobalMessagesForExport, getDMMessagesForExport, getGlobalMessageRank, getDMMessageRank, saveFileCache, getFileCache, clearAllFileCachePaths, getFileForDownload, savePeerCache, loadPeerCache, deletePeerCache, getPinnedKey, pinKey, updatePinnedKey, setVerified, SEARCH_JUMP_HISTORY_LIMIT }

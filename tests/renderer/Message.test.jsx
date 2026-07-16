@@ -78,4 +78,25 @@ describe('Message', () => {
     expect(screen.getByText('🔒 복호화할 수 없는 메시지')).toBeInTheDocument()
     expect(screen.queryByText('안녕하세요, 테스트 메시지입니다')).not.toBeInTheDocument()
   })
+
+  it('연속 이미지의 추가 썸네일도 검색 점프용 메시지 ID 앵커를 노출한다', () => {
+    const { container } = render(
+      <Message
+        message={buildMessage({
+          id: 'image-1',
+          contentType: 'image',
+          fileUrl: 'lanchat://file/image-1',
+          fileName: '첫 이미지.png',
+        })}
+        extraImages={[buildMessage({
+          id: 'image-2',
+          contentType: 'image',
+          fileUrl: 'lanchat://file/image-2',
+          fileName: '검색 대상 이미지.png',
+        })]}
+      />
+    )
+
+    expect(container.querySelector('[data-message-id="image-2"]')).toBeInTheDocument()
+  })
 })

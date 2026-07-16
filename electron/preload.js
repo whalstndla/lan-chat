@@ -99,7 +99,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   searchMessages: (params) => ipcRenderer.invoke('search-messages', params),
   // DM 전체 기간 검색 — main 에서 복호화하며 검색(#35)
   searchDMMessages: (params) => ipcRenderer.invoke('search-dm-messages', params),
+  // 검색 결과 점프 — 대상 메시지 ID부터 최신까지 원자적으로 조회
+  getGlobalHistoryThroughMessage: (messageId) =>
+    ipcRenderer.invoke('get-global-history-through-message', { messageId }),
+  getDMHistoryThroughMessage: (peerId, messageId) =>
+    ipcRenderer.invoke('get-dm-history-through-message', { peerId, messageId }),
+  // 이전 메시지 페이지네이션 — OFFSET 대신 현재 최상단 메시지 ID를 커서로 사용
+  getGlobalHistoryBeforeMessage: (messageId, limit) =>
+    ipcRenderer.invoke('get-global-history-before-message', { messageId, limit }),
+  getDMHistoryBeforeMessage: (peerId, messageId, limit) =>
+    ipcRenderer.invoke('get-dm-history-before-message', { peerId, messageId, limit }),
   // 검색 결과 점프용 — 특정 타임스탬프보다 최신인 메시지 개수 조회(#36)
+  // 구버전 렌더러 호환을 위해 유지한다.
   getGlobalMessageRank: (timestamp) => ipcRenderer.invoke('get-global-message-rank', { timestamp }),
   getDMMessageRank: (peerId, timestamp) => ipcRenderer.invoke('get-dm-message-rank', { peerId, timestamp }),
 

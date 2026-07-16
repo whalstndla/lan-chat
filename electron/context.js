@@ -15,6 +15,8 @@ function createAppContext(config) {
       localAddressCandidates: [],
       discoveryEpoch: 0,
       isDiscoveryStarting: false,
+      // 로그아웃/인증 실패로 세션을 닫는 동안 늦은 discovery 시작 요청을 차단한다.
+      isSessionClosing: false,
       downloadedUpdateFile: null,
       updatedFromVersion: null,
       unreadBadgeCount: 0,

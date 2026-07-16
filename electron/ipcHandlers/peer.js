@@ -31,10 +31,11 @@ const {
 function registerPeerHandlers(ctx) {
   // 피어 발견 시작 — 기존 인스턴스 정리 후 재시작 (Cmd+R 등 재호출 시 Bonjour 좀비 방지)
   ipcMain.handle('start-peer-discovery', async (_event, _params) => {
-    // wsServerInfo가 null이면 서버 초기화 실패 — 피어 탐색 불가
-    if (!ctx.state.wsServerInfo) return
+    // 서버/인증 세션이 준비되지 않았거나 로그아웃 중이면 피어 탐색을 시작하지 않는다.
+    if (!ctx.state.wsServerInfo || !ctx.state.database || ctx.state.isSessionClosing) return
     // 동시 실행 방지 — React StrictMode 이중 호출 등으로 인한 race condition 차단
     if (ctx.state.isDiscoveryStarting) return
+    const startRequestEpoch = ctx.state.discoveryEpoch
     ctx.state.isDiscoveryStarting = true
     try {
       writePeerDebugLog('main.discovery.startRequested', {
@@ -45,6 +46,13 @@ function registerPeerHandlers(ctx) {
       })
       stopBroadcastDiscovery()
       await stopPeerDiscovery()
+      // stop 대기 중 로그아웃이 시작됐다면 이 요청은 이전 세션 소속이다. 여기서 중단하지 않으면
+      // 로그아웃의 stop 호출이 자원을 비운 뒤 mDNS/UDP 광고를 다시 등록하는 경합이 생긴다.
+      if (
+        startRequestEpoch !== ctx.state.discoveryEpoch ||
+        !ctx.state.database ||
+        ctx.state.isSessionClosing
+      ) return
       disconnectAll()
       // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
       if (ctx.state.wsServerInfo) closeAllServerClients(ctx.state.wsServerInfo)
