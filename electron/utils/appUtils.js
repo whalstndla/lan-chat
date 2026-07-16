@@ -7,7 +7,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const { getProfile } = require('../storage/profile')
-const { saveFileCache } = require('../storage/queries')
+const { saveFileCache, getFileCache, deleteMessage, getLatestGlobalMessageTimestamp } = require('../storage/queries')
 const { getPendingMessages, deletePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
 const { getFilePort } = require('../peer/fileServer')
@@ -40,7 +40,7 @@ function getMyAdvertisedAddresses(ctx) {
 // Phase 1c: v2 hello 페이로드 생성 (wire.buildHello 래핑).
 // 기존 buildMyKeyExchangePayload 는 v0.8.0 부터 v2 hello 를 반환 —
 // 호환성을 위해 이름은 유지하지만 내부적으로 v2 포맷으로 송신.
-const { buildHello } = require('../peer/wire')
+const { buildHello, negotiateCapabilities } = require('../peer/wire')
 
 function buildMyHelloPayload(ctx, currentPeerId, nickname) {
   return buildHello({
@@ -151,6 +151,24 @@ function broadcastPeerMessage(ctx, messageObj) {
   })
 }
 
+// #31 전체채팅 히스토리 동기화 — 연결(hello 핸드셰이크) 완료 직후 1회 호출.
+// 내 DB 의 가장 최근 전체채팅 timestamp 를 실어 상대에게 history-sync-request 를 보낸다.
+// 상대는 그보다 최신(>=)인 전체채팅을 history-sync-response 로 돌려주고, 그 응답 수신은
+// 새 요청을 만들지 않으므로 증폭/무한루프가 없다(요청은 오직 이 지점에서만 발생).
+// 양쪽이 서로 요청해도(역방향 연결 포함) 수신측 dedup(INSERT OR IGNORE + 렌더러 id 검사)으로 안전.
+function sendHistorySyncRequest(ctx, targetPeerId) {
+  if (!ctx.state.database) return false
+  let sinceTimestamp = 0
+  try {
+    sinceTimestamp = getLatestGlobalMessageTimestamp(ctx.state.database)
+  } catch { /* DB 조회 실패 시 0(전체 요청)으로 폴백 */ }
+  return sendPeerMessage(ctx, targetPeerId, {
+    type: 'history-sync-request',
+    fromId: ctx.state.peerId,
+    sinceTimestamp,
+  })
+}
+
 // 안읽은 메시지 badge 증가 — Dock + 트레이
 function incrementBadge(ctx) {
   ctx.state.unreadBadgeCount++
@@ -189,6 +207,14 @@ function showNotification(ctx, title, body, navigateTo) {
     }
   })
   notification.show()
+}
+
+// 채팅방이 뮤트되었는지 확인 — mutedRooms 는 renderer localStorage 에만 저장되므로,
+// set-muted-rooms IPC 로 동기화받은 ctx.state.mutedRoomKeySet 을 기준으로 판정한다.
+// 뮤트는 소리/OS알림만 억제하고 안읽음 배지는 그대로 유지해야 하므로(#4), 호출부에서
+// incrementBadge 와 분리해서 사용한다.
+function isRoomMuted(ctx, roomKey) {
+  return !!ctx.state.mutedRoomKeySet && ctx.state.mutedRoomKeySet.has(roomKey)
 }
 
 // 창이 비활성화 상태일 때 렌더러에 소리 재생 요청
@@ -261,6 +287,12 @@ async function flushPendingMessages(ctx, targetPeerId, retryCount = 0) {
             contentType: messagePayload.contentType,
             fileUrl: messagePayload.fileUrl,
             fileName: messagePayload.fileName,
+            // 답장 메타(#28)도 pending 재전송 시 동일하게 암호화 페이로드에 실어 보낸다.
+            replyToId: messagePayload.replyToId || null,
+            replyPreview: messagePayload.replyPreview || null,
+            // @멘션(#29)도 동일하게 재전송 시 암호화 페이로드에 실어 보낸다 — DB 행은 최초
+            // 저장 시점에 이미 평문 컬럼으로 저장돼 있으므로 여기서는 와이어 페이로드만 채운다.
+            mentions: messagePayload.mentions || [],
           },
           sharedSecret,
           ctx.state.peerId,
@@ -279,6 +311,10 @@ async function flushPendingMessages(ctx, targetPeerId, retryCount = 0) {
           fileUrl: null,
           fileName: null,
           timestamp: pending.created_at,
+          // 오프라인 큐에서 지연 재전송되는 메시지 — 원래 전송 시점(최대 7일 전) timestamp 를
+          // 그대로 유지하므로, 수신측 신선도(replay) 검증에서 예외 처리되도록 표시한다.
+          // (수신측 messageHandler.isStaleInboundMessage 가 이 플래그를 보고 통과시킨다.)
+          deferred: true,
         }
         const sent = sendPeerMessage(ctx, targetPeerId, message)
         if (sent) {
@@ -339,9 +375,79 @@ function cacheOwnFile(ctx, messageId, fileName) {
   } catch { /* 캐시 실패 시 무시 — 표시는 tempFilePath 원본으로 폴백 */ }
 }
 
-// 파일 송수신 사이즈 한도 — wsServer.MAX_PAYLOAD_BYTES 와 base64 오버헤드(1.33x) 를
-// 고려해 raw 150MB 까지 단발 전송 허용. 그 이상은 send-file IPC 에서 사전 차단.
+// 메시지 삭제 + 연결된 file_cache 파일 정리 (#24).
+// cached_file_path 는 항상 `${messageId}${확장자}` 형태로 messageId 와 1:1 매핑된다
+// (cacheOwnFile / cacheReceivedFile 참고) — 즉 다른 메시지가 같은 캐시 파일을 참조할
+// 가능성이 없으므로 참조 카운트 없이 안전하게 삭제할 수 있다.
+// deleteMessage 는 from_id 가 일치하는 경우에만 실제로 행을 지우므로(changes > 0),
+// 권한이 없어 삭제가 실제로 일어나지 않았을 때는 캐시 파일도 지우지 않는다.
+function deleteMessageAndCachedFile(ctx, messageId, fromId) {
+  const cachedFilePath = getFileCache(ctx.state.database, messageId)
+  const result = deleteMessage(ctx.state.database, messageId, fromId)
+  if (result.changes > 0 && cachedFilePath) {
+    try { fs.unlinkSync(cachedFilePath) } catch { /* 이미 없거나 삭제 실패 시 무시 */ }
+  }
+  return result
+}
+
+// 로그인 시점에 file_cache/ 안에서 어떤 메시지도 참조하지 않는 orphan 파일을 정리한다.
+// 메시지 삭제 시 개별적으로 캐시 파일을 지우지만(deleteMessageAndCachedFile, 위),
+// 과거 데이터(이 수정 이전에 삭제된 메시지)나 비정상 종료로 인해 orphan 이 남아있을 수
+// 있어 로그인마다 한 번씩 스윕한다. DB 조회가 실패하면 잘못 지우는 것보다 안전하게
+// 아무 것도 하지 않는다.
+function sweepOrphanedFileCache(ctx) {
+  const cacheDir = path.join(ctx.config.appDataPath, 'file_cache')
+  if (!fs.existsSync(cacheDir)) return { removed: 0 }
+
+  let referencedPaths
+  try {
+    referencedPaths = new Set(
+      ctx.state.database
+        .prepare('SELECT cached_file_path FROM messages WHERE cached_file_path IS NOT NULL')
+        .all()
+        .map(row => path.resolve(row.cached_file_path))
+    )
+  } catch {
+    return { removed: 0 }
+  }
+
+  let removed = 0
+  let entries
+  try {
+    entries = fs.readdirSync(cacheDir)
+  } catch {
+    return { removed: 0 }
+  }
+  for (const fileName of entries) {
+    const fullPath = path.resolve(path.join(cacheDir, fileName))
+    if (referencedPaths.has(fullPath)) continue
+    try {
+      fs.unlinkSync(fullPath)
+      removed++
+    } catch { /* 개별 파일 삭제 실패는 무시하고 계속 진행 */ }
+  }
+  return { removed }
+}
+
+// 레거시 단발 file-data 사이즈 한도 — wsServer.MAX_PAYLOAD_BYTES 와 base64 오버헤드(1.33x) 를
+// 고려해 raw 150MB 까지 단발 전송 허용. 구버전(청크 미지원) 피어에게 보낼 때의 상한이다.
 const MAX_RAW_FILE_BYTES = 150 * 1024 * 1024
+
+// 청크 전송(#44/#45/#49) 사이즈 한도 — 청크화로 단일 프레임 제약이 사라지므로 상향한다.
+// 단 무한대는 금지(송/수신 모두 전체 평문을 메모리에 1회 올리므로) — 1GB 로 제한.
+// save-file IPC 업로드 가드와 청크 경로(fileRequest → sendFileAsChunks) 상한으로 쓰인다.
+const MAX_CHUNKED_FILE_BYTES = 1024 * 1024 * 1024
+
+// 협상된 capability 조회 — 상대가 해당 기능을 지원하고(원격 hello) 나도 지원하면(LOCAL) true.
+// peerManager 세션의 remoteCapabilities 를 LOCAL_CAPABILITIES 와 교집합해 판정한다.
+// peerManager/세션이 없으면(협상 정보 없음) 안전하게 false → 레거시 경로로 폴백.
+function peerSupportsCapability(ctx, peerId, capability) {
+  if (!ctx.state.peerManager) return false
+  const session = ctx.state.peerManager.getSession(peerId)
+  if (!session) return false
+  const remoteCapabilities = session.handshake?.remoteCapabilities || []
+  return negotiateCapabilities(remoteCapabilities).includes(capability)
+}
 
 // 파일 재요청 백오프 (ms). 메시지 손실·키 도착 지연·임시 연결 불안정에 대비.
 // 한 번에 끝내지 않고 점진적으로 retry → 사용자가 오래 기다리지 않으면서도
@@ -472,9 +578,11 @@ module.exports = {
   hasPeerConnection,
   sendPeerMessage,
   broadcastPeerMessage,
+  sendHistorySyncRequest,
   incrementBadge,
   clearBadge,
   showNotification,
+  isRoomMuted,
   playNotificationSound,
   checkAndNotifyUpdated,
   loadChangelog,
@@ -483,9 +591,13 @@ module.exports = {
   buildMyProfileImageUrl,
   cacheReceivedFile,
   cacheOwnFile,
+  deleteMessageAndCachedFile,
+  sweepOrphanedFileCache,
   requestFileViaWebSocket,
   clearPendingFileRequest,
   clearAllPendingFileRequests,
+  peerSupportsCapability,
   MAX_RAW_FILE_BYTES,
+  MAX_CHUNKED_FILE_BYTES,
   FILE_REQUEST_RETRY_DELAYS_MS,
 }

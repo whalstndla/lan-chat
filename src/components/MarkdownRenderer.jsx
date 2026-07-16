@@ -1,10 +1,12 @@
 // src/components/MarkdownRenderer.jsx
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import rehypeHighlight from 'rehype-highlight'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import CopyButton from './message/CopyButton'
+import { highlightMentions } from '../utils/highlightMentions'
 import 'highlight.js/styles/github-dark.css'
 
 // 접힘 기준 높이 (px). 이 값을 넘으면 기본 접힘 상태로 렌더하고 더보기 버튼 노출.
@@ -40,7 +42,7 @@ function CollapsibleCodeBlock({ children }) {
 
   const shouldCollapse = overflowing && !expanded
   return (
-    <div className="my-1">
+    <div className="my-1 group/codeblock">
       <div className="relative">
         <pre
           ref={preRef}
@@ -49,6 +51,11 @@ function CollapsibleCodeBlock({ children }) {
         >
           {children}
         </pre>
+        {/* 코드 원문 복사 버튼 — 실제 렌더된 pre 텍스트를 그대로 읽어 복사(하이라이트 span 무관하게 정확한 원문) */}
+        <CopyButton
+          getText={() => preRef.current?.innerText || ''}
+          className="absolute top-1.5 right-1.5 z-10 p-1 rounded bg-black/40 text-vsc-muted opacity-0 group-hover/codeblock:opacity-100 hover:text-white hover:bg-black/60 transition-opacity cursor-pointer"
+        />
         {shouldCollapse && (
           // 하단 페이드 — 코드가 잘려있음을 시각적으로 암시
           <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-12 bg-gradient-to-t from-[#0d1117] to-transparent" />
@@ -78,69 +85,92 @@ function CollapsibleCodeBlock({ children }) {
   )
 }
 
-// 마크다운 렌더링 커스텀 컴포넌트 (보안 + 스타일링)
-const markdownComponents = {
-  // 링크 — http/https만 허용, 외부 브라우저로 열기
-  a: ({ href, children }) => {
-    if (!/^https?:\/\//i.test(href || '')) return <span>{children}</span>
-    return (
-      <a
-        href={href}
-        className="text-vsc-accent underline hover:opacity-80 break-all"
-        onClick={(event) => {
-          event.preventDefault()
-          window.electronAPI.openExternal(href)
-        }}
-      >
-        {children}
-      </a>
+// 멘션(#29) — 마크다운 트리의 텍스트 리프에만 하이라이트를 적용한다. children 은 문자열
+// 하나이거나(단순 텍스트), 문자열/React 엘리먼트가 섞인 배열이다(굵게/링크 등이 함께 있을 때).
+// 이미 컴포넌트로 렌더된 엘리먼트(예: strong 안에서 이미 처리된 결과, code/a 등)는 각자의
+// 컴포넌트 오버라이드가 스스로 처리하므로 여기서는 문자열 리프만 재귀적으로 변환한다.
+function applyMentionHighlight(children, mentionedNicknames) {
+  if (mentionedNicknames.length === 0) return children
+  if (typeof children === 'string') return highlightMentions(children, mentionedNicknames)
+  if (Array.isArray(children)) {
+    return children.map((child, index) =>
+      typeof child === 'string'
+        ? <React.Fragment key={index}>{highlightMentions(child, mentionedNicknames)}</React.Fragment>
+        : child
     )
-  },
-  // 이미지 — 마크다운 내 이미지 비활성화 (파일 첨부로만 전송)
-  img: () => null,
-  // 인라인 코드 — pre > code에서도 호출되므로 인라인 스타일만 적용.
-  // rehype-highlight이 코드블록 code 요소에 'hljs' 클래스를 붙이는데, 이를 감지해 인라인 스타일을 건너뛴다.
-  code: ({ children, className, ...props }) => {
-    const isBlock = typeof className === 'string' && className.includes('hljs')
-    if (isBlock) {
-      return <code className={className} {...props}>{children}</code>
-    }
-    return (
-      <code className="bg-vsc-bg text-vsc-accent px-1 py-0.5 rounded text-xs font-mono" {...props}>
-        {children}
-      </code>
-    )
-  },
-  // 코드 블록 — 긴 경우 접힘 상태로 렌더하는 래퍼 컴포넌트로 대체.
-  pre: ({ children }) => <CollapsibleCodeBlock>{children}</CollapsibleCodeBlock>,
-  // 불릿 리스트 — list-outside + 좌측 패딩으로 래핑 시 들여쓰기 유지
-  ul: ({ children }) => <ul className="list-disc list-outside pl-5 my-1 space-y-0.5">{children}</ul>,
-  // 번호 리스트 — list-outside + 좌측 패딩
-  ol: ({ children }) => <ol className="list-decimal list-outside pl-5 my-1 space-y-0.5">{children}</ol>,
-  // 리스트 아이템 — 마커와 내용 사이 간격 약간
-  li: ({ children }) => <li className="pl-1">{children}</li>,
-  // 인용
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-2 border-vsc-accent/50 pl-2 my-1 text-vsc-muted italic">
-      {children}
-    </blockquote>
-  ),
-  // 단락 — 여백 최소화 (채팅 말풍선이라 조밀해야 함)
-  p: ({ children }) => <p className="my-0.5 first:mt-0 last:mb-0">{children}</p>,
-  // 굵게
-  strong: ({ children }) => <strong className="font-bold">{children}</strong>,
-  // 기울임
-  em: ({ children }) => <em className="italic">{children}</em>,
-  // 취소선
-  del: ({ children }) => <del className="line-through text-vsc-muted">{children}</del>,
+  }
+  return children
 }
 
-export default function MarkdownRenderer({ content }) {
+// 마크다운 렌더링 커스텀 컴포넌트 (보안 + 스타일링) — mentionedNicknames 에 따라 텍스트를
+// 담는 컴포넌트(p/li/blockquote/strong/em/del)만 멘션 하이라이트를 적용해 재생성한다.
+// mentionedNicknames 가 없는(=멘션 없는) 압도적 다수의 메시지는 매 렌더마다 재생성 비용을
+// 줄이도록 MarkdownRenderer 쪽에서 useMemo 로 캐싱한다.
+function buildMarkdownComponents(mentionedNicknames) {
+  return {
+    // 링크 — http/https만 허용, 외부 브라우저로 열기
+    a: ({ href, children }) => {
+      if (!/^https?:\/\//i.test(href || '')) return <span>{children}</span>
+      return (
+        <a
+          href={href}
+          className="text-vsc-accent underline hover:opacity-80 break-all"
+          onClick={(event) => {
+            event.preventDefault()
+            window.electronAPI.openExternal(href)
+          }}
+        >
+          {children}
+        </a>
+      )
+    },
+    // 이미지 — 마크다운 내 이미지 비활성화 (파일 첨부로만 전송)
+    img: () => null,
+    // 인라인 코드 — pre > code에서도 호출되므로 인라인 스타일만 적용.
+    // rehype-highlight이 코드블록 code 요소에 'hljs' 클래스를 붙이는데, 이를 감지해 인라인 스타일을 건너뛴다.
+    code: ({ children, className, ...props }) => {
+      const isBlock = typeof className === 'string' && className.includes('hljs')
+      if (isBlock) {
+        return <code className={className} {...props}>{children}</code>
+      }
+      return (
+        <code className="bg-vsc-bg text-vsc-accent px-1 py-0.5 rounded text-xs font-mono" {...props}>
+          {children}
+        </code>
+      )
+    },
+    // 코드 블록 — 긴 경우 접힘 상태로 렌더하는 래퍼 컴포넌트로 대체.
+    pre: ({ children }) => <CollapsibleCodeBlock>{children}</CollapsibleCodeBlock>,
+    // 불릿 리스트 — list-outside + 좌측 패딩으로 래핑 시 들여쓰기 유지
+    ul: ({ children }) => <ul className="list-disc list-outside pl-5 my-1 space-y-0.5">{children}</ul>,
+    // 번호 리스트 — list-outside + 좌측 패딩
+    ol: ({ children }) => <ol className="list-decimal list-outside pl-5 my-1 space-y-0.5">{children}</ol>,
+    // 리스트 아이템 — 마커와 내용 사이 간격 약간
+    li: ({ children }) => <li className="pl-1">{applyMentionHighlight(children, mentionedNicknames)}</li>,
+    // 인용
+    blockquote: ({ children }) => (
+      <blockquote className="border-l-2 border-vsc-accent/50 pl-2 my-1 text-vsc-muted italic">
+        {applyMentionHighlight(children, mentionedNicknames)}
+      </blockquote>
+    ),
+    // 단락 — 여백 최소화 (채팅 말풍선이라 조밀해야 함)
+    p: ({ children }) => <p className="my-0.5 first:mt-0 last:mb-0">{applyMentionHighlight(children, mentionedNicknames)}</p>,
+    // 굵게
+    strong: ({ children }) => <strong className="font-bold">{applyMentionHighlight(children, mentionedNicknames)}</strong>,
+    // 기울임
+    em: ({ children }) => <em className="italic">{applyMentionHighlight(children, mentionedNicknames)}</em>,
+    // 취소선
+    del: ({ children }) => <del className="line-through text-vsc-muted">{applyMentionHighlight(children, mentionedNicknames)}</del>,
+  }
+}
+
+export default function MarkdownRenderer({ content, mentionedNicknames = [] }) {
+  const components = useMemo(() => buildMarkdownComponents(mentionedNicknames), [mentionedNicknames])
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkBreaks]}
       rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
-      components={markdownComponents}
+      components={components}
     >
       {content || ''}
     </ReactMarkdown>

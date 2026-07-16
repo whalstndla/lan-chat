@@ -38,8 +38,9 @@ describe('WebSocket 서버', () => {
   })
 
   it('inbound 소켓에 peerId가 태깅되면 서버에서도 해당 피어로 전송할 수 있음', async () => {
-    const inboundKeyExchange = {
-      type: 'key-exchange',
+    // 핸드셰이크는 v2 hello 로 통일됨(#69) — fromId 로 소켓에 peerId 가 태깅된다.
+    const inboundHello = {
+      type: 'hello',
       fromId: 'peer-inbound',
       publicKey: 'dummy-key',
       timestamp: Date.now(),
@@ -48,7 +49,7 @@ describe('WebSocket 서버', () => {
     await new Promise(async (resolve) => {
       serverInfo = await startWsServer({
         onMessage: (received) => {
-          if (received.type !== 'key-exchange') return
+          if (received.type !== 'hello') return
 
           expect(getServerClientPeerIds(serverInfo)).toContain('peer-inbound')
           const sent = sendMessageToServerPeer(serverInfo, 'peer-inbound', {
@@ -68,7 +69,7 @@ describe('WebSocket 서버', () => {
         resolve()
       })
       client.on('open', () => {
-        client.send(JSON.stringify(inboundKeyExchange))
+        client.send(JSON.stringify(inboundHello))
       })
     })
   })

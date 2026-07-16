@@ -1,13 +1,21 @@
 // src/components/Message.jsx
 import React, { useState, useEffect, useMemo } from 'react'
-import { Paperclip, Trash2, Clock, Check, CheckCheck, SmilePlus, Pencil, Loader2 } from 'lucide-react'
+import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, Pencil, Loader2, Download, FolderOpen, Reply, X } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
+import { parseReplyPreview } from '../utils/replyPreview'
 import LinkPreviewCard from './LinkPreviewCard'
 import MarkdownRenderer from './MarkdownRenderer'
 import ImageLightbox from './message/ImageLightbox'
+import CopyButton from './message/CopyButton'
+import ReactionPicker from './message/ReactionPicker'
+import ReactionBadges from './message/ReactionBadges'
 import useUserStore from '../store/useUserStore'
 import useChatStore from '../store/useChatStore'
 import usePeerStore from '../store/usePeerStore'
+import useFileDownload from '../hooks/useFileDownload'
+import { highlightText } from '../utils/highlightText'
+import { highlightMentions } from '../utils/highlightMentions'
+import { parseStoredMentions, resolveMentionNickname } from '../utils/mentions'
 
 // timestamp → "오후 2:30" 형식
 function formatTime(timestamp) {
@@ -17,8 +25,18 @@ function formatTime(timestamp) {
   })
 }
 
-// 빠른 이모지 선택 목록
-const quickEmojis = ['👍', '❤️', '😂', '🎉', '😮', '😢']
+// timestamp → "2026년 7월 14일 오후 2:30:15" 형식 — hover 시에만 보이던 시간 표시를
+// title 속성으로도 제공해(#43) 스크린리더/키보드 사용자도 전체 날짜시간을 확인할 수 있게 한다.
+function formatFullDateTime(timestamp) {
+  return new Date(timestamp).toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
 
 // 이미지 소스 폴백 체인 — lanchat:// (앱 내부 복호화 채널) 만 사용한다.
 // 디스크 파일이 모두 ciphertext 라 file:// 직접 표시는 무용. lanchat:// 는 main
@@ -78,7 +96,7 @@ function ExtraImageThumb({ imageMessage, onClick }) {
 
   if (!src && status !== 'failed') return null
   return (
-    <div className="relative rounded overflow-hidden border border-vsc-border w-32 h-32 bg-vsc-bg" onClick={() => status === 'loaded' && onClick(src)}>
+    <div className="relative rounded overflow-hidden border border-vsc-border w-32 h-32 bg-vsc-bg" onClick={() => status === 'loaded' && onClick(src, imageMessage.id)}>
       {status === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
           <Loader2 size={18} className="animate-spin" />
@@ -94,6 +112,7 @@ function ExtraImageThumb({ imageMessage, onClick }) {
           src={src}
           alt={imageMessage.fileName || imageMessage.file_name || '이미지'}
           className={`w-32 h-32 object-cover ${status === 'loaded' ? 'block cursor-pointer' : 'invisible'}`}
+          loading="lazy"
           onLoad={onLoad}
           onError={onError}
         />
@@ -110,20 +129,80 @@ function extractFirstUrl(text) {
   return match ? match[0] : null
 }
 
-export default function Message({ message, onStartEdit, isHighlighted = false, isGrouped = false, extraImages = [] }) {
+// 멘션(#29) 하이라이트 + 링크 파싱을 함께 적용한 일반 텍스트 렌더링.
+// highlightMentions 가 먼저 "@닉네임" 부분을 배지로 감싸고, 나머지 순수 문자열 구간에만
+// parseLinksInText 를 적용해 링크 자동 인식을 그대로 유지한다(#37 검색 하이라이트와 동일하게
+// 두 처리를 동시에 적용하려면 별도 합성이 필요해, 이 함수로 그 합성을 담당한다).
+function renderTextWithMentions(text, mentionedNicknames) {
+  const withMentions = highlightMentions(text, mentionedNicknames)
+  if (typeof withMentions === 'string') return parseLinksInText(withMentions)
+  return withMentions.map((part, index) => (
+    <React.Fragment key={index}>{typeof part === 'string' ? parseLinksInText(part) : part}</React.Fragment>
+  ))
+}
+
+// 북마크 목록(#34)에 표시할 미리보기 문자열 계산 — 첨부 타입은 텍스트 대신 안내 문구.
+const BOOKMARK_PREVIEW_MAX_LENGTH = 100
+function getBookmarkPreview(message, contentType, fileName) {
+  if (contentType === 'image') return '사진'
+  if (contentType === 'video') return '동영상'
+  if (contentType === 'file') return `📎 ${fileName || '파일'}`
+  const content = message.content || ''
+  return content.length > BOOKMARK_PREVIEW_MAX_LENGTH
+    ? `${content.slice(0, BOOKMARK_PREVIEW_MAX_LENGTH)}…`
+    : content
+}
+
+function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = false, isGrouped = false, extraImages = [], searchQuery = '' }) {
   const myPeerId = useUserStore(state => state.myPeerId)
+  const myNickname = useUserStore(state => state.myNickname)
   const myProfileImageUrl = useUserStore(state => state.myProfileImageUrl)
-  // 리액션 로컬 상태 — 스토어 구독 없이 관리
-  const [reactions, setReactions] = useState({})
-  const onlinePeers = usePeerStore(state => state.onlinePeers)
+  // 리액션 — 스토어의 reactions 맵을 구독 (하이드레이션 + 실시간 갱신 반영)
+  const reactions = useChatStore(state => state.reactions[message.id]) || {}
+  // 북마크(#34) 여부 — 스토어의 bookmarks 맵을 구독
+  const isBookmarked = useChatStore(state => !!state.bookmarks[message.id])
   const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
-  const [lightboxUrl, setLightboxUrl] = useState(null)
+  const senderId = message.fromId || message.from_id
+  // 발신자 아바타 URL — onlinePeers 배열 전체가 아니라 "이 발신자의 프로필 이미지 URL"(primitive)만
+  // 좁게 구독한다. 이렇게 하면 무관한 피어 한 명의 상태 변화에 모든 메시지가 리렌더되던 문제가
+  // 사라지고, React.memo 와 결합해 실제로 이 발신자의 아바타가 바뀔 때만 리렌더된다.
+  const senderProfileImageUrl = usePeerStore(state =>
+    isMyMessage ? null : state.onlinePeers.find(p => p.peerId === senderId)?.profileImageUrl
+  )
+  const [lightboxData, setLightboxData] = useState(null) // { url, messageId }
+  const { downloadFile, savedPath, revealInFolder } = useFileDownload()
 
   const sender = message.from || message.from_name
   const contentType = message.contentType || message.content_type
   const fileUrl = message.fileUrl || message.file_url
   const fileName = message.fileName || message.file_name
-  const senderId = message.fromId || message.from_id
+
+  // 답장(#28) — 원본 messageId + 비정규화 인용 스냅샷. 라이브(camelCase)/DB(snake_case,
+  // reply_preview 는 JSON 문자열) 양쪽 경로를 모두 허용한다. 필드가 없으면 인용 미표시(하위호환).
+  const replyToId = message.replyToId || message.reply_to_id || null
+  const replyPreview = useMemo(
+    () => parseReplyPreview(message.replyPreview ?? message.reply_preview),
+    [message.replyPreview, message.reply_preview]
+  )
+
+  // 멘션(#29) — 라이브(camelCase 배열)/DB(JSON 문자열) 양쪽 경로 모두 허용.
+  const mentionedPeerIds = useMemo(() => parseStoredMentions(message.mentions), [message.mentions])
+  const isMeMentioned = mentionedPeerIds.includes(myPeerId)
+
+  // 멘션된 닉네임을 JSON 직렬화한 "원시 문자열"로만 좁게 구독 — onlinePeers/pastDMPeers 배열
+  // 전체가 아니라 실제로 이 메시지가 멘션한 닉네임 목록만 선택한다. 문자열은 값 비교(===)라서
+  // 계산 결과가 같으면(=멘션 대상 피어의 닉네임이 안 바뀌었으면) 무관한 피어 상태 변화로
+  // 리렌더되지 않는다(위 senderProfileImageUrl 과 동일한 이유로 좁게 구독). 닉네임에 공백 등
+  // 임의 문자가 섞여도 안전하도록 구분자 기반 join/split 대신 JSON 직렬화를 사용한다.
+  const mentionedNicknamesKey = usePeerStore(state => {
+    if (mentionedPeerIds.length === 0) return '[]'
+    return JSON.stringify(
+      mentionedPeerIds
+        .map(peerId => resolveMentionNickname(peerId, { myPeerId, myNickname, onlinePeers: state.onlinePeers, pastDMPeers: state.pastDMPeers }))
+        .filter(Boolean)
+    )
+  })
+  const mentionedNicknames = useMemo(() => JSON.parse(mentionedNicknamesKey), [mentionedNicknamesKey])
 
   // 텍스트 메시지에서 첫 번째 URL 추출 (링크 프리뷰용)
   const firstUrl = useMemo(() => {
@@ -137,9 +216,18 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
   const { src: resolvedFileUrl, status: imgStatus, onLoad: onImgLoad, onError: onImgError } =
     useImageSrcWithFallback(message.id, fileUrl, wsFileCachedUrl, loadError)
 
-  // 발신자 아바타 URL 계산
-  const senderPeer = onlinePeers.find(p => p.peerId === senderId)
-  const avatarUrl = isMyMessage ? myProfileImageUrl : senderPeer?.profileImageUrl
+  // 청크 전송 진행률(#44/#45/#49) — 수신 중일 때만 존재. 말풍선 스피너를 퍼센트로 표시하고
+  // 취소 버튼을 노출한다.
+  const transferProgress = useChatStore(state => state.fileTransferProgress[message.id])
+  const transferPercent = transferProgress && transferProgress.total > 0
+    ? Math.min(100, Math.floor((transferProgress.received / transferProgress.total) * 100))
+    : null
+  function handleCancelTransfer() {
+    window.electronAPI.cancelFileTransfer(message.id)
+  }
+
+  // 발신자 아바타 URL 계산 — 내 메시지는 내 프로필, 상대는 위에서 좁게 구독한 프로필 URL 사용
+  const avatarUrl = isMyMessage ? myProfileImageUrl : senderProfileImageUrl
 
   async function handleDelete() {
     const allMessages = extraImages.length > 0
@@ -165,31 +253,38 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
     }
   }
 
-  // 이모지 리액션 토글 — 내 리액션을 추가하거나 제거
+  // 이모지 리액션 토글 — 내 리액션을 추가하거나 제거. 결과는 스토어에 직접 반영
+  // (상대방의 리액션은 onReactionUpdated 구독을 통해 별도로 스토어에 반영됨)
   async function handleReaction(emoji) {
     const targetPeerId = (message.type === 'dm')
       ? (isMyMessage ? (message.to || message.to_id) : senderId) : null
     const result = await window.electronAPI.toggleReaction({ messageId: message.id, emoji, targetPeerId })
-    // 로컬 리액션 상태 업데이트
-    setReactions(prev => {
-      const updated = { ...prev }
-      const reactors = [...(updated[emoji] || [])]
-      if (result.action === 'add' && !reactors.includes(myPeerId)) reactors.push(myPeerId)
-      else if (result.action === 'remove') {
-        const idx = reactors.indexOf(myPeerId)
-        if (idx !== -1) reactors.splice(idx, 1)
-      }
-      if (reactors.length === 0) delete updated[emoji]
-      else updated[emoji] = reactors
-      return updated
-    })
+    useChatStore.getState().updateReaction(message.id, emoji, myPeerId, result.action)
+  }
+
+  // 북마크 토글(#34) — 피어 전파 없이 이 기기에만 로컬로 저장. roomKey 는 북마크 목록에서
+  // "어느 방의 메시지인지" 표시/이동에 사용된다(전체 채팅은 'global', DM 은 상대 peerId).
+  function handleToggleBookmark() {
+    const roomKey = (message.type === 'dm')
+      ? (isMyMessage ? (message.to || message.to_id) : senderId)
+      : 'global'
+    const preview = getBookmarkPreview(message, contentType, fileName)
+    useChatStore.getState().toggleBookmark(message.id, roomKey, preview)
   }
 
   return (
     <>
       <div
         data-message-id={message.id}
-        className={`flex gap-3 px-4 ${isGrouped ? 'py-0.5' : 'py-1.5'} hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${isHighlighted ? 'bg-yellow-500/10 border-l-2 border-yellow-400 transition-colors duration-300' : 'transition-colors duration-300'}`}
+        className={`flex gap-3 px-4 ${isGrouped ? 'py-0.5' : 'py-1.5'} hover:bg-vsc-hover group ${isMyMessage ? 'flex-row-reverse' : ''} ${message.pending ? 'opacity-60' : ''} ${
+          isHighlighted
+            ? 'bg-yellow-500/10 border-l-2 border-yellow-400 transition-colors duration-300'
+            // 멘션(#29) — 내가 언급된 메시지는 검색 점프 하이라이트보다 약하게, 과하지 않은
+            // accent 톤 배경으로만 구분한다(검색 하이라이트가 우선).
+            : isMeMentioned
+              ? 'bg-vsc-accent/5 border-l-2 border-vsc-accent/30 transition-colors duration-300'
+              : 'transition-colors duration-300'
+        }`}
       >
         {/* 아바타 */}
         {isGrouped ? (
@@ -217,7 +312,10 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
             <span className={`text-xs font-semibold ${isMyMessage ? 'text-vsc-accent' : 'text-vsc-text'}`}>
               {isMyMessage ? '나' : sender}
             </span>
-            <span className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+            <span
+              className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+              title={formatFullDateTime(message.timestamp)}
+            >
               {formatTime(message.timestamp)}
             </span>
             {/* 수정된 메시지 표시 */}
@@ -236,27 +334,72 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
           </div>
           )}
 
+          {/* 답장 인용 블록(#28) — reply_to_id 가 있으면 말풍선 위에 원본 발신자+스니펫 표시.
+              클릭 시 원본이 화면(DOM)에 있으면 스크롤+하이라이트, 없으면 조용히 무시(ChatWindow). */}
+          {replyToId && replyPreview && (
+            <button
+              type="button"
+              onClick={() => onQuoteClick?.(replyToId)}
+              title="원본 메시지로 이동"
+              className={`flex flex-col gap-0.5 mb-1 max-w-full text-left border-l-2 border-vsc-accent bg-vsc-panel/60 rounded px-2 py-1 hover:bg-vsc-hover cursor-pointer transition-colors ${isMyMessage ? 'items-end' : 'items-start'}`}
+            >
+              <span className="text-xs font-semibold text-vsc-accent truncate max-w-full">
+                {replyPreview.fromName}
+              </span>
+              <span className="text-xs text-vsc-muted truncate max-w-full">
+                {replyPreview.snippet || '내용 없음'}
+              </span>
+            </button>
+          )}
+
           {/* 메시지 내용 + 리액션 버튼 (말풍선 옆) */}
           <div className={`flex items-center gap-1 ${isMyMessage ? 'flex-row-reverse' : ''}`}>
-            {(contentType === 'text' || !contentType) && (
+            {/* 복호화 실패 메시지 — 키 교환 이전에 보내졌거나 손상된 DM. 빈 말풍선 대신 안내 표시 */}
+            {message.decryptionFailed && (
+              <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-muted italic leading-relaxed break-words min-w-0 overflow-hidden">
+                🔒 복호화할 수 없는 메시지
+              </div>
+            )}
+
+            {!message.decryptionFailed && (contentType === 'text' || !contentType) && (
               <div className="select-text bg-vsc-panel rounded px-3 py-1.5 text-sm text-vsc-text leading-relaxed break-words min-w-0 overflow-hidden">
                 {message.format === 'markdown' ? (
-                  <MarkdownRenderer content={message.content} />
+                  <MarkdownRenderer content={message.content} mentionedNicknames={mentionedNicknames} />
                 ) : (
-                  <span className="whitespace-pre-wrap">{parseLinksInText(message.content || '')}</span>
+                  <span className="whitespace-pre-wrap">
+                    {searchQuery.trim()
+                      // 검색 중에는 검색어 하이라이트를 우선한다(#37) — 멘션/링크 파싱과 동시에
+                      // 적용하려면 별도 처리가 필요해, 검색 바가 열려있는 동안에는 텍스트
+                      // 안의 멘션/링크가 일시적으로 강조·클릭 불가능해지는 단순한 트레이드오프를 택했다.
+                      ? highlightText(message.content || '', searchQuery)
+                      : renderTextWithMentions(message.content || '', mentionedNicknames)}
+                  </span>
                 )}
               </div>
             )}
 
-            {contentType === 'image' && (resolvedFileUrl || imgStatus === 'failed') && (
+            {!message.decryptionFailed && contentType === 'image' && (resolvedFileUrl || imgStatus === 'failed') && (
               <div className="flex flex-wrap gap-1 max-w-md">
                 <div
                   className={`relative rounded overflow-hidden border border-vsc-border bg-vsc-bg ${imgStatus === 'loaded' ? 'cursor-pointer' : ''} ${extraImages.length > 0 ? 'w-32 h-32' : 'min-w-[128px] min-h-[96px]'}`}
-                  onClick={() => imgStatus === 'loaded' && setLightboxUrl(resolvedFileUrl)}
+                  onClick={() => imgStatus === 'loaded' && setLightboxData({ url: resolvedFileUrl, messageId: message.id })}
                 >
                   {imgStatus === 'loading' && (
-                    <div className="absolute inset-0 flex items-center justify-center text-vsc-muted">
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-vsc-muted">
                       <Loader2 size={20} className="animate-spin" />
+                      {transferPercent !== null && (
+                        <>
+                          <span className="text-[10px] tabular-nums">{transferPercent}%</span>
+                          <button
+                            onClick={(event) => { event.stopPropagation(); handleCancelTransfer() }}
+                            aria-label="전송 취소"
+                            title="전송 취소"
+                            className="flex items-center gap-0.5 text-[10px] text-vsc-muted hover:text-red-400 cursor-pointer"
+                          >
+                            <X size={11} /> 취소
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                   {imgStatus === 'failed' && (
@@ -269,48 +412,78 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                       src={resolvedFileUrl}
                       alt={fileName || '이미지'}
                       className={`${extraImages.length > 0 ? 'w-32 h-32 object-cover' : 'max-w-xs max-h-64 object-contain'} ${imgStatus === 'loaded' ? 'block' : 'invisible'}`}
+                      loading="lazy"
                       onLoad={onImgLoad}
                       onError={onImgError}
                     />
                   )}
                 </div>
                 {extraImages.map(extra => (
-                  <ExtraImageThumb key={extra.id} imageMessage={extra} onClick={(url) => setLightboxUrl(url)} />
+                  <ExtraImageThumb key={extra.id} imageMessage={extra} onClick={(url, messageId) => setLightboxData({ url, messageId })} />
                 ))}
               </div>
             )}
 
-            {contentType === 'video' && resolvedFileUrl && (
-              <div className="rounded overflow-hidden border border-vsc-border">
+            {!message.decryptionFailed && contentType === 'video' && resolvedFileUrl && (
+              <div className="relative rounded overflow-hidden border border-vsc-border group/video">
                 <video
                   src={resolvedFileUrl}
                   controls
+                  preload="metadata"
                   className="max-w-xs max-h-64"
                   onError={onImgError}
                 />
+                <button
+                  onClick={() => downloadFile(message.id)}
+                  aria-label="비디오 저장"
+                  title="비디오 저장"
+                  className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white opacity-0 group-hover/video:opacity-100 transition-opacity cursor-pointer"
+                >
+                  <Download size={14} />
+                </button>
               </div>
             )}
 
-            {contentType === 'file' && resolvedFileUrl && (
-              <a
-                href={resolvedFileUrl}
-                download={fileName}
+            {!message.decryptionFailed && contentType === 'file' && resolvedFileUrl && (
+              <button
+                onClick={() => downloadFile(message.id)}
                 className="cursor-pointer flex items-center gap-2 bg-vsc-panel rounded px-3 py-2 text-sm text-vsc-accent hover:opacity-80 border border-vsc-border transition-opacity duration-150"
               >
                 <Paperclip size={14} className="shrink-0" />
-                {fileName || '파일'}
-              </a>
+                {searchQuery.trim() ? highlightText(fileName || '파일', searchQuery) : (fileName || '파일')}
+              </button>
             )}
 
             {/* 액션 버튼 (말풍선 옆) */}
             <div className="flex items-center gap-0.5 shrink-0">
+              {/* 답장 버튼(#28) — 복호화 실패가 아닌 모든 메시지(내/상대)에 대해 답장 가능.
+                  클릭 시 부모(ChatWindow→MessageInput)로 답장 대상 전달. */}
+              {!message.decryptionFailed && (
+                <button
+                  onClick={() => onReply?.(message)}
+                  aria-label="답장"
+                  title="답장"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                >
+                  <Reply size={12} />
+                </button>
+              )}
+              {/* 메시지 복사 버튼 — 텍스트 메시지의 마크다운 원문을 클립보드로 복사 */}
+              {!message.decryptionFailed && (contentType === 'text' || !contentType) && (
+                <CopyButton
+                  getText={() => message.content || ''}
+                  title="메시지 복사"
+                  copiedTitle="복사됨"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                />
+              )}
               {/* 수정 버튼 */}
               {isMyMessage && !message.pending && (contentType === 'text' || !contentType) && (
                 <button
                   onClick={() => onStartEdit?.(message)}
                   aria-label="메시지 수정"
                   title="메시지 수정"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-accent hover:bg-vsc-hover"
                 >
                   <Pencil size={12} />
                 </button>
@@ -321,29 +494,36 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
                   onClick={handleDelete}
                   aria-label="메시지 삭제"
                   title="메시지 삭제"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-red-400 hover:bg-vsc-hover"
+                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer p-0.5 rounded text-vsc-muted hover:text-red-400 hover:bg-vsc-hover"
                 >
                   <Trash2 size={12} />
                 </button>
               )}
-              {/* 리액션 추가 버튼 */}
-              <div className="relative group/reaction">
-                <button className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded text-vsc-muted hover:text-vsc-accent cursor-pointer" aria-label="리액션 추가">
-                  <SmilePlus size={14} />
+              {/* 북마크 토글 버튼(#34) — 로컬 전용, 활성 시 채워진 아이콘으로 표시 */}
+              {!message.decryptionFailed && (
+                <button
+                  onClick={handleToggleBookmark}
+                  aria-label={isBookmarked ? '북마크 해제' : '북마크'}
+                  title={isBookmarked ? '북마크 해제' : '북마크'}
+                  className={`p-0.5 rounded cursor-pointer transition-opacity hover:bg-vsc-hover ${
+                    isBookmarked
+                      ? 'opacity-100 text-vsc-accent'
+                      : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-vsc-muted hover:text-vsc-accent'
+                  }`}
+                >
+                  <Bookmark size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
                 </button>
-                <div className={`hidden group-hover/reaction:flex absolute bottom-full pb-2 z-10 ${isMyMessage ? 'right-0' : 'left-0'}`}>
-                  <div className="flex bg-vsc-sidebar border border-vsc-border rounded-lg shadow-lg p-1 gap-0.5">
-                    {quickEmojis.map(e => (
-                      <button key={e} onClick={() => handleReaction(e)} className="p-1 hover:bg-vsc-hover rounded cursor-pointer text-sm">{e}</button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              )}
+              {/* 리액션 추가 버튼 — 퀵 이모지 + 더보기(전체 피커, #38) */}
+              <ReactionPicker onSelect={handleReaction} alignRight={isMyMessage} />
             </div>
 
             {/* 그룹된 메시지 시간 (액션버튼 반대쪽) */}
             {isGrouped && (
-              <span className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              <span
+                className="text-vsc-muted text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity shrink-0"
+                title={formatFullDateTime(message.timestamp)}
+              >
                 {formatTime(message.timestamp)}
               </span>
             )}
@@ -354,27 +534,39 @@ export default function Message({ message, onStartEdit, isHighlighted = false, i
             <LinkPreviewCard url={firstUrl} />
           )}
 
-          {/* 리액션 배지 표시 */}
+          {/* 리액션 배지 표시 — hover 시 반응자 닉네임 툴팁(#38). onlinePeers/pastDMPeers 구독은
+              ReactionBadges 안으로 이동해, 리액션이 있는 메시지에서만 피어 상태를 구독한다. */}
           {Object.keys(reactions).length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              {Object.entries(reactions).map(([emoji, peerIds]) => (
-                <button key={emoji} onClick={() => handleReaction(emoji)}
-                  className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs border cursor-pointer transition-colors ${
-                    peerIds.includes(myPeerId)
-                      ? 'bg-vsc-accent/20 border-vsc-accent text-vsc-accent'
-                      : 'bg-vsc-panel border-vsc-border text-vsc-muted hover:border-vsc-accent'
-                  }`}>
-                  <span>{emoji}</span><span>{peerIds.length}</span>
-                </button>
-              ))}
-            </div>
+            <ReactionBadges reactions={reactions} myPeerId={myPeerId} onReact={handleReaction} />
+          )}
+
+          {/* 다운로드 저장 완료 안내 — 클릭 시 폴더에서 보기 */}
+          {savedPath && (
+            <button
+              onClick={revealInFolder}
+              className="mt-0.5 flex items-center gap-1 text-xs text-vsc-accent hover:underline cursor-pointer"
+            >
+              <FolderOpen size={11} />
+              저장됨 · 폴더에서 보기
+            </button>
           )}
         </div>
       </div>
 
-      {lightboxUrl && (
-        <ImageLightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
+      {lightboxData && (
+        <ImageLightbox
+          url={lightboxData.url}
+          messageId={lightboxData.messageId}
+          onClose={() => setLightboxData(null)}
+        />
       )}
     </>
   )
 }
+
+// React.memo — ChatWindow 가 넘기는 props(message/onStartEdit/onReply/onQuoteClick/
+// isHighlighted/isGrouped/extraImages/searchQuery)가 얕은 비교로 동일하면 부모 리렌더 시에도
+// 다시 그리지 않는다. onStartEdit/onReply/onQuoteClick 는 useCallback, extraImages 는 구조
+// memo(빈 배열은 공유 상수)로 참조가 안정화돼 있어 새 메시지 도착/무관한 피어 변화 시 기존
+// 메시지들이 리렌더되지 않는다.
+export default React.memo(Message)

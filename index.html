@@ -2,6 +2,37 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      CSP(콘텐츠 보안 정책) — 피어가 보낸 신뢰불가 마크다운/HTML 을 react-markdown +
+      rehype-highlight 로 렌더하므로, 인젝션된 스크립트 실행을 막는 것이 1차 목표다.
+      이 meta 는 프로덕션(file://) 정책이다. 개발 서버(vite)는 인라인 refresh preamble +
+      HMR WebSocket 이 필요해 vite.config.js 의 devRelaxCspPlugin 이 런타임에 완화한다.
+
+      각 지시어 근거:
+        default-src 'self'           기본은 앱 번들 자원만.
+        script-src  'self'           번들 JS 만 실행 — 인라인/외부 <script> 차단(핵심 XSS 방어).
+                    'unsafe-eval'     heic2any(libheif/Emscripten)가 new Function 을 쓰기 때문에
+                                      HEIC 업로드 변환(v0.10.3)이 깨지지 않도록 불가피하게 허용.
+                                      'unsafe-inline' 은 여전히 없어 인젝션 스크립트는 차단된다.
+        style-src   'self' 'unsafe-inline'
+                                      Tailwind 번들 CSS('self') + React 인라인 style,
+                                      emoji-picker(flairup)가 주입하는 <style> 때문에 인라인 필요.
+        img-src     'self' data: blob: lanchat: http: https:
+                                      lanchat://(복호화 미디어), data:/blob:(붙여넣기·미리보기),
+                                      http:(LAN 파일서버 프로필 이미지), https:(외부 OG 프리뷰 이미지).
+        media-src   'self' data: blob: lanchat:
+                                      내장 알림음('self'), 커스텀 알림음(blob:), 메시지 미디어(lanchat:).
+        connect-src 'self' data: blob: lanchat:
+                                      렌더러는 외부로 fetch/WebSocket 하지 않는다.
+        object-src  'none'           플러그인/embed 차단.
+        base-uri    'self'           <base> 태그 인젝션 차단.
+      더 조일 여지: 'unsafe-eval' 은 heic2any 격리 로드/대체 시 제거 가능,
+      img-src 의 http:/https: 는 링크프리뷰·프로필 이미지 경로 변경 시 축소 가능.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: lanchat: http: https:; media-src 'self' data: blob: lanchat:; font-src 'self' data:; connect-src 'self' data: blob: lanchat:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
     <link rel="icon" type="image/png" href="/logo.png" />
     <title>LAN Chat</title>
   </head>

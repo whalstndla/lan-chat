@@ -58,10 +58,14 @@ function registerUserHandlers(ctx) {
     }
   })
 
-  // 상태 변경 — 허용된 타입만 저장 후 브로드캐스트
+  // 상태 변경 — 허용된 타입만 저장 후 브로드캐스트.
+  // 사용자가 명시적으로 상태를 바꾸는 것이므로 auto-away 추적 상태를 리셋한다 — 그렇지
+  // 않으면 이후 유휴 감시가 "auto-away 였다"고 착각해 활동 재개 시 엉뚱한 상태로
+  // 되돌릴 수 있다(#41).
   ipcMain.handle('update-status', (_, { statusType, statusMessage }) => {
     const allowedTypes = ['online', 'away', 'busy', 'dnd']
     if (!allowedTypes.includes(statusType)) return
+    ctx.state.isAutoAway = false
     updateStatus(ctx.state.database, { statusType, statusMessage: (statusMessage || '').slice(0, 100) })
     broadcastPeerMessage(ctx, {
       type: 'status-changed', fromId: ctx.state.peerId,

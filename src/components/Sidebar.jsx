@@ -1,10 +1,12 @@
 // src/components/Sidebar.jsx
-import React, { useState, useEffect } from 'react'
-import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw } from 'lucide-react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Hash, Wifi, ChevronLeft, ChevronRight, Settings, FileText, RotateCw, Bookmark, Search, Plug, ShieldAlert } from 'lucide-react'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import SettingsPanel from './SettingsPanel'
+import BookmarksPanel from './BookmarksPanel'
+import { comparePeersForSidebar, matchesPeerFilter } from '../utils/comparePeers'
 
 // 상태 타입 → dot 색상 클래스 매핑
 const statusColors = {
@@ -73,14 +75,44 @@ function ConnectionStatusBar({ onlinePeers, connectingCount }) {
 export default function Sidebar({ onShowPatchNotes }) {
   const [collapsed, setCollapsed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showBookmarks, setShowBookmarks] = useState(false)
   const [connectingCount, setConnectingCount] = useState(0)
+  // DM/피어 목록 필터(#43) — 닉네임 부분일치. 사이드바를 접었다 펴도 값은 유지된다.
+  const [peerFilterQuery, setPeerFilterQuery] = useState('')
+  // 수동 피어 연결(#33) — mDNS/UDP 브로드캐스트 발견이 막힌 망에서 IP 직접 입력으로 연결
+  const [showManualConnect, setShowManualConnect] = useState(false)
+  const [manualHost, setManualHost] = useState('')
+  const [manualPort, setManualPort] = useState('')
+  // null | 'connecting' | 'success' | { error }
+  const [manualConnectStatus, setManualConnectStatus] = useState(null)
+
+  // 연결 시도 → 결과에 따라 성공/실패 피드백 표시
+  async function handleManualConnect() {
+    const host = manualHost.trim()
+    if (!host || manualConnectStatus === 'connecting') return
+    setManualConnectStatus('connecting')
+    const trimmedPort = manualPort.trim()
+    const result = await window.electronAPI.connectManualPeer({
+      host,
+      wsPort: trimmedPort ? Number(trimmedPort) : undefined,
+    })
+    if (result?.ok) {
+      setManualConnectStatus('success')
+    } else {
+      setManualConnectStatus({ error: result?.error || '연결에 실패했습니다' })
+    }
+  }
   const onlinePeers = usePeerStore(state => state.onlinePeers)
+  // TOFU 키 변경 경고(#59) — 보안키가 바뀐 피어에 경고 아이콘을 표시하기 위한 맵
+  const keyChangedPeers = usePeerStore(state => state.keyChangedPeers)
 
   // peer-connecting 이벤트로 연결 시도 중 상태 추적
   useEffect(() => {
     const handleConnecting = () => setConnectingCount(c => c + 1)
-    window.electronAPI.onPeerConnecting(handleConnecting)
-    return () => {}
+    const unsubscribe = window.electronAPI.onPeerConnecting(handleConnecting)
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
   }, [])
 
   // 연결 완료/해제 시 connectingCount 리셋
@@ -89,14 +121,50 @@ export default function Sidebar({ onShowPatchNotes }) {
   }, [onlinePeers.length])
   const pastDMPeers = usePeerStore(state => state.pastDMPeers)
   const myStatusType = useUserStore(state => state.myStatusType)
+  const myStatusMessage = useUserStore(state => state.myStatusMessage)
+
+  // 상태 메시지 입력 임시값 — store 값이 바뀌면(예: 유휴 자동 자리비움 복원) 동기화한다.
+  const [statusMessageDraft, setStatusMessageDraft] = useState(myStatusMessage || '')
+  useEffect(() => {
+    setStatusMessageDraft(myStatusMessage || '')
+  }, [myStatusMessage])
+
+  // 입력 완료(Enter/blur) 시점에 상태 메시지를 저장 + 피어에 전파한다.
+  function commitStatusMessage() {
+    const trimmed = statusMessageDraft.trim()
+    if (trimmed === (myStatusMessage || '')) return
+    useUserStore.getState().setMyStatus(myStatusType, trimmed)
+    window.electronAPI.updateStatus({ statusType: myStatusType, statusMessage: trimmed })
+  }
 
   // 온라인 피어 + 오프라인 과거 DM 상대 병합 (온라인 우선)
   const onlinePeerIds = new Set(onlinePeers.map(p => p.peerId))
   const offlinePastPeers = pastDMPeers.filter(p => !onlinePeerIds.has(p.peerId))
   const currentRoom = useChatStore(state => state.currentRoom)
   const unreadCounts = useChatStore(state => state.unreadCounts)
+  // 전체채팅 안읽음 배지(#39) — DM 배지와 동일한 unreadCounts 맵을 'global' 키로 재사용한다.
+  const globalUnreadCount = unreadCounts.global || 0
 
   const isGlobalSelected = currentRoom.type === 'global'
+
+  // 그룹(온라인/오프라인) 내부 정렬(#43) — 안읽음 있는 피어 우선, 그 다음 닉네임 가나다순.
+  // 발견 순서에 따른 불안정한 정렬을 방지한다. 필터는 검색어 부분일치로 걸러낸다.
+  const sortedOnlinePeers = useMemo(
+    () => [...onlinePeers].sort((a, b) => comparePeersForSidebar(a, b, unreadCounts)),
+    [onlinePeers, unreadCounts]
+  )
+  const sortedOfflinePastPeers = useMemo(
+    () => [...offlinePastPeers].sort((a, b) => comparePeersForSidebar(a, b, unreadCounts)),
+    [offlinePastPeers, unreadCounts]
+  )
+  const filteredOnlinePeers = useMemo(
+    () => sortedOnlinePeers.filter(peer => matchesPeerFilter(peer, peerFilterQuery)),
+    [sortedOnlinePeers, peerFilterQuery]
+  )
+  const filteredOfflinePastPeers = useMemo(
+    () => sortedOfflinePastPeers.filter(peer => matchesPeerFilter(peer, peerFilterQuery)),
+    [sortedOfflinePastPeers, peerFilterQuery]
+  )
 
   if (collapsed) {
     return (
@@ -112,14 +180,17 @@ export default function Sidebar({ onShowPatchNotes }) {
         <button
           onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
           title="전체 채팅"
-          className={`cursor-pointer p-1.5 rounded transition-colors ${
+          className={`cursor-pointer relative p-1.5 rounded transition-colors ${
             isGlobalSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
           }`}
         >
           <Hash size={14} />
+          {globalUnreadCount > 0 && (
+            <span className="absolute top-0 right-0 w-2 h-2 bg-vsc-accent rounded-full" />
+          )}
         </button>
 
-        {[...onlinePeers, ...offlinePastPeers].map((peer) => {
+        {[...filteredOnlinePeers, ...filteredOfflinePastPeers].map((peer) => {
           const isSelected = currentRoom.type === 'dm' && currentRoom.peerId === peer.peerId
           const hasUnread = unreadCounts[peer.peerId] > 0
           const isOnline = onlinePeerIds.has(peer.peerId)
@@ -127,12 +198,15 @@ export default function Sidebar({ onShowPatchNotes }) {
             <button
               key={peer.peerId}
               onClick={() => useChatStore.getState().setCurrentRoom({ type: 'dm', peerId: peer.peerId, nickname: peer.nickname })}
-              title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}`}
+              title={`${peer.nickname}${isOnline ? '' : ' (오프라인)'}${keyChangedPeers[peer.peerId] ? ' — 보안키 변경됨' : ''}${isOnline && peer.statusMessage ? ` — ${peer.statusMessage}` : ''}`}
               className={`cursor-pointer relative p-1.5 rounded transition-colors ${
                 isSelected ? 'bg-vsc-selected text-vsc-text' : 'text-vsc-muted hover:bg-vsc-hover hover:text-vsc-text'
               }`}
             >
               <PeerAvatar peer={peer} isOnline={isOnline} />
+              {keyChangedPeers[peer.peerId] && (
+                <ShieldAlert size={10} className="absolute -bottom-0.5 -left-0.5 text-red-400" />
+              )}
               {hasUnread && (
                 <span className="absolute top-0 right-0 w-2 h-2 bg-vsc-accent rounded-full" />
               )}
@@ -141,9 +215,16 @@ export default function Sidebar({ onShowPatchNotes }) {
         })}
 
         <button
+          onClick={() => { setCollapsed(false); setShowBookmarks(true) }}
+          title="북마크"
+          className="cursor-pointer mt-auto p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
+        >
+          <Bookmark size={14} />
+        </button>
+        <button
           onClick={() => { setCollapsed(false); setShowSettings(true) }}
           title="설정"
-          className="cursor-pointer mt-auto p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
+          className="cursor-pointer p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
         >
           <Settings size={14} />
         </button>
@@ -155,6 +236,8 @@ export default function Sidebar({ onShowPatchNotes }) {
     <div className="w-52 bg-vsc-sidebar border-r border-vsc-border flex flex-col shrink-0">
       {showSettings ? (
         <SettingsPanel onClose={() => setShowSettings(false)} />
+      ) : showBookmarks ? (
+        <BookmarksPanel onClose={() => setShowBookmarks(false)} />
       ) : (
         <>
           <div className="px-2 py-2">
@@ -169,6 +252,18 @@ export default function Sidebar({ onShowPatchNotes }) {
                   <RotateCw size={13} />
                 </button>
                 <button
+                  onClick={() => {
+                    setShowManualConnect(v => !v)
+                    setManualConnectStatus(null)
+                  }}
+                  title="IP로 연결"
+                  className={`cursor-pointer p-0.5 rounded transition-colors ${
+                    showManualConnect ? 'text-vsc-accent bg-vsc-hover' : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'
+                  }`}
+                >
+                  <Plug size={13} />
+                </button>
+                <button
                   onClick={() => setCollapsed(true)}
                   title="사이드바 접기"
                   className="cursor-pointer p-0.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"
@@ -177,6 +272,44 @@ export default function Sidebar({ onShowPatchNotes }) {
                 </button>
               </div>
             </div>
+            {/* IP로 연결(#33) — mDNS/UDP 브로드캐스트 발견이 막힌 망에서 최초 연결 수단 */}
+            {showManualConnect && (
+              <div className="px-2 pb-1.5 space-y-1">
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    value={manualHost}
+                    onChange={(e) => setManualHost(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleManualConnect()}
+                    placeholder="IP 주소 (예: 192.168.0.5)"
+                    aria-label="연결할 피어 IP 주소"
+                    className="flex-1 min-w-0 bg-vsc-bg border border-vsc-border rounded px-2 py-1 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+                  />
+                  <input
+                    type="text"
+                    value={manualPort}
+                    onChange={(e) => setManualPort(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleManualConnect()}
+                    placeholder="포트"
+                    aria-label="연결할 피어 포트 (선택)"
+                    className="w-14 bg-vsc-bg border border-vsc-border rounded px-1.5 py-1 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+                  />
+                </div>
+                <button
+                  onClick={handleManualConnect}
+                  disabled={!manualHost.trim() || manualConnectStatus === 'connecting'}
+                  className="cursor-pointer w-full text-xs px-2 py-1 rounded bg-vsc-accent text-white disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+                >
+                  {manualConnectStatus === 'connecting' ? '연결 중...' : '연결'}
+                </button>
+                {manualConnectStatus === 'success' && (
+                  <p className="text-[11px] text-green-400 px-0.5">연결에 성공했습니다.</p>
+                )}
+                {manualConnectStatus?.error && (
+                  <p className="text-[11px] text-red-400 px-0.5">{manualConnectStatus.error}</p>
+                )}
+              </div>
+            )}
             <button
               onClick={() => useChatStore.getState().setCurrentRoom({ type: 'global' })}
               className={`cursor-pointer w-full text-left px-3 py-1.5 rounded text-sm transition-colors duration-150 flex items-center gap-2 ${
@@ -187,6 +320,11 @@ export default function Sidebar({ onShowPatchNotes }) {
             >
               <Hash size={14} className="shrink-0" />
               전체 채팅
+              {globalUnreadCount > 0 && (
+                <span className="ml-auto bg-vsc-accent text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center leading-none">
+                  {globalUnreadCount}
+                </span>
+              )}
             </button>
           </div>
 
@@ -194,13 +332,27 @@ export default function Sidebar({ onShowPatchNotes }) {
             <p className="text-vsc-muted text-xs px-2 py-1 mb-1 uppercase tracking-wider">
               DM ({onlinePeers.length}/{onlinePeers.length + offlinePastPeers.length})
             </p>
-            {onlinePeers.length === 0 && offlinePastPeers.length === 0 ? (
+            {/* DM/피어 검색 필터(#43) — 닉네임 부분일치 */}
+            {(onlinePeers.length > 0 || offlinePastPeers.length > 0) && (
+              <div className="relative mb-1.5 px-0.5">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-vsc-muted pointer-events-none" />
+                <input
+                  type="text"
+                  value={peerFilterQuery}
+                  onChange={(e) => setPeerFilterQuery(e.target.value)}
+                  placeholder="이름으로 검색..."
+                  aria-label="DM 상대 검색"
+                  className="w-full bg-vsc-bg border border-vsc-border rounded pl-7 pr-2 py-1 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+                />
+              </div>
+            )}
+            {filteredOnlinePeers.length === 0 && filteredOfflinePastPeers.length === 0 ? (
               <div className="flex items-center gap-2 px-3 py-1.5 text-vsc-muted">
                 <Wifi size={13} className="opacity-40" />
-                <span className="text-xs">대기 중...</span>
+                <span className="text-xs">{peerFilterQuery.trim() ? '검색 결과가 없습니다.' : '대기 중...'}</span>
               </div>
             ) : (
-              [...onlinePeers, ...offlinePastPeers].map((peer) => {
+              [...filteredOnlinePeers, ...filteredOfflinePastPeers].map((peer) => {
                 const isSelected = currentRoom.type === 'dm' && currentRoom.peerId === peer.peerId
                 const isOnline = onlinePeerIds.has(peer.peerId)
                 return (
@@ -214,7 +366,15 @@ export default function Sidebar({ onShowPatchNotes }) {
                     }`}
                   >
                     <PeerAvatar peer={peer} isOnline={isOnline} />
-                    <span className={`truncate ${!isOnline ? 'opacity-50' : ''}`}>{peer.nickname}</span>
+                    <span className="flex-1 min-w-0 text-left">
+                      <span className={`block truncate ${!isOnline ? 'opacity-50' : ''}`}>{peer.nickname}</span>
+                      {isOnline && peer.statusMessage && (
+                        <span className="block truncate text-[10px] text-vsc-muted opacity-70">{peer.statusMessage}</span>
+                      )}
+                    </span>
+                    {keyChangedPeers[peer.peerId] && (
+                      <ShieldAlert size={13} className="shrink-0 text-red-400" title="보안키가 변경되었습니다" />
+                    )}
                     {unreadCounts[peer.peerId] > 0 && (
                       <span className="ml-auto bg-vsc-accent text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center leading-none">
                         {unreadCounts[peer.peerId]}
@@ -238,8 +398,9 @@ export default function Sidebar({ onShowPatchNotes }) {
                 value={myStatusType}
                 onChange={(e) => {
                   const newStatus = e.target.value
-                  useUserStore.getState().setMyStatus(newStatus, '')
-                  window.electronAPI.updateStatus({ statusType: newStatus, statusMessage: '' })
+                  // 상태 타입만 바꾸는 것이므로 기존에 입력해둔 상태 메시지는 유지한다
+                  useUserStore.getState().setMyStatus(newStatus, myStatusMessage)
+                  window.electronAPI.updateStatus({ statusType: newStatus, statusMessage: myStatusMessage })
                 }}
                 className="bg-vsc-bg border border-vsc-border rounded px-1 py-0.5 text-xs text-vsc-text cursor-pointer flex-1 min-w-0"
               >
@@ -249,6 +410,16 @@ export default function Sidebar({ onShowPatchNotes }) {
                 <option value="dnd">방해 금지</option>
               </select>
             </div>
+            {/* 상태 메시지 입력 — Enter 또는 blur 시점에 전파 */}
+            <input
+              type="text"
+              value={statusMessageDraft}
+              onChange={(e) => setStatusMessageDraft(e.target.value.slice(0, 100))}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              onBlur={commitStatusMessage}
+              placeholder="상태 메시지 (예: 회의 중)"
+              className="w-full bg-vsc-bg border border-vsc-border rounded px-1.5 py-0.5 text-xs text-vsc-text placeholder-vsc-muted outline-none focus:border-vsc-accent"
+            />
             <div className="space-y-0.5">
               <button
                 onClick={() => onShowPatchNotes?.()}
@@ -256,6 +427,13 @@ export default function Sidebar({ onShowPatchNotes }) {
               >
                 <FileText size={13} />
                 <span className="text-xs">패치노트</span>
+              </button>
+              <button
+                onClick={() => setShowBookmarks(true)}
+                className="cursor-pointer flex items-center gap-2 text-vsc-muted hover:text-vsc-text transition-colors w-full px-1 py-0.5 rounded hover:bg-vsc-hover"
+              >
+                <Bookmark size={13} />
+                <span className="text-xs">북마크</span>
               </button>
               <button
                 onClick={() => setShowSettings(true)}

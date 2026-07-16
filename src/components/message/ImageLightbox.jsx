@@ -2,13 +2,15 @@
 // Message.jsx 에서 분리 (Phase 3).
 
 import React, { useState, useEffect, useRef } from 'react'
-import { X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import { X, ZoomIn, ZoomOut, RotateCcw, FolderOpen } from 'lucide-react'
+import useFileDownload from '../../hooks/useFileDownload'
 
-export default function ImageLightbox({ url, onClose }) {
+export default function ImageLightbox({ url, messageId, onClose }) {
   const [zoom, setZoom] = useState(1)
   const [pos, setPos] = useState({ x: 0, y: 0 })
   const dragRef = useRef(null)
   const [contextMenu, setContextMenu] = useState(null) // { x, y }
+  const { downloadFile, savedPath, revealInFolder } = useFileDownload()
 
   // Escape 키로 닫기
   useEffect(() => {
@@ -88,6 +90,11 @@ export default function ImageLightbox({ url, onClose }) {
     if (!success) console.warn('이미지 복사 실패')
   }
 
+  function handleSaveAs() {
+    setContextMenu(null)
+    if (messageId) downloadFile(messageId)
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center overflow-hidden"
@@ -101,6 +108,17 @@ export default function ImageLightbox({ url, onClose }) {
       >
         <X size={28} />
       </button>
+
+      {/* 다운로드 저장 완료 안내 — 클릭 시 폴더에서 보기 */}
+      {savedPath && (
+        <button
+          onClick={(event) => { event.stopPropagation(); revealInFolder() }}
+          className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 bg-black/60 rounded-full px-3 py-1.5 text-xs text-white/90 hover:text-white cursor-pointer"
+        >
+          <FolderOpen size={13} />
+          저장됨 · 폴더에서 보기
+        </button>
+      )}
 
       {/* 확대/축소 컨트롤 */}
       <div
@@ -164,6 +182,12 @@ export default function ImageLightbox({ url, onClose }) {
             onClick={handleCopyImage}
           >
             이미지 복사
+          </button>
+          <button
+            className="w-full text-left px-3 py-1.5 text-sm text-vsc-text hover:bg-vsc-hover cursor-pointer"
+            onClick={handleSaveAs}
+          >
+            다른 이름으로 저장
           </button>
         </div>
       )}

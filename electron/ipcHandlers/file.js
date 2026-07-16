@@ -2,14 +2,17 @@
 // 파일 저장 및 캐시 관련 IPC 핸들러
 // 디스크 저장은 항상 마스터키로 AES-256-GCM 암호화 (보안 3단계).
 
-const { ipcMain } = require('electron')
+const { ipcMain, dialog, app, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { v4: uuidv4 } = require('uuid')
-const { getFileCache } = require('../storage/queries')
+const { getFileCache, getFileForDownload } = require('../storage/queries')
 const { getFilePort } = require('../peer/fileServer')
-const { encryptBuffer } = require('../crypto/fileEncryption')
-const { MAX_RAW_FILE_BYTES } = require('../utils/appUtils')
+const { encryptBuffer, decryptBuffer, isEncryptedFile } = require('../crypto/fileEncryption')
+const { MAX_CHUNKED_FILE_BYTES } = require('../utils/appUtils')
+const { cancelInboundTransferByMessageId } = require('../peer/fileChunkTransfer')
+const { resolveDownloadFileName } = require('../utils/downloadUtils')
+const { loadDownloadFolderPath, saveDownloadFolderPath, resolveDownloadFolderPath } = require('../utils/downloadFolder')
 
 function registerFileHandlers(ctx) {
   const tempFilePath = path.join(ctx.config.appDataPath, 'files')
@@ -23,11 +26,12 @@ function registerFileHandlers(ctx) {
       if (!ctx.state.masterKey) {
         return { ok: false, error: 'noMasterKey' }
       }
-      // 사이즈 사전 차단 — wsServer maxPayload 를 초과할 거대 파일은 보내봐야 수신측 연결만
-      // 끊김. 사용자에게 즉시 알려서 송신 시도를 막는다.
+      // 사이즈 사전 차단 — 청크 전송(#44/#45/#49)으로 단발 프레임 제약이 사라져 상한을 1GB 로
+      // 상향했다. 청크 미지원(구버전) 피어가 요청하면 fileRequest 핸들러가 레거시 한도(150MB)를
+      // 초과분에 대해 tooLarge 로 거부하므로, 업로드 자체는 청크 상한까지 허용한다.
       const byteLength = fileBuffer?.byteLength ?? fileBuffer?.length ?? 0
-      if (byteLength > MAX_RAW_FILE_BYTES) {
-        return { ok: false, error: 'tooLarge', maxBytes: MAX_RAW_FILE_BYTES, size: byteLength }
+      if (byteLength > MAX_CHUNKED_FILE_BYTES) {
+        return { ok: false, error: 'tooLarge', maxBytes: MAX_CHUNKED_FILE_BYTES, size: byteLength }
       }
       const ext = path.extname(fileName)
       const savedFileName = `${uuidv4()}${ext}`
@@ -52,6 +56,84 @@ function registerFileHandlers(ctx) {
       return `lanchat://file/${encodeURIComponent(messageId)}`
     }
     return null
+  })
+
+  // 파일 다운로드 — "다른 이름으로 저장" 다이얼로그를 띄워 사용자가 선택한 위치에
+  // 원본 파일명으로 저장한다. 복호화 경로는 lanchat:// 프로토콜 핸들러(protocol/lanchatProtocol.js)와
+  // 완전히 동일 — 캐시된 ciphertext 를 메모리에서 복호화해 평문 바이트를 얻는다.
+  // 사용자가 명시적으로 다운로드(내보내기)를 요청한 것이므로 디스크에 평문으로 저장하는 것이 의도된 동작이다.
+  ipcMain.handle('download-file', async (_, messageId) => {
+    try {
+      const fileInfo = getFileForDownload(ctx.state.database, messageId)
+      if (!fileInfo?.cachedFilePath || !fs.existsSync(fileInfo.cachedFilePath)) {
+        return { ok: false, error: 'notFound' }
+      }
+
+      const rawBytes = fs.readFileSync(fileInfo.cachedFilePath)
+      let plaintext
+      if (isEncryptedFile(rawBytes)) {
+        if (!ctx.state.masterKey) return { ok: false, error: 'noMasterKey' }
+        try {
+          plaintext = decryptBuffer(rawBytes, ctx.state.masterKey)
+        } catch (err) {
+          return { ok: false, error: 'decryptionFailed', message: err.message }
+        }
+      } else {
+        // 마이그레이션 전 평문 캐시 — 그대로 사용
+        plaintext = rawBytes
+      }
+
+      const defaultFileName = resolveDownloadFileName(fileInfo.fileName, fileInfo.cachedFilePath)
+      // 사용자가 설정에서 기본 다운로드 폴더를 지정했으면 그 폴더를, 아니면 OS 기본 다운로드 폴더를 사용(#74).
+      const downloadFolder = resolveDownloadFolderPath(ctx.config.appDataPath, app.getPath('downloads'))
+      const defaultPath = path.join(downloadFolder, defaultFileName)
+
+      const saveDialogOptions = { defaultPath }
+      const { canceled, filePath } = ctx.state.mainWindow
+        ? await dialog.showSaveDialog(ctx.state.mainWindow, saveDialogOptions)
+        : await dialog.showSaveDialog(saveDialogOptions)
+
+      if (canceled || !filePath) {
+        return { ok: false, canceled: true }
+      }
+
+      fs.writeFileSync(filePath, plaintext)
+      return { ok: true, path: filePath }
+    } catch (err) {
+      return { ok: false, error: 'writeError', message: err.message }
+    }
+  })
+
+  // 저장된 파일을 OS 파일 탐색기(파인더/탐색기)에서 보여주기 — "폴더에서 보기" 액션
+  ipcMain.handle('show-item-in-folder', (_, filePath) => {
+    if (typeof filePath === 'string' && filePath) {
+      shell.showItemInFolder(filePath)
+    }
+  })
+
+  // 진행 중인 청크 전송 취소(#44/#45/#49) — 사용자가 대용량 파일 수신을 중단할 때.
+  // 송신측에 file-cancel 을 보내 루프를 멈추고, 로컬 부분 버퍼를 폐기한다.
+  ipcMain.handle('cancel-file-transfer', (_, messageId) => {
+    cancelInboundTransferByMessageId(ctx, messageId)
+    return { ok: true }
+  })
+
+  // 기본 다운로드 폴더 설정(#74) 조회 — 사용자 지정 폴더와 OS 기본 다운로드 폴더를 함께 반환해
+  // 렌더러가 "지정 폴더 없음 = OS 기본값 사용 중"을 표시할 수 있게 한다.
+  ipcMain.handle('get-download-folder', () => ({
+    folderPath: loadDownloadFolderPath(ctx.config.appDataPath),
+    osDefaultPath: app.getPath('downloads'),
+  }))
+
+  // 기본 다운로드 폴더 설정 변경 — 폴더 선택 다이얼로그를 띄우고 선택 결과를 저장한다.
+  ipcMain.handle('set-download-folder', async () => {
+    const dialogOptions = { properties: ['openDirectory'] }
+    const { canceled, filePaths } = ctx.state.mainWindow
+      ? await dialog.showOpenDialog(ctx.state.mainWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions)
+    if (canceled || !filePaths?.[0]) return { ok: false, canceled: true }
+    saveDownloadFolderPath(ctx.config.appDataPath, filePaths[0])
+    return { ok: true, folderPath: filePaths[0] }
   })
 }
 

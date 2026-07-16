@@ -4,10 +4,10 @@ const { saveProfile, getProfile, updateStatus } = require('../../electron/storag
 
 describe('상태 메시지', () => {
   let db
-  beforeEach(() => {
+  beforeEach(async () => {
     db = initDatabase(':memory:')
     migrateDatabase(db)
-    saveProfile(db, { username: 'test', nickname: '테스트', password: 'pw123' })
+    await saveProfile(db, { username: 'test', nickname: '테스트', password: 'pw123' })
   })
   afterEach(() => closeDatabase(db))
 

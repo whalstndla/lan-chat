@@ -10,7 +10,7 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function PastePreviewDialog({ pastePreview, isSending, onConfirm, onCancel, onRemoveItem }) {
+export default function PastePreviewDialog({ pastePreview, isSending, onConfirm, onCancel, onRemoveItem, sendOriginalImages, onToggleSendOriginal }) {
   // Enter/Escape 단축키 처리
   useEffect(() => {
     if (!pastePreview) return
@@ -54,12 +54,25 @@ export default function PastePreviewDialog({ pastePreview, isSending, onConfirm,
               <X size={10} />
             </button>
             <p className="text-[10px] text-vsc-muted text-center mt-0.5 truncate w-20">
-              {formatFileSize(preview.fileSize)}
+              {!sendOriginalImages && preview.willCompress
+                ? (preview.estimatedCompressedSize != null
+                  ? `${formatFileSize(preview.fileSize)} → ${formatFileSize(preview.estimatedCompressedSize)}`
+                  : `${formatFileSize(preview.fileSize)} → 계산 중...`)
+                : formatFileSize(preview.fileSize)}
             </p>
           </div>
         ))}
       </div>
       <p className="text-xs text-vsc-muted mb-3">이미지를 더 붙여넣으면 추가됩니다</p>
+      <label className="flex items-center gap-2 mb-3 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={!!sendOriginalImages}
+          onChange={(event) => onToggleSendOriginal?.(event.target.checked)}
+          className="accent-vsc-accent cursor-pointer"
+        />
+        <span className="text-xs text-vsc-muted">원본 그대로 전송 (압축 안 함)</span>
+      </label>
       <div className="flex gap-2 justify-end">
         <button
           onClick={onCancel}

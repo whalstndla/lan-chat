@@ -8,8 +8,10 @@ const { startBroadcastDiscovery, stopBroadcastDiscovery } = require('../peer/bro
 const { buildPeerConnectHostCandidates } = require('../peer/networkUtils')
 const { connectToPeer, disconnectAll, disconnectFromPeer } = require('../peer/wsClient')
 const { closeAllServerClients } = require('../peer/wsServer')
+const { connectManualPeer } = require('../peer/manualConnect')
 const { getFilePort } = require('../peer/fileServer')
-const { loadPeerCache, deletePeerCache } = require('../storage/queries')
+const { loadPeerCache, deletePeerCache, updatePinnedKey } = require('../storage/queries')
+const { importPublicKey } = require('../crypto/keyManager')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
 const { PeerManager } = require('../peer/manager')
 const {
@@ -47,6 +49,8 @@ function registerPeerHandlers(ctx) {
       // 서버에 연결된 상대방의 클라이언트 소켓도 강제 종료 — 좀비 소켓 방지
       if (ctx.state.wsServerInfo) closeAllServerClients(ctx.state.wsServerInfo)
       ctx.state.peerPublicKeyMap.clear()
+      // 이전 세대의 키 변경 보류 상태도 초기화 — 새 발견 사이클에서 stale 경고가 남지 않게 한다(#59).
+      ctx.state.pendingKeyChangeMap.clear()
       clearAllPeerConnectRetryState(ctx)
       // 글로벌 세대 증가 — 이전 세대의 연결에서 발생하는 stale close/peer-left를 무시하기 위함
       ctx.state.discoveryEpoch++
@@ -340,6 +344,63 @@ function registerPeerHandlers(ctx) {
       if (sweepTimer.unref) sweepTimer.unref()
     } finally {
       ctx.state.isDiscoveryStarting = false
+    }
+  })
+
+  // 수동 피어 연결(#33) — mDNS/UDP 브로드캐스트 발견이 둘 다 막힌 망에서
+  // IP(+선택적 포트) 직접 입력으로 최초 핸드셰이크를 개시한다.
+  // 발견 없이 host 만 아는 상태이므로, 응답(hello/key-exchange)을 기존
+  // handleIncomingMessage 로 전달해 "역방향 연결" 로직이 실제 peerId 로
+  // 정식 세션(autoReconnect 포함)을 자연스럽게 맺도록 한다. 기존 발견/연결
+  // 경로(start-peer-discovery)는 그대로 유지되며 서로 영향을 주지 않는다.
+  ipcMain.handle('connect-manual-peer', async (_event, params) => {
+    const { host, wsPort } = params || {}
+    if (!ctx.state.wsServerInfo) {
+      return { ok: false, error: '서버가 아직 준비되지 않았습니다' }
+    }
+    // mySessionId 는 보통 start-peer-discovery 시점에 생성되지만, 수동 연결은
+    // 그 호출 순서에 의존하지 않아야 하므로 여기서도 방어적으로 보장한다.
+    // (없으면 hello 의 sessionId 가 비어 상대측 parseHello 가 거부한다)
+    if (!ctx.state.mySessionId) ctx.state.mySessionId = randomUUID()
+    const currentNickname = getCurrentNicknameSafely(ctx)
+    writePeerDebugLog('main.manualConnect.requested', { host, wsPort })
+    const result = await connectManualPeer({
+      host,
+      wsPort,
+      buildHelloPayload: () => buildMyKeyExchangePayload(ctx, ctx.state.peerId, currentNickname),
+      onReply: (message) => {
+        ctx.state.handleIncomingMessage(message, () => {})
+      },
+    })
+    writePeerDebugLog('main.manualConnect.result', { host, wsPort, result })
+    return result
+  })
+
+  // TOFU 키 변경 승인(#59) — 사용자가 "상대 보안키가 바뀌었다"는 경고를 명시적으로 신뢰.
+  // 보류(pendingKeyChangeMap)돼 있던 새 공개키를 고정 키로 교체하고 세션 맵을 새 키로 갱신한다.
+  // 이 IPC 호출(=사용자의 명시적 승인) 없이는 키가 절대 자동 교체되지 않는다.
+  ipcMain.handle('trust-peer-key', (_event, params) => {
+    const { peerId } = params || {}
+    if (!peerId) return { success: false, error: 'peerId 가 필요합니다' }
+    const newPublicKey = ctx.state.pendingKeyChangeMap.get(peerId)
+    if (!newPublicKey) {
+      // 이미 해제됐거나(정상 복귀) 보류 중인 변경이 없음 — 조용히 성공 처리.
+      return { success: false, error: '보류 중인 키 변경이 없습니다' }
+    }
+    try {
+      if (ctx.state.database) {
+        updatePinnedKey(ctx.state.database, { peerId, publicKey: newPublicKey })
+      }
+      // 세션 맵을 새 키로 교체 — 이제부터 이 피어와의 암/복호화가 새 키로 이뤄진다.
+      ctx.state.peerPublicKeyMap.set(peerId, importPublicKey(newPublicKey))
+      ctx.state.pendingKeyChangeMap.delete(peerId)
+      writePeerDebugLog('main.trustPeerKey.approved', { peerId })
+      // 신뢰 직후, 보류돼 있던 오프라인 메시지를 새 키로 재전송 시도한다.
+      flushPendingMessages(ctx, peerId)
+      return { success: true }
+    } catch (err) {
+      writePeerDebugLog('main.trustPeerKey.error', { peerId, error: err.message })
+      return { success: false, error: err.message }
     }
   })
 }

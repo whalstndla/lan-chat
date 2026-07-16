@@ -6,7 +6,7 @@ const os = require('os')
 const path = require('path')
 const Database = require('better-sqlite3-multiple-ciphers')
 const { initDatabase, migrateDatabase, closeDatabase, bufferToHexKey } = require('../../electron/storage/database')
-const { isPlaintextSqliteDb, migratePlaintextDbToEncrypted } = require('../../electron/storage/dbMigration')
+const { isPlaintextSqliteDb, migratePlaintextDbToEncrypted, verifyEncryptedDatabase, secureWipeAndDelete } = require('../../electron/storage/dbMigration')
 
 function tempDbPath() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lan-chat-db-')), 'chat.db')
@@ -89,7 +89,7 @@ describe('isPlaintextSqliteDb', () => {
 })
 
 describe('migratePlaintextDbToEncrypted', () => {
-  it('평문 DB 를 암호화 DB 로 변환 + 백업 보존 + 데이터 무결', () => {
+  it('평문 DB 를 암호화 DB 로 변환 + 무결성 검증 후 백업 안전 삭제 + 데이터 무결', () => {
     const key = crypto.randomBytes(32)
     const dbPath = tempDbPath()
     // 평문 DB 생성 + 데이터 삽입
@@ -105,7 +105,10 @@ describe('migratePlaintextDbToEncrypted', () => {
     const result = migratePlaintextDbToEncrypted(dbPath, key)
     expect(result.migrated).toBe(true)
     expect(result.backupPath).toBeTruthy()
-    expect(fs.existsSync(result.backupPath)).toBe(true)
+    // 암호화 DB 무결성 검증에 성공했으므로 평문 백업은 안전 삭제되어야 한다(#25) —
+    // 과거엔 rename 만 하고 삭제하지 않아 대화 전체의 평문 사본이 영구 잔존했다.
+    expect(result.backupDeleted).toBe(true)
+    expect(fs.existsSync(result.backupPath)).toBe(false)
     expect(isPlaintextSqliteDb(dbPath)).toBe(false)
 
     // 마이그레이션된 DB 를 암호화 DB 로 열어 데이터 검증
@@ -168,6 +171,92 @@ describe('migratePlaintextDbToEncrypted', () => {
     plain.close()
     expect(() => migratePlaintextDbToEncrypted(dbPath, null)).toThrow()
     fs.rmSync(path.dirname(dbPath), { recursive: true, force: true })
+  })
+
+  it('로그인 시점에 남아있는 평문 백업(.bak)을 정리하는 가드 — 이미 암호화된 DB + 올바른 키면 안전 삭제', () => {
+    // 과거 실행에서 안전 삭제가 중간에 실패해 .bak 이 남아있는 상황을 재현한다.
+    const key = crypto.randomBytes(32)
+    const dbPath = tempDbPath()
+    const db = initDatabase(dbPath, key)
+    migrateDatabase(db)
+    closeDatabase(db)
+
+    const backupPath = `${dbPath}.plaintext.bak`
+    fs.writeFileSync(backupPath, '레거시 평문 백업 잔존')
+    expect(fs.existsSync(backupPath)).toBe(true)
+
+    const result = migratePlaintextDbToEncrypted(dbPath, key)
+    expect(result.migrated).toBe(false)
+    // 이미 암호화된 DB 이므로 마이그레이션은 수행하지 않지만, 정상 오픈이 확인되므로
+    // 잔존 백업은 정리되어야 한다.
+    expect(fs.existsSync(backupPath)).toBe(false)
+
+    fs.rmSync(path.dirname(dbPath), { recursive: true, force: true })
+  })
+
+  it('잔존 .bak 정리 가드 — masterKey 가 없으면 안전하게 아무 것도 하지 않는다', () => {
+    const key = crypto.randomBytes(32)
+    const dbPath = tempDbPath()
+    const db = initDatabase(dbPath, key)
+    migrateDatabase(db)
+    closeDatabase(db)
+
+    const backupPath = `${dbPath}.plaintext.bak`
+    fs.writeFileSync(backupPath, '레거시 평문 백업 잔존')
+
+    const result = migratePlaintextDbToEncrypted(dbPath, null)
+    expect(result.migrated).toBe(false)
+    // masterKey 없이는 검증 자체가 불가능하므로 안전하게 백업을 그대로 둔다.
+    expect(fs.existsSync(backupPath)).toBe(true)
+
+    fs.rmSync(path.dirname(dbPath), { recursive: true, force: true })
+  })
+})
+
+describe('verifyEncryptedDatabase', () => {
+  it('올바른 masterKey 로 정상 오픈되면 true', () => {
+    const key = crypto.randomBytes(32)
+    const dbPath = tempDbPath()
+    const db = initDatabase(dbPath, key)
+    migrateDatabase(db)
+    closeDatabase(db)
+
+    expect(verifyEncryptedDatabase(dbPath, key)).toBe(true)
+    fs.rmSync(path.dirname(dbPath), { recursive: true, force: true })
+  })
+
+  it('잘못된 masterKey 로는 false (백업을 지우면 안 되는 근거)', () => {
+    const key = crypto.randomBytes(32)
+    const wrongKey = crypto.randomBytes(32)
+    const dbPath = tempDbPath()
+    const db = initDatabase(dbPath, key)
+    migrateDatabase(db)
+    closeDatabase(db)
+
+    expect(verifyEncryptedDatabase(dbPath, wrongKey)).toBe(false)
+    fs.rmSync(path.dirname(dbPath), { recursive: true, force: true })
+  })
+
+  it('존재하지 않는 파일은 false', () => {
+    const key = crypto.randomBytes(32)
+    expect(verifyEncryptedDatabase('/tmp/lan-chat-no-such-verify.db', key)).toBe(false)
+  })
+})
+
+describe('secureWipeAndDelete', () => {
+  it('파일을 0으로 덮어쓴 뒤 삭제한다', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lan-chat-wipe-'))
+    const filePath = path.join(dir, 'secret.bak')
+    fs.writeFileSync(filePath, '민감한 평문 내용')
+
+    secureWipeAndDelete(filePath)
+
+    expect(fs.existsSync(filePath)).toBe(false)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('존재하지 않는 파일이어도 에러를 던지지 않는다', () => {
+    expect(() => secureWipeAndDelete('/tmp/lan-chat-no-such-wipe.bak')).not.toThrow()
   })
 })
 

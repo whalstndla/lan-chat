@@ -118,7 +118,7 @@ npm run release
 - **mDNS 방화벽**: Windows 첫 실행 시 방화벽 허용 팝업 승인이 필요합니다 (UDP 5353).
 - **AP isolation 환경**: mDNS가 차단된 네트워크에서는 UDP 브로드캐스트(DHCP 허용 필요)로 피어를 발견합니다.
 - **파일 URL 만료**: 발신자가 앱을 종료하면 전송한 이미지/영상에 접근할 수 없습니다.
-- **개인키 백업**: `%APPDATA%/lan-chat/private_key.pem` (Windows) 또는 `~/Library/Application Support/lan-chat/private_key.pem` (macOS)을 백업해두면 PC 포맷 후에도 DM 기록을 복호화할 수 있습니다.
+- **개인키는 파일 하나만으로 백업/복원 불가**: 개인키는 `private_key.enc`로 저장되며 비밀번호 기반 마스터키(`master.key`)로 다시 암호화(wrap)돼 있습니다. `private_key.enc` 파일만 따로 백업해도 마스터키·비밀번호 없이는 복호화할 수 없습니다. PC 포맷 후에도 DM 기록을 이어보려면 앱 데이터 폴더 전체(`master.key`, `private_key.enc`, `chat.db` 등 — Windows: `%APPDATA%/lan-chat`, macOS: `~/Library/Application Support/lan-chat`)를 백업하고, 로그인 비밀번호를 동일하게 사용해야 합니다.
 
 ## 아키텍처
 

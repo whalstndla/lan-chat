@@ -33,6 +33,12 @@ function initDatabase(dbPath, masterKey) {
 
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  // WAL 모드에서는 synchronous=FULL 이 과도하다 — NORMAL 로도 WAL 저널이 커밋을
+  // 보장하며, 매 쓰기마다의 fsync 비용을 줄여준다(#27).
+  db.pragma('synchronous = NORMAL')
+  // 다른 프로세스/커넥션이 잠깐 잠그고 있을 때 즉시 SQLITE_BUSY 로 실패하는 대신
+  // 최대 5초까지 재시도 대기.
+  db.pragma('busy_timeout = 5000')
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -47,7 +53,10 @@ function initDatabase(dbPath, masterKey) {
       file_url          TEXT,
       file_name         TEXT,
       timestamp         INTEGER NOT NULL,
-      format            TEXT
+      format            TEXT,
+      reply_to_id       TEXT,
+      reply_preview     TEXT,
+      mentions          TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
     CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type, from_id, to_id);
@@ -77,6 +86,12 @@ function migrateDatabase(db) {
     'ALTER TABLE profile ADD COLUMN notification_custom_sound TEXT',
     "ALTER TABLE profile ADD COLUMN status_type TEXT DEFAULT 'online'",
     "ALTER TABLE profile ADD COLUMN status_message TEXT DEFAULT ''",
+    // 알림 범위: 'all'(전체) | 'dm'(DM만) | 'off'(끄기)
+    "ALTER TABLE profile ADD COLUMN notification_scope TEXT DEFAULT 'all'",
+    // OS 알림 본문 숨김 — on 이면 실제 메시지 내용 대신 "새 메시지"만 표시
+    'ALTER TABLE profile ADD COLUMN notification_hide_body INTEGER DEFAULT 0',
+    // 링크 미리보기(외부 서버 OG 요청) 사용 여부 — 기본 on(1). off 면 완전 단절.
+    'ALTER TABLE profile ADD COLUMN link_preview_enabled INTEGER DEFAULT 1',
   ]
   for (const sql of profileMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
@@ -88,6 +103,13 @@ function migrateDatabase(db) {
     'ALTER TABLE messages ADD COLUMN format TEXT',
     'ALTER TABLE messages ADD COLUMN edited_at INTEGER',
     'ALTER TABLE messages ADD COLUMN cached_file_path TEXT',
+    // 답장/인용(#28) — 원본 messageId + 비정규화 미리보기 스냅샷(JSON 문자열).
+    // additive 하위호환: 구버전 클라이언트는 이 컬럼/필드를 무시한다.
+    'ALTER TABLE messages ADD COLUMN reply_to_id TEXT',
+    'ALTER TABLE messages ADD COLUMN reply_preview TEXT',
+    // @멘션(#29) — 멘션된 peerId 배열(JSON 문자열). additive 하위호환: 구버전 클라이언트는
+    // 이 컬럼/필드를 무시하고, 이 값이 없는 메시지는 멘션 없음으로 취급한다.
+    'ALTER TABLE messages ADD COLUMN mentions TEXT',
   ]
   for (const sql of messagesMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
@@ -127,26 +149,128 @@ function migrateDatabase(db) {
     );
   `)
 
+  // TOFU(Trust On First Use) 키 고정(#59) — peerId 별 최초 공개키를 고정 저장한다.
+  // hello 수신 시 이 테이블과 대조해, 알려진 peerId 의 키가 바뀌면 조용히 덮어쓰지 않고
+  // 사용자 재확인(경고)을 거치게 한다. CREATE TABLE IF NOT EXISTS 라 기존 DB 에도 additive
+  // 하게 추가되며 별도 데이터 마이그레이션이 필요 없다.
+  //   first_seen : 최초 고정 시각(ms) — 지문/신뢰 이력 표시용.
+  //   verified   : 대면 지문(안전 번호) 비교로 사용자가 명시적으로 검증했는지(0/1).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS peer_keys (
+      peer_id    TEXT PRIMARY KEY,
+      public_key TEXT NOT NULL,
+      first_seen INTEGER NOT NULL,
+      verified   INTEGER NOT NULL DEFAULT 0
+    );
+  `)
+
+  // 방별 마지막 읽은 지점(타임스탬프) — 안읽음 구분선을 재시작 후에도 유지하기 위한 영속
+  // 저장소(#39). room_key 는 전체채팅이면 'global', DM 이면 상대 peerId — 렌더러의
+  // getRoomKey() 규약과 동일하게 맞춰 별도 매핑 없이 그대로 키로 사용한다.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS room_read_state (
+      room_key            TEXT PRIMARY KEY,
+      last_read_timestamp INTEGER
+    );
+  `)
+
   // FTS5 전문 검색 (글로벌 메시지만 — DM은 암호화되어 인덱싱 불가)
   try {
+    // 백필 여부 판단은 반드시 "이번 호출 전에 messages_fts 테이블이 이미 존재했는가"로
+    // 해야 한다. content='messages' 외부 콘텐츠 테이블은 MATCH 없는 일반 SELECT/count(*)
+    // 가 인덱스를 거치지 않고 원본 messages 테이블을 그대로 스캔하므로, count(*) 결과가
+    // 항상 messages 테이블의 행 수와 같아진다 — 즉 "FTS 인덱스에 실제로 백필됐는지"를
+    // 전혀 반영하지 못하는 값이라 가드로 쓸 수 없다.
+    const existingFtsRow = db.prepare(
+      `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'`
+    ).get()
+
+    // 구버전 스키마(#36 이전 — file_name 컬럼 없음) 감지 시 DROP 후 재생성한다.
+    // FTS5 external-content 테이블은 컬럼 추가를 위한 ALTER TABLE 을 지원하지 않으므로,
+    // 기존 사용자 DB 에 이미 2컬럼(content, from_name) 짜리 messages_fts 가 있다면
+    // DROP + CREATE + 전체 재백필이 유일한 안전한 마이그레이션 경로다.
+    // DROP TABLE 은 messages_fts 의 shadow 테이블(_data/_idx/_docsize/_config)도 함께 정리한다.
+    const isLegacyFtsSchema = !!existingFtsRow && !existingFtsRow.sql.includes('file_name')
+    if (isLegacyFtsSchema) {
+      db.exec('DROP TABLE messages_fts')
+    }
+
+    const ftsTableExistedBefore = !isLegacyFtsSchema && !!existingFtsRow
+
     db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-        id UNINDEXED, content, from_name,
+        id UNINDEXED, content, from_name, file_name,
         content='messages', content_rowid='rowid'
       );
     `)
-    // content='messages' 모드에서는 FTS rowid가 messages 테이블 rowid와 반드시 일치해야 함.
-    // rowid를 명시하지 않으면 FTS rowid가 자동 할당되어 실제 messages rowid와 어긋나고,
-    // 엉뚱한 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생함.
-    // 따라서 rowid를 SELECT rowid FROM messages 로 명시적으로 지정함.
+
+    // 기존 messages 데이터를 FTS 인덱스로 백필 — 테이블을 이번 호출에서 새로 만든
+    // 경우(=최초 1회, 신규 프로필이거나 FTS5 도입 이전/구버전 스키마 DB 의 첫 로그인)에만
+    // 수행한다. migrateDatabase() 는 로그인/등록마다 호출되는데, 가드 없이 매번 INSERT 하면
+    // 동일 rowid 가 반복 삽입 시도되어 검색 중복·인덱스 증가로 이어진다(#7).
+    // 이후 신규/수정/삭제 메시지는 트리거가 전담하므로 두 번째 로그인부터는 건너뛴다.
+    // 파일 메시지(content가 null인 이미지/비디오/파일)도 file_name 으로 검색 가능해야
+    // 하므로(#36) content IS NOT NULL 조건뿐 아니라 file_name IS NOT NULL 도 포함한다.
+    if (!ftsTableExistedBefore) {
+      // content='messages' 모드에서는 FTS rowid가 messages 테이블 rowid와 반드시 일치해야 함.
+      // rowid를 명시하지 않으면 FTS rowid가 자동 할당되어 실제 messages rowid와 어긋나고,
+      // 엉뚱한 메시지(dm 등)가 검색 결과에 섞이는 버그가 발생함.
+      // 따라서 rowid를 SELECT rowid FROM messages 로 명시적으로 지정함.
+      db.exec(`
+        INSERT INTO messages_fts(rowid, id, content, from_name, file_name)
+        SELECT rowid, id, content, from_name, file_name FROM messages
+        WHERE type = 'message' AND (content IS NOT NULL OR file_name IS NOT NULL);
+      `)
+    }
+
+    // messages 테이블 변경을 messages_fts 에 자동 동기화하는 트리거.
+    // 과거엔 saveMessage() 가 INSERT 시에만 수동으로 FTS 를 동기화해 edit/delete/
+    // clearAllMessages/clearAllDMs 이후 FTS 인덱스가 실제 messages 테이블과 어긋나
+    // (삭제된 메시지의 토큰이 남거나, 수정 전 텍스트로 검색되는) 문제가 있었다.
+    // 표준 external-content FTS5 트리거로 일원화해 INSERT/UPDATE/DELETE 모두
+    // 자동으로 반영되도록 한다 (전역 메시지만 대상 — DM 은 암호화되어 제외).
+    //
+    // 트리거는 "CREATE TRIGGER IF NOT EXISTS" 대신 매번 DROP 후 재생성한다 — file_name
+    // 컬럼 추가처럼 트리거 본문 자체가 바뀌는 마이그레이션에서 IF NOT EXISTS 를 쓰면
+    // 기존 사용자 DB 에 이미 등록된 구버전 트리거 정의가 영구히 남아, 로그인해도 새
+    // 컬럼(file_name)이 절대 채워지지 않는 문제가 생긴다(#36).
     db.exec(`
-      INSERT INTO messages_fts(rowid, id, content, from_name)
-      SELECT rowid, id, content, from_name FROM messages WHERE type = 'message' AND content IS NOT NULL;
+      DROP TRIGGER IF EXISTS messages_fts_after_insert;
+      DROP TRIGGER IF EXISTS messages_fts_after_delete;
+      DROP TRIGGER IF EXISTS messages_fts_after_update;
+
+      CREATE TRIGGER messages_fts_after_insert AFTER INSERT ON messages
+      WHEN new.type = 'message' AND (new.content IS NOT NULL OR new.file_name IS NOT NULL)
+      BEGIN
+        INSERT INTO messages_fts(rowid, id, content, from_name, file_name)
+        VALUES (new.rowid, new.id, new.content, new.from_name, new.file_name);
+      END;
+
+      CREATE TRIGGER messages_fts_after_delete AFTER DELETE ON messages
+      WHEN old.type = 'message' AND (old.content IS NOT NULL OR old.file_name IS NOT NULL)
+      BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name, file_name)
+        VALUES ('delete', old.rowid, old.id, old.content, old.from_name, old.file_name);
+      END;
+
+      CREATE TRIGGER messages_fts_after_update AFTER UPDATE OF content, from_name, file_name ON messages
+      BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, id, content, from_name, file_name)
+          SELECT 'delete', old.rowid, old.id, old.content, old.from_name, old.file_name
+          WHERE old.type = 'message' AND (old.content IS NOT NULL OR old.file_name IS NOT NULL);
+        INSERT INTO messages_fts(rowid, id, content, from_name, file_name)
+          SELECT new.rowid, new.id, new.content, new.from_name, new.file_name
+          WHERE new.type = 'message' AND (new.content IS NOT NULL OR new.file_name IS NOT NULL);
+      END;
     `)
   } catch { /* FTS5 미지원 환경 무시 */ }
 }
 
 function closeDatabase(db) {
+  // WAL 파일에 쌓인 내용을 메인 DB 파일로 합쳐 WAL 이 무한정 커지는 것을 방지(#27).
+  // :memory: 이거나 WAL 모드가 아니면 실패할 수 있으므로 안전하게 무시하고 close 는
+  // 계속 진행한다.
+  try { db.pragma('wal_checkpoint(TRUNCATE)') } catch { /* 무시 */ }
   db.close()
 }
 

@@ -16,6 +16,11 @@
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
+const { promisify } = require('util')
+
+// crypto.pbkdf2 는 콜백 기반 비동기 API — 로그인/등록 시 메인 이벤트 루프(wsServer/fileServer 포함)가
+// pbkdf2Sync 로 인해 수백 ms 정지하는 것을 막기 위해 promisify 해서 사용한다.
+const pbkdf2Async = promisify(crypto.pbkdf2)
 
 const MASTER_KEY_FILENAME = 'master.key'
 const LEGACY_KEY_FILENAME = 'master.key.enc' // v0.9.0 ~ 0.9.1 키체인 wrap 본
@@ -29,9 +34,10 @@ const KDF_ITERATIONS = 310000
 
 const HEADER_BYTES = MAGIC.length + 1 + SALT_BYTES + IV_BYTES + TAG_BYTES // 49
 
-function deriveKek(password, salt) {
+async function deriveKek(password, salt) {
   if (!password) throw new Error('비밀번호가 비어 있다')
-  return crypto.pbkdf2Sync(password, salt, KDF_ITERATIONS, 32, 'sha256')
+  // KDF 파라미터(iterations/salt/keylen/digest)는 기존 wrap 된 마스터키와 호환을 위해 변경 금지.
+  return pbkdf2Async(password, salt, KDF_ITERATIONS, 32, 'sha256')
 }
 
 function masterKeyPath(appDataPath) {
@@ -56,13 +62,13 @@ function createMasterKey() {
 }
 
 // 마스터키를 비밀번호 KEK 로 wrap 하여 디스크에 저장.
-function saveWrappedMasterKey(appDataPath, masterKey, password) {
+async function saveWrappedMasterKey(appDataPath, masterKey, password) {
   if (!Buffer.isBuffer(masterKey) || masterKey.length !== MASTER_KEY_BYTES) {
     throw new Error('마스터키는 32바이트 Buffer 여야 한다')
   }
   const salt = crypto.randomBytes(SALT_BYTES)
   const iv = crypto.randomBytes(IV_BYTES)
-  const kek = deriveKek(password, salt)
+  const kek = await deriveKek(password, salt)
   const cipher = crypto.createCipheriv('aes-256-gcm', kek, iv)
   const wrapped = Buffer.concat([cipher.update(masterKey), cipher.final()])
   const tag = cipher.getAuthTag()
@@ -83,7 +89,7 @@ function saveWrappedMasterKey(appDataPath, masterKey, password) {
 }
 
 // 비밀번호로 마스터키 unwrap. 파일 부재 / 손상 / 비밀번호 오류 시 null 반환 (throw 안 함 — 호출부가 분기).
-function loadWrappedMasterKey(appDataPath, password) {
+async function loadWrappedMasterKey(appDataPath, password) {
   const filePath = masterKeyPath(appDataPath)
   if (!fs.existsSync(filePath)) return null
   let envelope
@@ -100,7 +106,7 @@ function loadWrappedMasterKey(appDataPath, password) {
   const wrapped = envelope.slice(offset)
 
   try {
-    const kek = deriveKek(password, salt)
+    const kek = await deriveKek(password, salt)
     const decipher = crypto.createDecipheriv('aes-256-gcm', kek, iv)
     decipher.setAuthTag(tag)
     const masterKey = Buffer.concat([decipher.update(wrapped), decipher.final()])
@@ -112,16 +118,16 @@ function loadWrappedMasterKey(appDataPath, password) {
 }
 
 // 비밀번호 변경 — 같은 마스터키를 새 비밀번호로 다시 wrap.
-function rewrapMasterKey(appDataPath, currentPassword, newPassword) {
-  const masterKey = loadWrappedMasterKey(appDataPath, currentPassword)
+async function rewrapMasterKey(appDataPath, currentPassword, newPassword) {
+  const masterKey = await loadWrappedMasterKey(appDataPath, currentPassword)
   if (!masterKey) return false
-  saveWrappedMasterKey(appDataPath, masterKey, newPassword)
+  await saveWrappedMasterKey(appDataPath, masterKey, newPassword)
   return true
 }
 
 // v0.9.x 키체인 wrap 파일 (master.key.enc) 을 비밀번호 wrap 으로 마이그레이션.
 // safeStorage 가 있을 때만 호출. 성공 시 구 파일 삭제.
-function migrateLegacyMasterKey(appDataPath, safeStorage, password) {
+async function migrateLegacyMasterKey(appDataPath, safeStorage, password) {
   const legacyPath = legacyKeyPath(appDataPath)
   if (!fs.existsSync(legacyPath)) return false
   if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
@@ -133,7 +139,7 @@ function migrateLegacyMasterKey(appDataPath, safeStorage, password) {
   if (masterKey.length !== MASTER_KEY_BYTES) {
     throw new Error('legacy 마스터키 길이가 잘못됨')
   }
-  saveWrappedMasterKey(appDataPath, masterKey, password)
+  await saveWrappedMasterKey(appDataPath, masterKey, password)
   try { fs.unlinkSync(legacyPath) } catch {}
   return true
 }

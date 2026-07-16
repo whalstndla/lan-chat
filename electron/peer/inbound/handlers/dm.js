@@ -11,6 +11,7 @@ const {
   playNotificationSound,
   cacheReceivedFile,
 } = require('../../../utils/appUtils')
+const { resolveNotificationDecision } = require('../../../utils/notificationPolicy')
 
 function saveCiphertextOnly(ctx, message) {
   try {
@@ -54,20 +55,40 @@ module.exports = function handleDm({ message, ctx }) {
         file_url: decryptedPayload.fileUrl || null,
         file_name: decryptedPayload.fileName || null,
         timestamp: message.timestamp,
+        // 답장(#28) — DM 은 reply 메타가 암호화 페이로드 안에 있으므로 복호화된 값을
+        // file_url/file_name 처럼 평문 컬럼으로 저장한다.
+        reply_to_id: decryptedPayload.replyToId || null,
+        reply_preview: decryptedPayload.replyPreview ? JSON.stringify(decryptedPayload.replyPreview) : null,
+        // @멘션(#29) — DM 은 mentions 도 암호화 페이로드 안에 있으므로 복호화된 값을
+        // 평문 컬럼으로 저장한다.
+        mentions: Array.isArray(decryptedPayload.mentions) && decryptedPayload.mentions.length > 0
+          ? JSON.stringify(decryptedPayload.mentions) : null,
       })
     } catch (err) {
       console.error(`[DM 수신] DB 저장 실패: ${message.id}`, err.message)
     }
 
+    // @멘션(#29) — 이 DM 에 내 peerId 가 언급됐는지. 알림 정책의 뮤트 override 판단에 사용한다.
+    const isMentioned = Array.isArray(decryptedPayload.mentions) && decryptedPayload.mentions.includes(ctx.state.peerId)
+
     if (ctx.state.mainWindow && !ctx.state.mainWindow.isFocused()) {
+      // 안읽음 배지는 뮤트/알림 범위/방해금지 여부와 무관하게 항상 증가한다(#4).
       incrementBadge(ctx)
-      showNotification(
-        ctx,
-        `${message.from || '알 수 없음'} (DM)`,
-        decryptedPayload.content || '파일을 보냈습니다.',
-        { type: 'dm', peerId: message.fromId, nickname: message.from || '알 수 없음' }
-      )
-      playNotificationSound(ctx)
+      const { notify, body } = resolveNotificationDecision(ctx, {
+        roomType: 'dm',
+        roomKey: message.fromId,
+        fallbackBody: decryptedPayload.content || '파일을 보냈습니다.',
+        isMentioned,
+      })
+      if (notify) {
+        showNotification(
+          ctx,
+          `${message.from || '알 수 없음'} (DM)`,
+          body,
+          { type: 'dm', peerId: message.fromId, nickname: message.from || '알 수 없음' }
+        )
+        playNotificationSound(ctx)
+      }
     }
 
     sendToRenderer(ctx, 'message-received', {
@@ -76,6 +97,11 @@ module.exports = function handleDm({ message, ctx }) {
       contentType: decryptedPayload.contentType,
       fileUrl: decryptedPayload.fileUrl,
       fileName: decryptedPayload.fileName,
+      // 답장 메타(#28)도 복호화된 평문 객체로 렌더러에 전달해 인용을 즉시 렌더한다.
+      replyToId: decryptedPayload.replyToId || null,
+      replyPreview: decryptedPayload.replyPreview || null,
+      // @멘션(#29)도 복호화된 평문 배열로 렌더러에 전달해 하이라이트/멘션 배경을 즉시 렌더한다.
+      mentions: decryptedPayload.mentions || null,
     })
 
     if (decryptedPayload.fileUrl) {

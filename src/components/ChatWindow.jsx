@@ -1,11 +1,13 @@
 // src/components/ChatWindow.jsx
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, BellOff, ChevronDown, Search } from 'lucide-react'
-import useChatStore from '../store/useChatStore'
+import useChatStore, { getRoomKey } from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import Message from './Message'
 import MessageInput from './MessageInput'
 import ChatSearchBar from './chat/ChatSearchBar'
+import { getUnreadMessages } from '../utils/unreadDivider'
+import { buildMessageRenderItems } from '../utils/buildMessageRenderItems'
 
 export default function ChatWindow() {
   const currentRoom = useChatStore(state => state.currentRoom)
@@ -24,11 +26,14 @@ export default function ChatWindow() {
   // 커져도 "중간에 멈춤" 현상 방지 (여러 번 재스크롤 + ResizeObserver)
   const pendingInitialScrollRef = useRef(false)
   const resizeObserverRef = useRef(null)
-  // 읽지 않은 메시지 구분선 기준 타임스탬프 (로컬 ref — 스토어 구독 없음)
-  const lastReadTimestampsRef = useRef({})
+  // 검색 결과 점프(#36)로 히스토리를 일괄 로드하는 동안, 자동 스크롤 스냅/무한스크롤
+  // 트리거가 우리가 계산한 목표 스크롤 위치와 경쟁하지 않도록 억제하는 플래그
+  const pendingJumpScrollRef = useRef(false)
 
   const [newMessageToast, setNewMessageToast] = useState(null)
   const [isDragOver, setIsDragOver] = useState(false)
+  // 스크롤이 맨 아래에서 벗어나 있는지(#39 안읽음 점프 버튼 표시 조건) — handleScroll 에서 갱신.
+  const [isAwayFromBottom, setIsAwayFromBottom] = useState(false)
   // 검색 상태 (로컬 — 스토어 구독 없음)
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -41,22 +46,45 @@ export default function ChatWindow() {
 
   const mutedRooms = useChatStore(state => state.mutedRooms)
   const toggleRoomMute = useChatStore(state => state.toggleRoomMute)
+  // 북마크(#34) 목록에서 메시지를 열었을 때 스크롤해야 할 대상 — BookmarksPanel 이 설정한다.
+  const pendingScrollMessageId = useChatStore(state => state.pendingScrollMessageId)
+  // 방별 마지막 읽은 지점(#39) — DB 에 영속되어 재시작 후에도 유지된다.
+  const lastReadTimestamps = useChatStore(state => state.lastReadTimestamps)
 
   const currentMessages = currentRoom.type === 'global'
     ? globalMessages
     : (dmMessages[currentRoom.peerId] || [])
 
-  const roomKey = currentRoom.type === 'global' ? 'global' : currentRoom.peerId
+  const roomKey = getRoomKey(currentRoom)
   const isMuted = !!mutedRooms[roomKey]
-  const lastReadTimestamp = lastReadTimestampsRef.current[roomKey]
+  const lastReadTimestamp = lastReadTimestamps[roomKey]
+  // 안읽음 점프 버튼(#39)용 — 구분선 렌더링과 동일한 순수 함수로 계산해 기준이 어긋나지 않게 한다.
+  const unreadMessages = getUnreadMessages(currentMessages, lastReadTimestamp, myPeerId)
+  const firstUnreadMessageId = unreadMessages[0]?.id || null
+
+  // 수정 시작 핸들러 — 매 렌더마다 새 함수가 생기면 Message 의 React.memo 가 무력화되므로
+  // ref 기반으로 안정화한다(messageInputRef 는 렌더 간 동일 참조라 의존성이 없다).
+  const handleStartEdit = useCallback((msg) => messageInputRef.current?.startEdit(msg), [])
+  // 답장 시작 핸들러(#28) — handleStartEdit 와 동일한 ref 패턴으로 MessageInput 에 답장 대상 전달.
+  const handleStartReply = useCallback((msg) => messageInputRef.current?.startReply(msg), [])
+
+  // 렌더 아이템 목록(날짜/안읽음 구분선 + 연속 이미지 그룹 구조)을 구조가 바뀔 때만 재계산한다.
+  // 자주 바뀌는 isHighlighted/searchQuery 는 여기 넣지 않고 렌더 시 각 Message 에 props 로 전달한다.
+  const renderItems = useMemo(
+    () => buildMessageRenderItems(currentMessages, lastReadTimestamp, myPeerId),
+    [currentMessages, lastReadTimestamp, myPeerId]
+  )
 
   const chatTitle = currentRoom.type === 'global'
     ? '전체 채팅'
     : `${currentRoom.nickname} (DM)`
 
+  // typingUsers 는 발신자 peerId 를 키로 저장되며 to 필드로 대상(전체채팅=null, DM=수신자 peerId)을 구분.
+  // DM 방에서는 상대가 "나에게" 보낸 typing(to === myPeerId) 인 경우에만 표시해야 한다.
+  // 그렇지 않으면 상대가 전체채팅에 입력 중인데도 DM 방에 "입력 중"이 잘못 표시된다.
   const typingUserList = currentRoom.type === 'global'
     ? Object.values(typingUsers).filter(u => u.to === null)
-    : (typingUsers[currentRoom.peerId] ? [typingUsers[currentRoom.peerId]] : [])
+    : (typingUsers[currentRoom.peerId]?.to === myPeerId ? [typingUsers[currentRoom.peerId]] : [])
 
   function handleScroll() {
     const container = messagesContainerRef.current
@@ -65,9 +93,11 @@ export default function ChatWindow() {
     const nearBottom = scrollHeight - scrollTop - clientHeight <= 50
     isNearBottomRef.current = nearBottom
     if (nearBottom) setNewMessageToast(null)
+    // 안읽음 점프 버튼(#39) 표시 조건 — 맨 아래에 있으면 안읽음 메시지도 이미 화면에 보이므로 숨긴다.
+    setIsAwayFromBottom(!nearBottom)
 
-    // 무한 스크롤 — 상단 도달 시 이전 메시지 로드
-    if (scrollTop < 50 && !loadingMore && hasMore) {
+    // 무한 스크롤 — 상단 도달 시 이전 메시지 로드 (검색 결과 점프 로딩 중에는 건너뜀, #36)
+    if (scrollTop < 50 && !loadingMore && hasMore && !pendingJumpScrollRef.current) {
       loadOlderMessages()
     }
   }
@@ -94,6 +124,9 @@ export default function ChatWindow() {
         } else {
           prependDMMessages(currentRoom.peerId, older)
         }
+        // 새로 로드된 이전 메시지들의 리액션도 하이드레이션
+        const reactionRows = await window.electronAPI.getReactions(older.map(m => m.id))
+        useChatStore.getState().setReactions(reactionRows)
         // 스크롤 위치 복원
         requestAnimationFrame(() => {
           if (container) {
@@ -171,8 +204,10 @@ export default function ChatWindow() {
     }
   }
 
-  // 검색 결과 클릭 → 해당 메시지로 스크롤 + 하이라이트
-  function scrollToMessage(messageId) {
+  // 검색 결과 클릭 / 답장 인용 클릭(#28) → 해당 메시지로 스크롤 + 하이라이트.
+  // 답장 인용에서 재사용하려고 useCallback 으로 참조를 안정화한다(Message 의 React.memo 유지).
+  // 원본이 화면(DOM)에 없으면 조용히 무시 — 과한 히스토리 로드를 하지 않는다(#28 설계 결정).
+  const scrollToMessage = useCallback((messageId) => {
     setHighlightedMessageId(messageId)
     // DOM에서 해당 메시지 요소 찾아 스크롤
     requestAnimationFrame(() => {
@@ -183,6 +218,51 @@ export default function ChatWindow() {
     })
     // 3초 후 하이라이트 제거
     setTimeout(() => setHighlightedMessageId(null), 3000)
+  }, [])
+
+  // 검색 결과 클릭 처리(#36) — 이미 화면(DOM)에 로드되어 있으면 바로 스크롤하고,
+  // 스크롤로 로드하지 않아 아직 없는 과거 결과라면 해당 타임스탬프까지 히스토리를
+  // 한 번에 불러온 뒤(전체 교체) 점프한다.
+  async function handleResultClick(result) {
+    const messageId = result.id
+    const existingElement = messagesContainerRef.current?.querySelector(`[data-message-id="${messageId}"]`)
+    if (existingElement) {
+      scrollToMessage(messageId)
+      return
+    }
+
+    pendingJumpScrollRef.current = true
+    setLoadingMore(true)
+    try {
+      let history = []
+      if (currentRoom.type === 'global') {
+        const rank = await window.electronAPI.getGlobalMessageRank(result.timestamp)
+        history = await window.electronAPI.getGlobalHistory({ limit: rank + 1, offset: 0 })
+        prevMessageCountRef.current = history.length
+        useChatStore.getState().setGlobalHistory(history)
+        setHasMore(history.length === rank + 1)
+      } else {
+        const rank = await window.electronAPI.getDMMessageRank(currentRoom.peerId, result.timestamp)
+        history = await window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId, rank + 1, 0)
+        prevMessageCountRef.current = history.length
+        useChatStore.getState().setDMHistory(currentRoom.peerId, history)
+        setHasMore(history.length === rank + 1)
+      }
+      if (history.length > 0) {
+        const reactionRows = await window.electronAPI.getReactions(history.map(m => m.id))
+        useChatStore.getState().setReactions(reactionRows)
+      }
+    } catch { /* 로드 실패 시 무시 */ }
+    setLoadingMore(false)
+
+    // React 커밋 + 브라우저 페인트 이후에 스크롤해야 대상 메시지 DOM 이 실제로 존재한다.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollToMessage(messageId)
+        // 점프 스크롤 애니메이션이 끝날 때까지 자동 스크롤 로직을 잠시 더 억제
+        setTimeout(() => { pendingJumpScrollRef.current = false }, 500)
+      })
+    })
   }
 
   async function handleSearch(query) {
@@ -192,37 +272,53 @@ export default function ChatWindow() {
       return
     }
     setIsSearching(true)
-    if (currentRoom.type === 'dm') {
-      // DM은 암호화되어 DB 검색 불가 → 이미 복호화된 메시지에서 클라이언트 사이드 검색
-      const currentDmMessages = dmMessages[currentRoom.peerId] || []
-      const lowerQuery = query.toLowerCase()
-      const filtered = currentDmMessages.filter(msg => {
-        const content = msg.content || ''
-        return content.toLowerCase().includes(lowerQuery)
-      })
-      setSearchResults(filtered)
-    } else {
-      const results = await window.electronAPI.searchMessages({ query, type: 'message' })
-      setSearchResults(results)
+    try {
+      if (currentRoom.type === 'dm') {
+        // DM 은 암호화 저장이라 FTS 인덱싱이 불가능 → main 프로세스가 상대와 나눈 전체 기간의
+        // DM 을 복호화하며 검색한다(#35). 과거엔 이미 화면에 로드된 메시지만 클라이언트에서
+        // 필터링해 스크롤로 불러오지 않은 과거 DM 은 검색되지 않는 비대칭이 있었다.
+        const results = await window.electronAPI.searchDMMessages({ peerId: currentRoom.peerId, query })
+        setSearchResults(results)
+      } else {
+        const results = await window.electronAPI.searchMessages({ query, type: 'message' })
+        setSearchResults(results)
+      }
+    } catch {
+      setSearchResults([])
     }
     setIsSearching(false)
   }
 
-  // DM 채팅방 진입 시 기록 불러오기 + 안읽은 메시지 초기화 + 읽음 확인 전송
+  // 방 진입 시 처리 — 전체채팅·DM 공용(#39). 이 방을 DB 에 영속된 lastRead 기록이 아직
+  // 없는 상태로 처음 진입하는 경우에만 현재 마지막 메시지 타임스탬프를 lastRead 로 캡처해
+  // 구분선 위치를 정한다(이미 DB 값이 있으면 그 값을 그대로 사용 — 재시작 후 위치 유지).
+  // DM 은 추가로 히스토리 재조회 + 읽음 확인 전송을 수행한다(기존 DM 전용 로직 유지).
   useEffect(() => {
-    if (currentRoom.type === 'dm' && myPeerId) {
-      const roomKey = currentRoom.peerId
+    if (!myPeerId) return
+    const key = getRoomKey(currentRoom)
 
-      // 처음 진입하는 방인 경우에만 현재 마지막 메시지 타임스탬프를 lastRead로 기록
-      if (lastReadTimestampsRef.current[roomKey] === undefined) {
-        const currentDmMessages = useChatStore.getState().dmMessages[roomKey] || []
-        const lastMessage = currentDmMessages[currentDmMessages.length - 1]
-        lastReadTimestampsRef.current[roomKey] = lastMessage ? lastMessage.timestamp : null
-      }
+    if (useChatStore.getState().lastReadTimestamps[key] === undefined) {
+      const messagesInRoom = currentRoom.type === 'global'
+        ? useChatStore.getState().globalMessages
+        : (useChatStore.getState().dmMessages[currentRoom.peerId] || [])
+      const lastMessage = messagesInRoom[messagesInRoom.length - 1]
+      const timestamp = lastMessage ? lastMessage.timestamp : null
+      useChatStore.getState().setLastReadTimestamp(key, timestamp)
+      window.electronAPI.setRoomReadTimestamp(key, timestamp).catch(() => {})
+    }
 
-      useChatStore.getState().resetUnread(currentRoom.peerId)
+    useChatStore.getState().resetUnread(key)
+
+    if (currentRoom.type === 'dm') {
       window.electronAPI.getDMHistory(myPeerId, currentRoom.peerId)
-        .then(history => useChatStore.getState().setDMHistory(currentRoom.peerId, history))
+        .then(async (history) => {
+          useChatStore.getState().setDMHistory(currentRoom.peerId, history)
+          // 리액션 하이드레이션 — 화면에 로드된 메시지 ID들의 리액션을 배치 조회해 병합
+          if (history.length > 0) {
+            const reactionRows = await window.electronAPI.getReactions(history.map(m => m.id))
+            useChatStore.getState().setReactions(reactionRows)
+          }
+        })
       window.electronAPI.getUnreadDMIds(currentRoom.peerId)
         .then(unreadIds => {
           if (unreadIds.length > 0) {
@@ -232,20 +328,27 @@ export default function ChatWindow() {
     }
   }, [currentRoom, myPeerId])
 
-  // DM 채팅방 이탈 시 lastRead 업데이트
+  // 방 이탈 시 lastRead 갱신 + 영속화(#39) — 과거엔 DM 전용 in-memory ref 였으나, 전체채팅도
+  // 동일하게 적용하고 DB(room_read_state)에 저장해 재시작 후에도 구분선 위치가 유지되게 한다.
   useEffect(() => {
     return () => {
-      if (currentRoom.type === 'dm') {
-        const roomKey = currentRoom.peerId
-        const currentDmMessages = useChatStore.getState().dmMessages[roomKey] || []
-        const lastMessage = currentDmMessages[currentDmMessages.length - 1]
-        lastReadTimestampsRef.current[roomKey] = lastMessage ? lastMessage.timestamp : null
-      }
+      const key = getRoomKey(currentRoom)
+      const messagesInRoom = currentRoom.type === 'global'
+        ? useChatStore.getState().globalMessages
+        : (useChatStore.getState().dmMessages[currentRoom.peerId] || [])
+      const lastMessage = messagesInRoom[messagesInRoom.length - 1]
+      const timestamp = lastMessage ? lastMessage.timestamp : null
+      useChatStore.getState().setLastReadTimestamp(key, timestamp)
+      window.electronAPI.setRoomReadTimestamp(key, timestamp).catch(() => {})
     }
   }, [currentRoom])
 
   // 새 메시지 처리 + 초기 로드 시 맨 아래 스냅
   useEffect(() => {
+    // 검색 결과 점프(#36)로 히스토리를 일괄 교체하는 동안에는 이 효과의 자동 스크롤 로직을
+    // 건너뛴다 — handleResultClick 이 직접 목표 메시지로 스크롤을 처리한다.
+    if (pendingJumpScrollRef.current) return
+
     const roomKey = currentRoom.type === 'global' ? 'global' : currentRoom.peerId
     const isRoomChange = currentRoomKeyRef.current !== roomKey
 
@@ -295,6 +398,7 @@ export default function ChatWindow() {
     setNewMessageToast(null)
     setHasMore(true)
     setLoadingMore(false)
+    setIsAwayFromBottom(false)
   }, [currentRoom])
 
   // 컨테이너 크기 변화 감지 — 초기 스크롤 snap 기간 동안 이미지/비디오가 로드되어
@@ -315,6 +419,22 @@ export default function ChatWindow() {
     }
   }, [currentRoom])
 
+  // 북마크(#34) 목록에서 메시지를 열었을 때: 이미 화면(DOM)에 로드돼 있으면 스크롤+하이라이트.
+  // 방을 막 전환한 직후라 히스토리가 아직 로드 중일 수 있으므로 currentMessages 가 바뀔 때마다
+  // 재시도하고, 너무 오래된(아직 무한스크롤로 불러오지 않은) 메시지라면 일정 시간 후 조용히
+  // 포기한다 — 기존 검색 점프 로직(#36)의 방/스크롤 레이스 처리는 건드리지 않는 순수 추가 effect.
+  useEffect(() => {
+    if (!pendingScrollMessageId) return
+    const element = messagesContainerRef.current?.querySelector(`[data-message-id="${pendingScrollMessageId}"]`)
+    if (element) {
+      scrollToMessage(pendingScrollMessageId)
+      useChatStore.getState().clearPendingScrollMessageId()
+      return
+    }
+    const timer = setTimeout(() => useChatStore.getState().clearPendingScrollMessageId(), 4000)
+    return () => clearTimeout(timer)
+  }, [pendingScrollMessageId, currentMessages])
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
       {/* 헤더 */}
@@ -324,7 +444,14 @@ export default function ChatWindow() {
           <div className="flex items-center gap-1">
             {/* 알림 뮤트 토글 버튼 */}
             <button
-              onClick={() => toggleRoomMute(roomKey)}
+              onClick={() => {
+                toggleRoomMute(roomKey)
+                // 토글 직후 main 프로세스에 뮤트 집합을 재동기화 — 소리/OS알림 억제 판정용(#4)
+                const updatedMutedRooms = useChatStore.getState().mutedRooms
+                window.electronAPI.setMutedRooms(
+                  Object.keys(updatedMutedRooms).filter((key) => updatedMutedRooms[key])
+                )
+              }}
               className={`p-1 rounded hover:bg-vsc-hover transition-colors cursor-pointer ${isMuted ? 'text-vsc-muted' : 'text-vsc-muted'}`}
               title={isMuted ? '알림 켜기' : '알림 끄기'}
             >
@@ -343,11 +470,11 @@ export default function ChatWindow() {
 
         {showSearch && (
           <ChatSearchBar
-            searchQuery={searchQuery}
             searchResults={searchResults}
             isSearching={isSearching}
             onSearch={handleSearch}
-            onResultClick={scrollToMessage}
+            onResultClick={handleResultClick}
+            onClose={handleToggleSearch}
           />
         )}
       </div>
@@ -359,7 +486,13 @@ export default function ChatWindow() {
             <p className="text-vsc-accent text-sm font-semibold">파일을 여기에 놓으세요</p>
           </div>
         )}
-        <div ref={messagesContainerRef} onScroll={handleScroll} className="h-full overflow-y-auto py-2">
+        <div
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          role="log"
+          aria-live="polite"
+          className="h-full overflow-y-auto py-2"
+        >
           {currentMessages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>
@@ -371,97 +504,36 @@ export default function ChatWindow() {
                 <span className="text-xs text-vsc-muted">이전 메시지 불러오는 중...</span>
               </div>
             )}
-            {(() => {
-              const elements = []
-              let i = 0
-              while (i < currentMessages.length) {
-                const message = currentMessages[i]
-                const prevMessage = i > 0 ? currentMessages[i - 1] : null
-                const isMyMessage = message.fromId === myPeerId || message.from_id === myPeerId
-                const messageContentType = message.contentType || message.content_type
-                const messageSenderId = message.fromId || message.from_id
-
-                // 날짜 구분선: 이전 메시지와 날짜가 다르면 표시
-                const messageDate = new Date(message.timestamp)
-                const messageDateStr = messageDate.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                const prevDateStr = prevMessage
-                  ? new Date(prevMessage.timestamp).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
-                  : null
-                if (prevDateStr !== null && messageDateStr !== prevDateStr) {
-                  const year = messageDate.getFullYear()
-                  const month = String(messageDate.getMonth() + 1).padStart(2, '0')
-                  const day = String(messageDate.getDate()).padStart(2, '0')
-                  elements.push(
-                    <div key={`date-${message.id}`} className="flex items-center gap-2 px-4 py-2 my-1">
-                      <div className="flex-1 border-t border-vsc-border" />
-                      <span className="text-xs text-vsc-muted shrink-0">{year}년 {month}월 {day}일</span>
-                      <div className="flex-1 border-t border-vsc-border" />
-                    </div>
-                  )
-                }
-
-                const shouldShowDivider =
-                  lastReadTimestamp != null &&
-                  message.timestamp > lastReadTimestamp &&
-                  (prevMessage === null || prevMessage.timestamp <= lastReadTimestamp) &&
-                  !isMyMessage
-
-                if (shouldShowDivider) {
-                  elements.push(
-                    <div key={`divider-${message.id}`} className="flex items-center gap-2 px-4 py-1 my-1">
-                      <div className="flex-1 border-t border-red-400/50" />
-                      <span className="text-xs text-red-400 font-semibold shrink-0">여기서부터 새 메시지</span>
-                      <div className="flex-1 border-t border-red-400/50" />
-                    </div>
-                  )
-                }
-
-                // 연속 이미지 그룹 감지
-                if (messageContentType === 'image') {
-                  const imageGroup = [message]
-                  let j = i + 1
-                  while (j < currentMessages.length) {
-                    const next = currentMessages[j]
-                    const nextContentType = next.contentType || next.content_type
-                    const nextSenderId = next.fromId || next.from_id
-                    if (nextContentType === 'image' && nextSenderId === messageSenderId) {
-                      imageGroup.push(next)
-                      j++
-                    } else break
-                  }
-
-                  if (imageGroup.length > 1) {
-                    // 연속 이미지 그룹 → 첫 번째만 Message로 렌더, 나머지는 그리드에 포함
-                    const isGrouped = prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId
-                    elements.push(
-                      <Message
-                        key={message.id}
-                        message={message}
-                        onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
-                        isHighlighted={highlightedMessageId === message.id}
-                        isGrouped={isGrouped}
-                        extraImages={imageGroup.slice(1)}
-                      />
-                    )
-                    i = j
-                    continue
-                  }
-                }
-
-                // 일반 메시지
-                elements.push(
-                  <Message
-                    key={message.id}
-                    message={message}
-                    onStartEdit={(msg) => messageInputRef.current?.startEdit(msg)}
-                    isHighlighted={highlightedMessageId === message.id}
-                    isGrouped={prevMessage !== null && (prevMessage.fromId || prevMessage.from_id) === messageSenderId}
-                  />
-                )
-                i++
-              }
-              return elements
-            })()}
+            {renderItems.map(item => (
+              <React.Fragment key={item.message.id}>
+                {/* 날짜 구분선: 이전 메시지와 날짜가 다르면 표시 */}
+                {item.showDateDivider && (
+                  <div className="flex items-center gap-2 px-4 py-2 my-1">
+                    <div className="flex-1 border-t border-vsc-border" />
+                    <span className="text-xs text-vsc-muted shrink-0">{item.dateLabel}</span>
+                    <div className="flex-1 border-t border-vsc-border" />
+                  </div>
+                )}
+                {/* 안읽음 구분선(#39) */}
+                {item.showUnreadDivider && (
+                  <div className="flex items-center gap-2 px-4 py-1 my-1">
+                    <div className="flex-1 border-t border-red-400/50" />
+                    <span className="text-xs text-red-400 font-semibold shrink-0">여기서부터 새 메시지</span>
+                    <div className="flex-1 border-t border-red-400/50" />
+                  </div>
+                )}
+                <Message
+                  message={item.message}
+                  onStartEdit={handleStartEdit}
+                  onReply={handleStartReply}
+                  onQuoteClick={scrollToMessage}
+                  isHighlighted={highlightedMessageId === item.message.id}
+                  isGrouped={item.isGrouped}
+                  extraImages={item.extraImages}
+                  searchQuery={showSearch ? searchQuery : ''}
+                />
+              </React.Fragment>
+            ))}
             </>
           )}
 
@@ -481,6 +553,19 @@ export default function ChatWindow() {
 
           <div ref={scrollEndRef} />
         </div>
+
+        {/* 안읽음 점프 버튼(#39) — 구분선이 있는데(=안읽음 존재) 맨 아래에서 벗어나 있을 때만 표시.
+            newMessageToast 와 동시에 뜨면 하단 pill 이 겹치므로 그 동안은 숨긴다(순수 추가, 기존
+            새 메시지 토스트/scrollToMessage 로직은 그대로 재사용만 한다). */}
+        {firstUnreadMessageId && isAwayFromBottom && !newMessageToast && (
+          <button
+            onClick={() => scrollToMessage(firstUnreadMessageId)}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-2 rounded-full bg-vsc-accent text-white shadow-lg cursor-pointer hover:opacity-90 transition-opacity max-w-[80%]"
+          >
+            <ChevronDown size={14} className="shrink-0" />
+            <span className="text-xs font-semibold">새 메시지 {unreadMessages.length}개</span>
+          </button>
+        )}
 
         {newMessageToast && (
           <button

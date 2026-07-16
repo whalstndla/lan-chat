@@ -1,14 +1,23 @@
 // src/components/MessageInput.jsx
 import React, { useState, useRef, useEffect, Suspense, lazy, useCallback, forwardRef, useImperativeHandle } from 'react'
 const EmojiPicker = lazy(() => import('emoji-picker-react'))
-import { Paperclip, Smile, Send, Loader2, X, Pencil } from 'lucide-react'
+import { Paperclip, Smile, Send, Loader2, X, Pencil, Reply } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Placeholder from '@tiptap/extension-placeholder'
 import { Markdown } from 'tiptap-markdown'
 import FormattingToolbar from './input/FormattingToolbar'
 import PastePreviewDialog from './input/PastePreviewDialog'
-import useChatStore from '../store/useChatStore'
+import useChatStore, { getRoomKey } from '../store/useChatStore'
+import useUserStore from '../store/useUserStore'
+import usePeerStore from '../store/usePeerStore'
+import { isCompressibleImageType, compressImageFile } from '../utils/imageCompression'
+import { findLastEditableOwnMessage } from '../utils/lastEditableMessage'
+import { buildReplyPreview } from '../utils/replyPreview'
+import { parseMentions } from '../utils/mentions'
+
+// 메시지 최대 길이 — electron/ipcHandlers/message.js 의 MAX_CONTENT_LENGTH 와 동일 값을 유지.
+// 전송 전 클라이언트에서 미리 검증해, 초과 시 IPC 실패 응답을 기다리지 않고 즉시 안내한다.
+const MAX_MESSAGE_LENGTH = 10000
 
 // 파일 MIME 타입 → contentType 변환.
 // SVG 는 XSS 위험으로 fileServer 가 attachment 강제 → 인라인 표시 불가.
@@ -63,10 +72,32 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
   const [pastePreview, setPastePreview] = useState(null) // null 또는 { files: [File...], previews: [{ previewUrl, fileName, fileSize }...] }
   // 수정 모드: 현재 수정 중인 메시지 객체 (null이면 일반 전송 모드)
   const [editingMessage, setEditingMessage] = useState(null)
+  // 답장 모드(#28): 현재 답장 대상 스냅샷 { id, preview: { fromName, snippet } } (null이면 답장 아님).
+  // 수정 모드와 상호배타 — startReply/startEdit 가 서로를 해제한다.
+  const [replyTarget, setReplyTarget] = useState(null)
+  // placeholder 표시 여부 — TipTap Placeholder 확장(ProseMirror 데코레이션) 대신 사용.
+  // 이 state 는 래퍼 div 의 속성만 바꾸고, EditorContent(React.memo)는 editor 인스턴스가
+  // 바뀌지 않는 한 리렌더되지 않으므로 ProseMirror 가 관리하는 에디터 내부 DOM 에는 영향이 없다.
+  const [isEditorEmpty, setIsEditorEmpty] = useState(true)
   const fileInputRef = useRef(null)
   const lastTypingSentAtRef = useRef(0)
   const sendMessageRef = useRef(null)
+  // 이모지 피커 바깥 클릭 감지용 ref(#40) — 피커 컨테이너와 토글 버튼 둘 다 클릭 영역에서
+  // 제외해야 토글 버튼으로 닫을 때 "닫혔다가 다시 열리는" 깜빡임이 생기지 않는다.
+  const emojiPickerRef = useRef(null)
+  const emojiButtonRef = useRef(null)
+  // 붙여넣기 미리보기 항목 고유 id 발급용 카운터 — 압축 예상 크기 비동기 계산 결과를
+  // 정확한 항목에 반영하기 위해 index 대신 고유 id 로 매칭한다(연속 붙여넣기/제거 시에도 안전).
+  const pastePreviewIdCounterRef = useRef(0)
   const currentRoom = useChatStore(state => state.currentRoom)
+  const sendOriginalImages = useChatStore(state => state.sendOriginalImages)
+  const setSendOriginalImages = useChatStore(state => state.setSendOriginalImages)
+  // 방별 draft 보존용 — 매 키 입력마다 store 에 쓰지 않고, 최신 마크다운을 ref 에만 저장해뒀다가
+  // 방 전환/blur 시점에만 store.setDraft 로 flush 한다(IME 안전: 순수 ref 대입이라 조합에 영향 없음).
+  const latestMarkdownRef = useRef('')
+  // effect 클린업/onBlur 시점에 "수정 모드 중이었는지"를 정확히 알기 위한 ref.
+  // (edit 중인 내용은 draft 가 아니므로 draft 로 저장하면 안 됨)
+  const editingMessageRef = useRef(null)
 
   // Tiptap 에디터 설정
   const editor = useEditor({
@@ -75,12 +106,16 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         heading: false,
         horizontalRule: false,
       }),
-      // [IME 진단 v0.10.2] Placeholder 확장이 한국어 composition transition 중 빈 노드 ↔
-      // 채워진 노드 토글로 ProseMirror DOM observer를 흔들어 첫 글자/자모가 사라지는지
-      // 확인용으로 임시 비활성화. 검증 후 영구 처리 결정 (옵션 조정 또는 CSS 직접 처리).
-      // Placeholder.configure({
-      //   placeholder: `${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`,
-      // }),
+      // [IME 진단 v0.10.2 → 최종 결정] @tiptap/extension-placeholder 는 미사용으로 확정(#14).
+      // 코드 레벨 재검토 결과: 이 확장은 ProseMirror 노드 데코레이션으로 구현되어 있어(placeholder.ts
+      // decorations 훅) doc/selection 이 바뀔 때마다 "비어있음 ↔ 채워짐" 여부를 다시 계산해 조합 중인
+      // 바로 그 텍스트블록 노드의 class/attribute 를 매 트랜잭션마다 갱신한다 — 즉 조합이 시작되는
+      // 정확히 그 순간(빈 노드 → 채워진 노드로 전환되는 첫 글자)에 ProseMirror 가 관리하는 DOM 자체를
+      // 건드리게 되어 v0.10.2 에서 관찰된 증상과 메커니즘이 일치한다. v0.10.4 의 composing 가드는
+      // Enter 전송/강제 focus() 를 막는 것이라 이 경로와는 무관해 확장을 다시 켜도 되는 근거가 되지
+      // 않는다. 대신 아래 isEditorEmpty(React state) + CSS 로 완전히 별도 구현했다 — 이 방식은
+      // EditorContent 가 React.memo 라 editor 인스턴스가 바뀌지 않는 한 리렌더되지 않으므로,
+      // ProseMirror 가 관리하는 에디터 내부 DOM 은 전혀 건드리지 않는다(래퍼 엘리먼트의 속성만 갱신).
       Markdown.configure({
         // 마크다운 붙여넣기 → 리치 텍스트 변환
         transformPastedText: true,
@@ -104,19 +139,46 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         }
         if (newFiles.length === 0) return false
         event.preventDefault()
+        // 미리보기 항목마다 고유 id 발급 — 아래 압축 예상 크기 비동기 계산 결과를 index 가 아닌
+        // id 로 매칭해, 계산 도중 다른 항목이 추가/제거돼도 엉뚱한 항목이 갱신되지 않게 한다.
+        const addedPreviews = newFiles.map(file => ({
+          id: (pastePreviewIdCounterRef.current += 1),
+          previewUrl: URL.createObjectURL(file),
+          fileName: file.name || '이미지.png',
+          fileSize: file.size,
+          // 압축 파이프라인 대상 여부(#47) — GIF/SVG 등은 원본 그대로 전송되므로 예상 크기를
+          // 계산하지 않는다.
+          willCompress: isCompressibleImageType(file.type),
+          estimatedCompressedSize: null, // 아래에서 비동기로 채워짐
+        }))
         // 기존 미리보기에 누적 추가
         setPastePreview(prev => {
           const existingFiles = prev ? prev.files : []
           const existingPreviews = prev ? prev.previews : []
-          const addedPreviews = newFiles.map(file => ({
-            previewUrl: URL.createObjectURL(file),
-            fileName: file.name || '이미지.png',
-            fileSize: file.size,
-          }))
           return {
             files: [...existingFiles, ...newFiles],
             previews: [...existingPreviews, ...addedPreviews],
           }
+        })
+        // 압축 후 예상 크기를 미리보기에 참고용으로 표시(#47) — 실제 전송 시점의 압축 여부는
+        // sendFile 이 그때의 sendOriginalImages 값을 다시 확인해 결정하므로, 이 계산 결과 자체를
+        // 전송에 재사용하지는 않는다(순수 참고 표시).
+        newFiles.forEach((file, index) => {
+          const previewId = addedPreviews[index].id
+          if (!addedPreviews[index].willCompress) return
+          compressImageFile(file).then(compressed => {
+            setPastePreview(prev => {
+              if (!prev) return prev
+              const targetIndex = prev.previews.findIndex(p => p.id === previewId)
+              if (targetIndex === -1) return prev
+              const updatedPreviews = [...prev.previews]
+              updatedPreviews[targetIndex] = {
+                ...updatedPreviews[targetIndex],
+                estimatedCompressedSize: compressed ? compressed.size : updatedPreviews[targetIndex].fileSize,
+              }
+              return { ...prev, previews: updatedPreviews }
+            })
+          }).catch(() => {})
         })
         return true
       },
@@ -157,11 +219,40 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           sendMessageRef.current?.()
           return true
         }
+        // ↑ 로 마지막 내 메시지 불러와 수정(#40). 입력창이 완전히 비어있고, 이미 다른 메시지를
+        // 수정 중이 아닐 때만 발동한다. 위 조합 가드를 통과한 뒤에만 이 코드에 도달하므로
+        // 한글 등 IME 조합 중에는 Enter 전송과 동일하게 절대 발동하지 않는다.
+        if (event.key === 'ArrowUp' && !editingMessageRef.current && view.state.doc.textContent.length === 0) {
+          const { globalMessages, dmMessages } = useChatStore.getState()
+          const roomMessages = currentRoom.type === 'global' ? globalMessages : (dmMessages[currentRoom.peerId] || [])
+          const lastOwnMessage = findLastEditableOwnMessage(roomMessages, useUserStore.getState().myPeerId)
+          if (lastOwnMessage) {
+            event.preventDefault()
+            startEdit(lastOwnMessage)
+            return true
+          }
+        }
         return false
       },
     },
+    // 방 전환/최초 마운트로 새 에디터 인스턴스가 생성될 때, 저장된 draft 가 있으면 복원.
+    // (조합 로직과 무관 — 조합 도중이 아니라 에디터가 새로 생성되는 시점에만 1회 실행됨)
+    onCreate: ({ editor: ed }) => {
+      const roomKey = getRoomKey(currentRoom)
+      const draftMarkdown = useChatStore.getState().drafts[roomKey]
+      if (draftMarkdown) {
+        ed.commands.setContent(draftMarkdown)
+      }
+      // 새 에디터 인스턴스 생성 시점의 비어있음 여부를 placeholder state 에 반영(위 draft 복원 반영 후).
+      setIsEditorEmpty(ed.isEmpty)
+    },
     // 타이핑 인디케이터
     onUpdate: ({ editor: ed }) => {
+      // draft 추적용 — store 에는 쓰지 않고 ref 에만 최신 마크다운을 보관해둔다(순수 대입이라 IME 영향 없음).
+      latestMarkdownRef.current = ed.storage.markdown.getMarkdown()
+      // placeholder 표시 여부 갱신 — 래퍼 div 속성만 바뀌므로 조합에 영향 없음.
+      setIsEditorEmpty(ed.isEmpty)
+
       const now = Date.now()
       if (!ed.isEmpty && now - lastTypingSentAtRef.current > 2000) {
         lastTypingSentAtRef.current = now
@@ -169,6 +260,35 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         window.electronAPI.sendTyping(targetPeerId).catch(() => {})
       }
     },
+    // 창 포커스 이탈(blur) 시에도 draft 를 flush — 방 전환 없이 앱을 벗어나는 경우 대비.
+    onBlur: () => {
+      if (editingMessageRef.current) return
+      const roomKey = getRoomKey(currentRoom)
+      useChatStore.getState().setDraft(roomKey, latestMarkdownRef.current)
+    },
+  }, [currentRoom])
+
+  // editingMessage 최신값을 ref 에도 반영 — draft 저장 시점(effect cleanup/blur)에서
+  // "수정 모드였는지"를 정확히 판단하기 위함 (edit 중인 내용을 draft 로 오인해 저장하지 않도록).
+  useEffect(() => {
+    editingMessageRef.current = editingMessage
+  }, [editingMessage])
+
+  // 방 전환 시 답장 배너 해제(#28) — A 방 메시지에 대한 답장 컨텍스트가 B 방으로 새지 않게 한다.
+  useEffect(() => {
+    setReplyTarget(null)
+  }, [currentRoom])
+
+  // 방을 떠날 때(전환 직전) 작성 중이던 내용을 해당 방의 draft 로 저장.
+  // cleanup 클로저가 "이전" currentRoom 을 캡처하므로 정확히 떠나는 방의 roomKey 로 저장된다.
+  // latestMarkdownRef 는 에디터 인스턴스와 무관한 순수 ref 라, useEditor 내부 effect(에디터 파괴)와의
+  // 실행 순서에 의존하지 않고 항상 안전하게 마지막 값을 읽을 수 있다.
+  useEffect(() => {
+    return () => {
+      if (editingMessageRef.current) return
+      const roomKey = getRoomKey(currentRoom)
+      useChatStore.getState().setDraft(roomKey, latestMarkdownRef.current)
+    }
   }, [currentRoom])
 
   const keepEditorFocus = useCallback(() => {
@@ -207,11 +327,57 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [editor])
 
+  // 이모지 피커 바깥 클릭 시 닫기(#40). 토글 버튼 자체는 클릭 영역에서 제외해야 한다 — 안 그러면
+  // 버튼 클릭 시 mousedown 에서 먼저 닫히고 뒤이은 click 의 토글 핸들러가 다시 열어버려서
+  // "버튼으로는 못 닫는" 깜빡임이 생긴다.
+  useEffect(() => {
+    if (!showEmojiPicker) return
+    const handleOutsideClick = (event) => {
+      if (emojiPickerRef.current?.contains(event.target)) return
+      if (emojiButtonRef.current?.contains(event.target)) return
+      setShowEmojiPicker(false)
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [showEmojiPicker])
+
+  // Esc 로 메시지 수정 취소(#40). IME 조합 중에는 절대 취소하지 않는다 — 한글 조합을 취소하려고
+  // 누른 Esc 를 편집 취소로 오인하면 안 되므로, Enter 전송과 동일한 조합 가드를 그대로 재사용한다.
+  // 붙여넣기 미리보기가 열려 있으면 그쪽 Esc 처리(PastePreviewDialog)를 우선하고 여기서는 무시한다.
+  useEffect(() => {
+    if (!editingMessage) return
+    const handleEscKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      if (editor?.view?.composing || event.isComposing || event.keyCode === 229) return
+      if (pastePreview) return
+      cancelEdit()
+    }
+    window.addEventListener('keydown', handleEscKeyDown)
+    return () => window.removeEventListener('keydown', handleEscKeyDown)
+  }, [editingMessage, pastePreview, editor])
+
   // 수정 모드 시작 — 선택한 메시지를 에디터에 로드
   function startEdit(message) {
+    // 답장 모드와 상호배타 — 수정 시작 시 답장 배너를 해제한다.
+    setReplyTarget(null)
     setEditingMessage(message)
     editor?.commands.setContent(message.content || '')
     editor?.commands.focus()
+  }
+
+  // 답장 모드 시작(#28) — 대상 메시지의 비정규화 스냅샷을 만들어 답장 배너를 띄운다.
+  // 에디터 내용은 건드리지 않는다(작성 중이던 텍스트 보존). 수정 모드였다면 해제한다.
+  function startReply(message) {
+    if (!message) return
+    if (editingMessageRef.current) cancelEdit()
+    setReplyTarget({ id: message.id, preview: buildReplyPreview(message) })
+    editor?.commands.focus('end')
+  }
+
+  // 답장 모드 취소 — 배너만 닫고 에디터 내용은 유지한다.
+  function cancelReply() {
+    setReplyTarget(null)
+    keepEditorFocus()
   }
 
   // 수정 내용 제출 — IPC 호출 후 스토어 업데이트
@@ -250,10 +416,33 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     const content = markdown.trim()
     if (!content) return
 
+    // 전송 전 길이 사전 검증 — 초과 시 main 프로세스 왕복 없이 즉시 사용자에게 안내.
+    // (에디터 내용은 건드리지 않고 여기서 return — IME/조합 관련 clearContent 순서는 그대로 유지)
+    if (content.length > MAX_MESSAGE_LENGTH) {
+      window.alert(`메시지가 너무 깁니다 (${content.length}자). 최대 ${MAX_MESSAGE_LENGTH}자까지 전송 가능합니다.`)
+      return
+    }
+
+    // 답장(#28) — 전송 시점의 답장 대상을 스냅샷으로 보관(아래에서 즉시 배너를 지우므로).
+    // send 페이로드에 실을 optional 메타이며, IME 핵심 로직(clearContent/keepEditorFocus)과 무관.
+    const replySnapshot = replyTarget
+
+    // @멘션(#29) — 전송 시점에 메시지 텍스트에서 "@닉네임" 토큰을 파싱해 peerId 배열을 계산한다.
+    // 실시간 자동완성/드롭다운이 아니라 send 페이로드 구성 단계의 순수 계산이라
+    // IME 핵심 로직(clearContent/keepEditorFocus/composing)과 무관하다. usePeerStore 가
+    // main 보다 "알려진 피어 닉네임" 을 더 단순하고 정확하게 알고 있어 렌더러에서 계산한다.
+    const { onlinePeers, pastDMPeers } = usePeerStore.getState()
+    const peerNicknameList = [...onlinePeers, ...pastDMPeers].map(peer => ({ peerId: peer.peerId, nickname: peer.nickname }))
+    const mentions = parseMentions(content, peerNicknameList, { excludePeerId: useUserStore.getState().myPeerId })
+
     // IPC 응답을 기다린 뒤 초기화하면 사용자가 시작한 다음 한글 조합까지 지워질 수 있다.
     // 전송할 내용을 먼저 보관하고 에디터는 즉시 비워 이전 전송의 후처리가 새 입력을 건드리지 않게 한다.
     editor.commands.clearContent()
     keepEditorFocus()
+    // 에디터를 비운 시점에 맞춰 해당 방의 draft 도 함께 비운다(전송 중인 내용이 draft 로 남지 않도록).
+    useChatStore.getState().clearDraft(getRoomKey(currentRoom))
+    // 답장 배너도 함께 해제 — clearContent/keepEditorFocus 순서 뒤에 순수 추가(조합에 영향 없음).
+    setReplyTarget(null)
 
     setIsSending(true)
     try {
@@ -263,21 +452,46 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           content,
           contentType: 'text',
           format: 'markdown',
+          replyToId: replySnapshot?.id || null,
+          replyPreview: replySnapshot?.preview || null,
+          mentions,
         })
-        useChatStore.getState().addGlobalMessage(sentMessage)
       } else {
         sentMessage = await window.electronAPI.sendDM({
           recipientPeerId: currentRoom.peerId,
           content,
           contentType: 'text',
           format: 'markdown',
+          replyToId: replySnapshot?.id || null,
+          replyPreview: replySnapshot?.preview || null,
+          mentions,
         })
-        useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
       }
+      // main 이 입력 검증 실패 시 { ok: false, error } 를 반환한다 — 스토어에 넣지 않고 안전하게 처리.
+      if (!sentMessage || sentMessage.ok === false) {
+        window.alert('메시지 전송에 실패했습니다.')
+        // 전송 실패 — 미리 비워둔 에디터에 원본 내용을 복원해 사용자가 다시 타이핑하지 않고
+        // Enter 로 바로 재시도할 수 있게 한다. (즉시 초기화 패턴 자체는 유지 — 실패 시에만 복원)
+        editor.commands.setContent(content)
+        keepEditorFocus()
+        // 답장 배너도 함께 복원 — 내용과 동일하게 실패 시에만 되돌린다.
+        setReplyTarget(replySnapshot)
+        return
+      }
+      if (currentRoom.type === 'global') useChatStore.getState().addGlobalMessage(sentMessage)
+      else useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
+    } catch (err) {
+      // IPC 호출 자체가 throw 된 경우(네트워크/직렬화 예외 등) — 위 { ok: false } 분기와 동일하게
+      // 원본 내용을 복원해 유실을 막는다.
+      console.error('[메시지 전송 실패]', err)
+      window.alert('메시지 전송에 실패했습니다.')
+      editor.commands.setContent(content)
+      keepEditorFocus()
+      setReplyTarget(replySnapshot)
     } finally {
       setIsSending(false)
     }
-  }, [editor, isSending, currentRoom, editingMessage, keepEditorFocus])
+  }, [editor, isSending, currentRoom, editingMessage, keepEditorFocus, replyTarget])
 
   // sendMessage를 ref에 저장 (handleKeyDown에서 참조)
   useEffect(() => {
@@ -301,6 +515,14 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         uploadFile = new File([file], file.name, { type: 'application/octet-stream' })
       }
     }
+    // 이미지 리사이즈/재인코딩(#47) — HEIC 변환 이후 단계에 둬서 HEIC→JPEG 로 바뀐 파일도 동일하게
+    // 압축 대상이 되게 한다. "원본 전송" 설정이 켜져 있으면 건너뛰고, 실패/비대상(GIF 등)이면
+    // compressImageFile 이 null 을 반환해 원본 uploadFile 을 그대로 유지한다(HEIC 변환 실패
+    // 폴백과 동일한 안전 철학 — 압축이 실패해도 전송 자체는 막지 않는다).
+    if (!useChatStore.getState().sendOriginalImages) {
+      const compressed = await compressImageFile(uploadFile)
+      if (compressed) uploadFile = compressed
+    }
     const arrayBuffer = await uploadFile.arrayBuffer()
     const saveResult = await window.electronAPI.saveFile(arrayBuffer, uploadFile.name)
     if (!saveResult || !saveResult.ok) {
@@ -321,11 +543,16 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     let sentMessage
     if (currentRoom.type === 'global') {
       sentMessage = await window.electronAPI.sendGlobalMessage(payload)
-      useChatStore.getState().addGlobalMessage(sentMessage)
     } else {
       sentMessage = await window.electronAPI.sendDM({ recipientPeerId: currentRoom.peerId, ...payload })
-      useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
     }
+    // main 이 입력 검증 실패 시 { ok: false, error } 를 반환한다 — 스토어에 넣지 않고 안전하게 처리.
+    if (!sentMessage || sentMessage.ok === false) {
+      window.alert('메시지 전송에 실패했습니다.')
+      return
+    }
+    if (currentRoom.type === 'global') useChatStore.getState().addGlobalMessage(sentMessage)
+    else useChatStore.getState().addDMMessage(currentRoom.peerId, sentMessage)
   }
 
   // 여러 파일을 순차적으로 전송
@@ -347,10 +574,11 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     sendFiles(fileList)
   }
 
-  // 부모 컴포넌트에서 ref를 통해 handleDroppedFiles, startEdit 호출 가능하도록 노출
+  // 부모 컴포넌트에서 ref를 통해 handleDroppedFiles, startEdit, startReply 호출 가능하도록 노출
   useImperativeHandle(ref, () => ({
     handleDroppedFiles,
     startEdit,
+    startReply,
   }))
 
   function confirmPasteSend() {
@@ -393,7 +621,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
     <div className="px-4 pb-4 pt-2 shrink-0 relative">
       {/* 이모지 피커 */}
       {showEmojiPicker && (
-        <div className="absolute bottom-16 right-4 z-10">
+        <div ref={emojiPickerRef} className="absolute bottom-16 right-4 z-10">
           <Suspense fallback={null}>
             <EmojiPicker onEmojiClick={onEmojiSelect} theme="dark" height={380} searchPlaceholder="이모지 검색..." />
           </Suspense>
@@ -406,6 +634,8 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
         onConfirm={confirmPasteSend}
         onCancel={cancelPaste}
         onRemoveItem={removePasteItem}
+        sendOriginalImages={sendOriginalImages}
+        onToggleSendOriginal={setSendOriginalImages}
       />
 
       <div className="flex flex-col bg-vsc-panel rounded border border-vsc-border focus-within:border-vsc-accent transition-colors duration-150">
@@ -420,12 +650,32 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
           </div>
         )}
 
+        {/* 답장 모드 배너(#28) — 답장 중일 때만 표시(수정 모드와 상호배타). "○○에게 답장" + 스니펫 + 취소. */}
+        {replyTarget && !editingMessage && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-vsc-panel border-b border-vsc-border text-xs">
+            <Reply size={12} className="shrink-0 text-vsc-accent" />
+            <span className="text-vsc-accent font-semibold shrink-0">
+              {replyTarget.preview?.fromName || '알 수 없음'}에게 답장
+            </span>
+            <span className="text-vsc-muted truncate min-w-0">
+              {replyTarget.preview?.snippet}
+            </span>
+            <button onClick={cancelReply} aria-label="답장 취소" className="ml-auto shrink-0 text-vsc-muted hover:text-red-400 cursor-pointer">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {/* 마크다운 포맷팅 툴바 */}
         <FormattingToolbar editor={editor} />
 
         <div className="flex items-end gap-2">
         {/* Tiptap 에디터 */}
-        <div className="flex-1 tiptap-editor">
+        <div
+          className="flex-1 tiptap-editor"
+          data-placeholder-visible={isEditorEmpty ? 'true' : 'false'}
+          data-placeholder-text={`${currentRoom.type === 'global' ? '전체 채팅' : currentRoom.nickname}에게 메시지 입력...`}
+        >
           <EditorContent editor={editor} />
         </div>
 
@@ -437,7 +687,7 @@ const MessageInput = forwardRef(function MessageInput(props, ref) {
             className="cursor-pointer p-1.5 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150">
             <Paperclip size={16} />
           </button>
-          <button onMouseDown={(event) => event.preventDefault()} onClick={() => setShowEmojiPicker(prev => !prev)} aria-label="이모지 선택" title="이모지"
+          <button ref={emojiButtonRef} onMouseDown={(event) => event.preventDefault()} onClick={() => setShowEmojiPicker(prev => !prev)} aria-label="이모지 선택" title="이모지"
             className={`cursor-pointer p-1.5 rounded transition-colors duration-150 ${showEmojiPicker ? 'text-vsc-accent bg-vsc-hover' : 'text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover'}`}>
             <Smile size={16} />
           </button>

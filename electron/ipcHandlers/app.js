@@ -9,15 +9,50 @@ const { v4: uuidv4 } = require('uuid')
 const { spawn } = require('child_process')
 const { autoUpdater } = require('electron-updater')
 const { sendToRenderer, loadChangelog } = require('../utils/appUtils')
+const { isBlockedUrlAsync } = require('../utils/urlGuard')
+const { getLinkPreviewEnabled } = require('../storage/profile')
+const { getAutoLaunchStatus, saveAutoLaunchPreference, applyAutoLaunchSettings } = require('../utils/autoLaunch')
+
+// SSRF 가드가 적용된 fetch — 각 리다이렉트 홉의 목적지까지 재검증한다(#66).
+// redirect:'manual' 로 3xx 를 직접 따라가며 매 홉마다 스킴/사설 IP/DNS(rebinding)를 검사해,
+// "공개 URL → 리다이렉트 → 내부 IP" 우회를 막는다.
+// 반환: 리다이렉트가 아닌 최종 Response, 또는 null(차단/에러/과다 리다이렉트).
+async function guardedFetch(url, options = {}, maxRedirects = 5) {
+  let currentUrl = url
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    if (await isBlockedUrlAsync(currentUrl)) return null
+    let response
+    try {
+      response = await fetch(currentUrl, { ...options, redirect: 'manual' })
+    } catch {
+      return null
+    }
+    const location = response.headers.get('location')
+    if (response.status >= 300 && response.status < 400 && location) {
+      try {
+        currentUrl = new URL(location, currentUrl).toString() // 상대 Location 절대화
+      } catch {
+        return null
+      }
+      continue
+    }
+    return response
+  }
+  return null // 리다이렉트 과다 → 차단
+}
 
 function registerAppHandlers(ctx) {
   // 링크 프리뷰 OG 메타데이터 추출 — 메인 프로세스에서 fetch (CORS 제한 없음)
   ipcMain.handle('fetch-link-preview', async (_, url) => {
     try {
-      const response = await fetch(url, {
+      // 링크 미리보기가 꺼져 있으면 외부 요청 자체를 하지 않는다(완전 단절 모드).
+      if (!getLinkPreviewEnabled(ctx.state.database)) return null
+      // 단일 5초 예산을 모든 리다이렉트 홉에 공유(총 소요 시간 상한).
+      const response = await guardedFetch(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
         signal: AbortSignal.timeout(5000),
       })
+      if (!response || !response.ok) return null
       const html = await response.text()
       // og 태그에서 content 속성이 property 앞/뒤 어디에 있든 매칭
       const getOgContent = (property) => {
@@ -54,18 +89,10 @@ function registerAppHandlers(ctx) {
     try {
       let image
       if (/^https?:\/\//i.test(imageUrl)) {
-        const { net } = require('electron')
-        const buffer = await new Promise((resolve, reject) => {
-          const request = net.request(imageUrl)
-          const chunks = []
-          request.on('response', (response) => {
-            response.on('data', (chunk) => chunks.push(chunk))
-            response.on('end', () => resolve(Buffer.concat(chunks)))
-            response.on('error', reject)
-          })
-          request.on('error', reject)
-          request.end()
-        })
+        // SSRF 가드 적용 fetch 로 통일 — 사설/메타데이터/루프백 및 리다이렉트 우회 차단(#66).
+        const response = await guardedFetch(imageUrl, { signal: AbortSignal.timeout(5000) })
+        if (!response || !response.ok) return false
+        const buffer = Buffer.from(await response.arrayBuffer())
         image = nativeImage.createFromBuffer(buffer)
       } else {
         // 로컬 파일 경로
@@ -91,6 +118,17 @@ function registerAppHandlers(ctx) {
     }
     ctx.state.updatedFromVersion = null
     return result
+  })
+
+  // 로그인 시 자동 시작(#71) 상태 조회 — openAtLogin 은 가능하면 OS 에 실제 등록된 값을 반환한다.
+  ipcMain.handle('get-auto-launch-settings', () => getAutoLaunchStatus(app, ctx.config.appDataPath))
+
+  // 로그인 시 자동 시작 설정 변경 — 선호도 저장 + 실제 OS 로그인 아이템 등록/해제(#71).
+  // Linux 등 미지원 플랫폼은 applyAutoLaunchSettings 내부에서 안전하게 no-op 처리된다.
+  ipcMain.handle('set-auto-launch-settings', (_, { openAtLogin, startHidden }) => {
+    saveAutoLaunchPreference(ctx.config.appDataPath, { openAtLogin, startHidden })
+    applyAutoLaunchSettings(app, { openAtLogin, startHidden })
+    return getAutoLaunchStatus(app, ctx.config.appDataPath)
   })
 
   // 업데이트 확인 IPC 핸들러 — dev에서는 즉시 not-available 반환

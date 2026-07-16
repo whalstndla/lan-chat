@@ -1,5 +1,5 @@
 // electron/main.js
-const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage } = require('electron')
+const { app, BrowserWindow, Menu, Tray, nativeImage, safeStorage, dialog, shell, screen } = require('electron')
 // safeStorage 는 v0.9.x 키체인 wrap 마스터키를 비밀번호 wrap 으로 마이그레이션할 때만 사용.
 // v0.10.0 부터는 OS 키체인 의존 없이 사용자 비밀번호 KDF 만으로 마스터키 보호.
 const path = require('path')
@@ -8,9 +8,12 @@ const { startWsServer, stopWsServer } = require('./peer/wsServer')
 const { disconnectAll } = require('./peer/wsClient')
 const { startFileServer, stopFileServer, getFilePort } = require('./peer/fileServer')
 const { collectLocalIpv4Addresses, selectPrimaryLocalIpv4 } = require('./peer/networkUtils')
-const { loadOrCreateKeyPair, exportPublicKey } = require('./crypto/keyManager')
-const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath } = require('./utils/peerDebugLogger')
+// 장기 신원키(myPrivateKey/myPublicKeyBase64)는 부팅이 아니라 로그인 이후(masterKey 확보 시점)에
+// auth.js 가 loadOrCreateEncryptedKeyPair 로 로드한다(#61). 부팅 경로에서는 개인키를 다루지 않는다.
+const { closeDatabase } = require('./storage/database')
+const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath, flushPeerDebugLogNow } = require('./utils/peerDebugLogger')
 const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
+const { startPresenceMonitor, stopPresenceMonitor } = require('./utils/presence')
 const { stopPeerDiscovery } = require('./peer/discovery')
 const { autoUpdater } = require('electron-updater')
 const fs = require('fs')
@@ -20,9 +23,32 @@ const { createIncomingMessageHandler } = require('./messageHandler')
 const { registerAllIpcHandlers } = require('./ipcHandlers/index')
 const { sendToRenderer, clearBadge, checkAndNotifyUpdated } = require('./utils/appUtils')
 const { registerLanChatScheme, registerLanChatHandler } = require('./protocol/lanchatProtocol')
+// 창 크기/위치 기억(#71) — 저장된 bounds 를 디스플레이 범위와 대조해 복원한다.
+const { resolveWindowState, saveWindowState, DEFAULT_WIDTH, DEFAULT_HEIGHT, MIN_WIDTH, MIN_HEIGHT } = require('./storage/windowState')
+// 로그인 시 자동 시작(#71) — 부팅 시 "숨김 시작" 여부 판정에만 필요, 토글 적용은 IPC 핸들러(app.js)에서.
+const { loadAutoLaunchPreference, shouldStartHiddenThisLaunch } = require('./utils/autoLaunch')
 
 // custom protocol 은 app.whenReady 이전에 등록해야 함
 registerLanChatScheme()
+
+// main 프로세스 미처리 예외/거부 핸들러 — 등록하지 않으면 Node.js 기본 동작으로
+// uncaughtException 발생 시 프로세스가 그대로 종료된다. 트레이 상주 앱 특성상
+// 사용자가 창을 닫지 않고 방치하는 경우가 많아, 조용히 프로세스가 사라지는 대신
+// 로그를 남기고(peerDebugLogger) 가능하면 사용자에게 알린 뒤 계속 실행한다.
+process.on('uncaughtException', (error) => {
+  try {
+    writePeerDebugLog('main.process.uncaughtException', { error })
+  } catch { /* 로깅 실패 시 무시 */ }
+  try {
+    dialog.showErrorBox('LAN Chat 오류', `예상치 못한 오류가 발생했습니다.\n${error?.message || error}`)
+  } catch { /* 다이얼로그 표시 실패 시 무시 (예: 창이 아직 없는 시점) */ }
+})
+
+process.on('unhandledRejection', (reason) => {
+  try {
+    writePeerDebugLog('main.process.unhandledRejection', { reason })
+  } catch { /* 로깅 실패 시 무시 */ }
+})
 
 // 단일 인스턴스 강제 — 트레이에 숨겨진 채로 사용자가 앱을 다시 실행했을 때
 // 두 번째 프로세스가 별도로 떠서 포트 / DB 락 충돌로 창이 안 뜨던 버그 방지.
@@ -35,11 +61,31 @@ if (!hasSingleInstanceLock) {
 
 const isDev = !app.isPackaged
 
+// 렌더러가 이동해도 되는 "앱 내부" URL 인지 판정한다(네비게이션 가드용).
+// 허용: 프로덕션 file://, 앱 내부 lanchat://, dev 서버 localhost/127.0.0.1.
+// 그 외(외부 http(s), 다른 스킴)는 렌더러 세션을 외부 페이지로 끌고 가지 못하게 차단한다.
+function isInternalNavigationUrl(targetUrl) {
+  try {
+    const parsed = new URL(targetUrl)
+    if (parsed.protocol === 'file:') return true
+    if (parsed.protocol === 'lanchat:') return true
+    if (isDev && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
 // 앱 데이터 경로
 const appDataPath = app.getPath('userData')
 const tempFilePath = path.join(appDataPath, 'files')
 const profileFolderPath = path.join(appDataPath, 'profile')
 const systemDefaultNickname = os.userInfo().username
+
+// 로그인 자동 시작(#71) 선호도 — 이번 실행이 "자동 시작 + 숨김 시작"으로 인한 것인지 부팅 시 1회 판정.
+// 최초 창 생성에만 반영하고(트레이로만 뜸), 이후 두 번째 인스턴스/activate 시엔 항상 정상 표시한다.
+const autoLaunchPreference = loadAutoLaunchPreference(appDataPath)
+let shouldStartHiddenOnFirstLaunch = shouldStartHiddenThisLaunch(app, autoLaunchPreference)
 
 // AppContext 생성
 const ctx = createAppContext({
@@ -100,10 +146,9 @@ async function initApp() {
     interfaces: os.networkInterfaces(),
   })
 
-  // ECDH 키 쌍 로드 (최초 실행 시 자동 생성)
-  const { privateKey, publicKey } = loadOrCreateKeyPair(appDataPath)
-  ctx.state.myPrivateKey = privateKey
-  ctx.state.myPublicKeyBase64 = exportPublicKey(publicKey)
+  // ECDH 신원 키는 여기서 로드하지 않는다(#61). masterKey 로 wrap 된 private_key.enc 를
+  // 로그인/등록 성공 직후(auth.js)에 언랩해 ctx.state.myPrivateKey/myPublicKeyBase64 에 세팅하고,
+  // 그 다음에야 renderer 가 start-peer-discovery 를 호출한다 — 즉 개인키는 항상 discovery 보다 먼저 준비된다.
 
   // 파일 서버 시작 (파일 + 프로필 이미지 제공)
   await startFileServer(profileFolderPath)
@@ -119,6 +164,9 @@ async function initApp() {
   // WebSocket 서버 시작 (공용 핸들러 사용) — 고정 포트 범위 49152~49161 우선 시도
   ctx.state.wsServerInfo = await startWsServer({ onMessage: ctx.state.handleIncomingMessage })
   writePeerDebugLog('main.wsServer.ready', { wsPort: ctx.state.wsServerInfo.port })
+
+  // 유휴 자동 자리비움 감시 시작 — 로그인 전에는 내부적으로 아무 것도 하지 않는다(#41).
+  startPresenceMonitor(ctx)
 }
 
 // 부팅 / 재실행 시 중복 호출 방지 플래그.
@@ -156,13 +204,28 @@ async function createWindow() {
     return
   }
 
+  // 창 크기/위치 복원(#71) — 저장된 위치가 현재 연결된 디스플레이 중 어디에도 없으면
+  // (모니터 분리 등) resolveWindowState 가 null 을 반환해 기본 크기로 폴백한다.
+  const restoredBounds = resolveWindowState(appDataPath, screen.getAllDisplays())
+
+  // 로그인 자동 시작으로 인한 최초 실행이고 "숨김 시작"이 켜져 있으면 창을 띄우지 않고 트레이만 띄운다.
+  // 플래그는 1회성 — 이후 재실행(두 번째 인스턴스/activate)에서는 항상 정상적으로 보이게 한다.
+  const startHidden = shouldStartHiddenOnFirstLaunch
+  shouldStartHiddenOnFirstLaunch = false
+
   ctx.state.mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    minWidth: 700,
-    minHeight: 500,
+    width: restoredBounds?.width ?? DEFAULT_WIDTH,
+    height: restoredBounds?.height ?? DEFAULT_HEIGHT,
+    ...(restoredBounds ? { x: restoredBounds.x, y: restoredBounds.y } : {}),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
+    show: !startHidden,
     backgroundColor: '#1e1e1e',
-    titleBarStyle: 'hiddenInset',
+    // macOS: hiddenInset 로 신호등만 남기고 렌더러 커스텀 헤더(App.jsx TitleBar)를 그 옆에 배치.
+    // win/linux: 네이티브 프레임을 그대로 사용(frame: true, 기본값과 동일) — 별도 재설계 없이
+    // 신호등 여백만 렌더러에서 제거하면 되므로(#72), 여기서는 darwin 전용 옵션만 분기한다.
+    // (수동 확인 필요: win/linux 에서 커스텀 헤더 + 네이티브 타이틀바가 자연스럽게 공존하는지)
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : { frame: true }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -171,12 +234,48 @@ async function createWindow() {
     },
   })
 
+  // 창 크기/위치 변경을 디바운스 저장(#71) — resize/move 마다 디스크에 쓰지 않도록 500ms 유예.
+  // getNormalBounds() 는 최대화/최소화/전체화면 상태에서도 항상 "일반 상태" bounds 를 반환하므로
+  // 별도의 isMaximized 가드 없이도 항상 정상적인 복원 값이 저장된다.
+  let saveWindowStateTimer = null
+  const persistWindowStateNow = () => {
+    if (!ctx.state.mainWindow || ctx.state.mainWindow.isDestroyed()) return
+    saveWindowState(appDataPath, ctx.state.mainWindow.getNormalBounds())
+  }
+  const scheduleWindowStateSave = () => {
+    clearTimeout(saveWindowStateTimer)
+    saveWindowStateTimer = setTimeout(persistWindowStateNow, 500)
+  }
+  ctx.state.mainWindow.on('resize', scheduleWindowStateSave)
+  ctx.state.mainWindow.on('move', scheduleWindowStateSave)
+
+  // 네비게이션 가드 — 렌더러가 신뢰불가 콘텐츠(피어 마크다운 링크 등)로 세션을
+  // 외부 페이지로 끌고 가거나 임의의 새 BrowserWindow 를 여는 것을 차단한다.
+  // 외부 링크는 기존과 동일하게 shell.openExternal(사용자 기본 브라우저)로만 열린다.
+  ctx.state.mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // http/https 만 외부 브라우저로 위임, 그 외 스킴/파일은 조용히 무시.
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    // 어떤 경우에도 앱 안에서 새 창을 만들지 않는다.
+    return { action: 'deny' }
+  })
+
+  // 앱 내부(file://·lanchat://·dev localhost) 가 아닌 곳으로의 네비게이션을 막고,
+  // 외부 http/https 였다면 기본 브라우저로 열어 링크 클릭 UX 는 유지한다.
+  ctx.state.mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isInternalNavigationUrl(url)) return
+    event.preventDefault()
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+  })
+
   // 닫기 버튼 클릭 시 종료 대신 숨김 (트레이로 최소화)
   ctx.state.mainWindow.on('close', (event) => {
     if (!ctx.state.isQuitting) {
       event.preventDefault()
       ctx.state.mainWindow.hide()
     }
+    // 숨김/실제 종료 어느 경로든 디바운스 타이머를 기다리지 않고 마지막 위치를 즉시 저장한다(#71).
+    clearTimeout(saveWindowStateTimer)
+    persistWindowStateNow()
   })
 
   // 창 포커스 시 badge 초기화
@@ -326,11 +425,16 @@ async function performCleanup() {
   if (hasCleanedUp) return
   hasCleanedUp = true
   stopMemoryMonitor()
+  stopPresenceMonitor()
   // mDNS goodbye 패킷 전파를 위해 await (500ms 대기 포함)
   try { await stopPeerDiscovery() } catch { /* 무시 */ }
   try { stopFileServer() } catch { /* 무시 */ }
   try { if (ctx.state.wsServerInfo) stopWsServer(ctx.state.wsServerInfo) } catch { /* 무시 */ }
-  try { if (ctx.state.database) ctx.state.database.close() } catch { /* 무시 */ }
+  // closeDatabase 가 close 전에 wal_checkpoint(TRUNCATE) 를 시도해 WAL 파일이
+  // 무한정 커지는 것을 방지한다(#27).
+  try { if (ctx.state.database) closeDatabase(ctx.state.database) } catch { /* 무시 */ }
+  // 버퍼링된(비동기) 디버그 로그가 종료 시점에 유실되지 않도록 마지막으로 강제 flush.
+  try { await flushPeerDebugLogNow() } catch { /* 무시 */ }
 }
 
 // before-quit: app.quit()가 어디서 호출되든 cleanup 실행 (async 처리로 goodbye 전파 보장)
