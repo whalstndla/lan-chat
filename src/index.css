@@ -5,18 +5,20 @@
 /* ─── 테마 색상 변수 (#73) ───
    다크가 이 앱의 기본 테마(:root) — 값은 기존 tailwind.config.js 의 vsc-* 16진값과
    정확히 동일한 RGB 채널로 옮겨졌을 뿐이라 렌더 결과는 이전과 100% 동일하다(다크 불변식).
-   "R, G, B" 형태(hex 아님)인 이유는 tailwind.config.js 의 rgb(var(--x) / <alpha-value>)
-   패턴이 opacity 모디파이어(bg-vsc-accent/20 등)를 지원하려면 채널값이 필요하기 때문. */
+   "R G B" 형태(공백 구분, hex 아님, 쉼표 금지)인 이유: tailwind.config.js 의
+   rgb(var(--x) / <alpha-value>) 패턴이 슬래시-알파(모던 rgb 문법)를 쓰므로 채널값도
+   반드시 공백 구분이어야 한다. 쉼표로 쓰면 rgb(30, 30, 30 / 1) 처럼 레거시(쉼표)+모던(/알파)
+   혼합이라 브라우저가 무효 색으로 처리해 배경/테두리가 전부 렌더되지 않는다(v0.11.0 회귀). */
 :root {
-  --vsc-bg:        30, 30, 30;     /* #1e1e1e */
-  --vsc-sidebar:   37, 37, 38;     /* #252526 */
-  --vsc-panel:     45, 45, 45;     /* #2d2d2d */
-  --vsc-border:    62, 62, 66;     /* #3e3e42 */
-  --vsc-text:      204, 204, 204;  /* #cccccc */
-  --vsc-muted:     133, 133, 133;  /* #858585 */
-  --vsc-accent:    78, 201, 176;   /* #4ec9b0 */
-  --vsc-selected:  55, 55, 61;     /* #37373d */
-  --vsc-hover:     42, 45, 46;     /* #2a2d2e */
+  --vsc-bg:        30 30 30;     /* #1e1e1e */
+  --vsc-sidebar:   37 37 38;     /* #252526 */
+  --vsc-panel:     45 45 45;     /* #2d2d2d */
+  --vsc-border:    62 62 66;     /* #3e3e42 */
+  --vsc-text:      204 204 204;  /* #cccccc */
+  --vsc-muted:     133 133 133;  /* #858585 */
+  --vsc-accent:    78 201 176;   /* #4ec9b0 */
+  --vsc-selected:  55 55 61;     /* #37373d */
+  --vsc-hover:     42 45 46;     /* #2a2d2e */
 
   /* 폰트 크기 설정(#73) 배율 — 기본 1(보통). SettingsPanel 에서 useUserStore.setFontSize 로 갱신. */
   --app-font-scale: 1;
@@ -25,15 +27,15 @@
 /* 라이트 팔레트 — 시각 검증 불가 환경(샌드박스)에서 만든 "합리적 시작점"이다.
    실제 앱에서 사용자가 눈으로 보며 색상을 튜닝해야 한다(대비/가독성 확정 안 됨). */
 :root[data-theme='light'] {
-  --vsc-bg:        255, 255, 255;  /* #ffffff */
-  --vsc-sidebar:   246, 246, 246;  /* #f6f6f6 */
-  --vsc-panel:     241, 241, 241;  /* #f1f1f1 */
-  --vsc-border:    224, 224, 224;  /* #e0e0e0 */
-  --vsc-text:      30, 30, 30;     /* #1e1e1e */
-  --vsc-muted:     110, 110, 110;  /* #6e6e6e */
-  --vsc-accent:    13, 148, 136;   /* #0d9488 */
-  --vsc-selected:  219, 238, 235;  /* #dbeeeb */
-  --vsc-hover:     236, 236, 236;  /* #ececec */
+  --vsc-bg:        255 255 255;  /* #ffffff */
+  --vsc-sidebar:   246 246 246;  /* #f6f6f6 */
+  --vsc-panel:     241 241 241;  /* #f1f1f1 */
+  --vsc-border:    224 224 224;  /* #e0e0e0 */
+  --vsc-text:      30 30 30;     /* #1e1e1e */
+  --vsc-muted:     110 110 110;  /* #6e6e6e */
+  --vsc-accent:    13 148 136;   /* #0d9488 */
+  --vsc-selected:  219 238 235;  /* #dbeeeb */
+  --vsc-hover:     236 236 236;  /* #ececec */
 }
 
 /* 루트 font-size 를 배율만큼 조정 — Tailwind 의 text-xs/text-sm 등은 rem 기반이라
