@@ -38,7 +38,7 @@ export default function LanpetAvatar({ stage = 'seed', appearanceId = '', restin
         {social && <path d="M98 133L100 129L102 133L107 134L103 137L104 142L100 139L96 142L97 137L93 134Z" fill="#eac877" stroke="#765a47" strokeWidth="1.5" />}
         {mature && <g fill="#ecc375" stroke="#243b2b" strokeWidth="2"><circle cx="105" cy="42" r="9" /><circle cx="118" cy="42" r="9" /><circle cx="111" cy="31" r="9" /><circle cx="111" cy="43" r="5" fill="#9c713d" /></g>}
       </g>
-      {resting && <text x="145" y="63" fill="#668c43" fontFamily="monospace" fontSize="20">z z</text>}
+      {resting && <text x="145" y="63" fill="#668c43" fontFamily="sans-serif" fontSize="16">쿨쿨</text>}
     </svg>
   )
 }

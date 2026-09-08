@@ -1,13 +1,23 @@
 [
   {
+    "version": "0.13.1",
+    "date": "2026-09-08",
+    "changes": [
+      { "type": "improve", "text": "랜펫 화면 전체 한글화: 시작 안내, 돌봄, 성장, 친구, 추억, 설정과 접근성 안내를 자연스러운 한국어로 표시합니다." },
+      { "type": "improve", "text": "친선 배틀의 집중·방어·불꽃 선택, 규칙, 남은 시간, 승패와 재연결 안내를 한글로 표시합니다." },
+      { "type": "fix", "text": "랜펫 오류 메시지와 기본 이름, 날짜·시간, 기념품 이름을 한글로 정리했습니다. 사용자가 지은 이름과 기존 성장·교류 데이터는 유지합니다." },
+      { "type": "improve", "text": "v0.13.0의 랜펫 업데이트 안내도 한글로 표시합니다. v0.13.0 사용자와 계속 함께 놀 수 있습니다." }
+    ]
+  },
+  {
     "version": "0.13.0",
     "date": "2026-09-08",
     "changes": [
-      { "type": "feat", "text": "Lanpet: adopt an original pocket companion, care for it, and choose its growth. Activities run Monday through Friday, 09:00–18:00; nights and weekends carry no care penalty." },
-      { "type": "feat", "text": "Lanpet friends: opt in to local sharing, exchange visits and keepsakes, play together, and join five-round friendly battles. Both players keep their pets and items." },
-      { "type": "feat", "text": "Private by default: activity permissions and invitation blocking, no chat-content or message-count rewards, no pet OS notifications, and encrypted local pet records." },
-      { "type": "improve", "text": "Peer recovery: encrypted Lanpet messages, trusted-key and generation checks, persistent duplicate protection, and explicit confirmation of interrupted results." },
-      { "type": "improve", "text": "Compatibility: both peers need v0.13.0 or later for Lanpet activities. Existing chat remains compatible with wire-v2 versions when the other peer has no Lanpet support." }
+      { "type": "feat", "text": "랜펫: 나만의 작은 친구를 맞이하고 돌보며 성장 모습을 선택할 수 있습니다. 월요일부터 금요일 09:00–18:00에만 활동하며 밤과 주말에는 돌봄 벌점이 없습니다." },
+      { "type": "feat", "text": "랜펫 친구: 펫 공개를 켜면 방문·기념품·협동 놀이와 5판 친선 배틀을 함께할 수 있습니다. 승패와 관계없이 펫과 아이템을 그대로 간직합니다." },
+      { "type": "feat", "text": "기본 비공개: 활동별 허용과 초대 차단을 지원합니다. 채팅 내용·메시지 수를 보상에 사용하지 않으며 펫 알림을 보내지 않고 기록을 암호화해 저장합니다." },
+      { "type": "improve", "text": "교류 복구: 랜펫 통신 암호화, 신뢰 키·펫 세대 확인, 영구 중복 방지와 끊긴 활동의 결과 확인을 지원합니다." },
+      { "type": "improve", "text": "호환성: 랜펫 교류는 양쪽 앱이 v0.13.0 이상이어야 합니다. 상대가 랜펫을 지원하지 않아도 기존 통신 규격의 채팅은 유지됩니다." }
     ]
   },
   {
