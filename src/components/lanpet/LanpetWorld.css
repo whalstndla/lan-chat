@@ -101,3 +101,69 @@
 @media (max-width: 740px) { .lanpet-dialog .lanpet-home-layout { grid-template-columns: 1fr; }.lanpet-dialog .lanpet-header { padding: 15px; }.lanpet-dialog .lanpet-tabs { padding: 8px 10px; gap: 2px; }.lanpet-dialog .lanpet-tabs > button { padding: 7px 9px; font-size: 11px; }.pet-shop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.pet-drawer-body { grid-template-columns: 1fr; }.pet-drawer-scene { min-height: 210px; }.pet-drawer-controls { overflow: visible; }.pet-drawer-toggle small { display: none; } }
 @media (max-width: 440px) { .lanpet-dialog.lanpet-dialog { width: calc(100vw - 12px); max-height: calc(100dvh - 20px); border-radius: 19px; }.lanpet-dialog .lanpet-content { padding: 14px; }.lanpet-dialog .lanpet-tabs { flex-direction: row; }.pet-tree { padding: 12px; }.pet-tree-branches { gap: 5px; }.pet-tree-branches strong { font-size: 11px; }.pet-tree-branches small { font-size: 9px; }.pet-shop-grid, .pet-game-cards { grid-template-columns: 1fr; }.pet-lottery { padding: 14px; gap: 10px; }.pet-lottery > .pet-item-icon { font-size: 28px; }.lanpet-dialog .lanpet-local-label { display: none; } }
 @media (prefers-reduced-motion: reduce) { .is-roaming .pet-room-resident, .lanpet-creature, .lanpet-eyes { animation: none !important; }.pet-race-track > div { transition: none; } }
+
+/* 입체 놀이방의 조명과 어울리는 바닐라·로즈 색을 유지한다. */
+.lanpet-dialog.lanpet-dialog { width: min(1060px, calc(100vw - 32px)); border-color: #dcb3c3; }
+.lanpet-dialog .lanpet-header { background: #f8e5df; }
+.lanpet-dialog .lanpet-content { background: #fffaf3; }
+.lanpet-dialog .lanpet-home-layout { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 25px; }
+.lanpet-dialog .lanpet-pocket { background: #f9eddf; border-color: #d8bcac; }
+.pet-room-three.lanpet-room { height: 330px; background: #f8eadf; border: 1px solid #d9c1b0; border-radius: 19px; }
+.lanpet-three-scene { position: relative; width: 100%; height: 300px; overflow: hidden; border-radius: 18px; background: #f8eadf; contain: layout paint; }
+.lanpet-three-scene canvas { display: block; width: 100%; height: 100%; outline: none; }
+.pet-room-three > .lanpet-three-scene { height: 100%; }
+.pet-room-caption { position: absolute; top: 13px; left: 16px; display: flex; flex-direction: column; gap: 3px; pointer-events: none; max-width: calc(100% - 25px); }
+.pet-room-caption > span { color: #967965; font-size: 9px; letter-spacing: .07em; }
+.pet-room-caption > strong { color: #795b62; font-size: 13px; text-shadow: 0 1px #fff9; }
+.pet-resident-tags { position: absolute; left: 10px; right: 10px; bottom: 12px; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; pointer-events: none; }
+.pet-resident-tags > span { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border-radius: 15px; background: #fffaf0ed; color: #72566a; font-size: 10px; border: 1px solid #dcc6b8; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-resident-tags i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.pet-scene-loading, .pet-scene-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 20px; background: #f8eadff0; text-align: center; color: #796173; font-size: 12px; }
+.pet-scene-fallback p { max-width: 290px; font-size: 11px; }
+.pet-three-portrait { object-fit: contain; filter: drop-shadow(0 4px 3px #79536313); }
+.lanpet-avatar.pet-three-portrait.is-small { width: 94px; height: 88px; }
+.lanpet-peer-avatar .lanpet-avatar.pet-three-portrait { width: 65px; height: 65px; }
+.lanpet-dialog .lanpet-peer, .lanpet-dialog .lanpet-session { box-shadow: 0 3px 0 #dfd2c730; }
+.lanpet-session > .lanpet-three-scene { height: 210px; margin-top: 12px; }
+.lanpet-session.pet-social-race > .scene-race, .pet-active-game > .scene-race { height: 255px; margin-top: 14px; }
+.pet-active-game > .scene-memory { height: 225px; }
+.pet-active-game { background: #f8f4e8; border-color: #d1c6a9; }
+.pet-game-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pet-game-heading h3 { font-size: 17px; color: #716052; }
+.pet-game-step { text-align: center; font-size: 12px; color: #826b73; margin: 11px 0 !important; }
+.pet-distance-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 9px 12px; border-bottom: 1px solid #e0cdbd; background: #fffaf1; border-radius: 0 0 12px 12px; color: #7b6174; font-size: 11px; }
+.pet-distance-bar b { font-size: 15px; margin-left: 7px; color: #6b6973; }
+.pet-dice-results { display: flex; justify-content: center; gap: 14px; margin: 12px 0; }
+.pet-dice-results > div { display: flex; align-items: center; gap: 9px; padding: 3px 14px; background: #fffaf0; border: 1px solid #dec5b0; border-radius: 15px; color: #806376; font-size: 11px; }
+.pet-dice-results b { font-size: 36px; line-height: 1.15; color: #b66589; }
+.pet-dice-results > div + div b { color: #528b8c; }
+.pet-dice-results strong { font-size: 13px; }
+.pet-dice-button { display: flex; justify-content: center; align-items: center; gap: 10px; width: min(100%, 420px); min-height: 51px; margin: 10px auto; padding: 8px 20px; border-radius: 18px; border: 2px solid #bc7493; background: #eab2c8; color: #603d57; font-weight: 700; font-size: 14px; box-shadow: 0 4px 0 #d995b1, inset 0 1px 0 #fff9; transition: transform .15s, background .15s; }
+.pet-dice-button > span { font-size: 28px; line-height: 1; }
+.pet-dice-button:hover:not(:disabled) { background: #f2c9a6; transform: translateY(-1px); }
+.pet-dice-button:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 2px 0 #d995b1; }
+.pet-dice-button:disabled, .pet-memory-card:disabled { cursor: not-allowed; opacity: .6; }
+.pet-memory-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 8px 0 14px; }
+.pet-memory-card { display: flex; align-items: center; flex-direction: column; justify-content: center; gap: 5px; min-height: 100px; background: #fff8e7; border: 2px solid #d9bf9e; border-radius: 17px; box-shadow: 0 4px 0 #e0d1bc; color: #79675c; transition: transform .2s; }
+.pet-memory-card:hover:not(:disabled) { transform: translateY(-5px) rotate(-2deg); background: #ffe7dd; }
+.pet-memory-card > span { font-size: 36px; }.pet-memory-card small { font-size: 10px; }
+.pet-game-cue { min-height: 42px; font-size: 15px; }
+.pet-prize > strong { font-size: 18px; display: block; margin-bottom: 3px; }.pet-prize p { margin: 3px 0; }
+.pet-prize.is-new-prize { animation: pet-prize-pop .6s ease-out; }
+.pet-limit-explanation { padding: 10px 13px; margin: 12px 0; border: 1px solid #e3d3bd; border-radius: 13px; background: #fbf2e2; color: #7d6a5d; font-size: 11px; line-height: 1.65; }
+.pet-limit-explanation > strong { font-size: 12px; }.pet-limit-explanation p { margin: 3px 0 !important; color: inherit !important; font-size: inherit !important; }
+.pet-ready-time { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 11px; margin-top: 6px; font-size: 11px; color: #7d6475; }
+.pet-ready-time > strong { padding: 2px 7px; border-radius: 8px; background: #f3dfdd; color: #8a4d6c; font-size: 11px; font-variant-numeric: tabular-nums; }
+.pet-explained-notice { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid #becfc2; background: #edf4e9; color: #4f6b5b; border-radius: 16px; font-size: 12px; }
+.pet-explained-notice.is-error { background: #fff0e2; color: #8d5a43; border-color: #d8b99b; }
+.pet-explained-notice > div { flex: 1; min-width: 0; }.pet-explained-notice p { margin: 5px 0 0; line-height: 1.55; font-size: 11px; }.pet-notice-symbol { font-size: 18px; }.pet-explained-notice > button { flex-shrink: 0; }
+.pet-drawer-peer > .pet-limit-explanation { flex-basis: 100%; margin: 2px 0; padding: 6px 9px; font-size: 10px; }
+.pet-drawer-scene .pet-room-three { min-height: 228px; }
+.pet-drawer-controls .scene-race { height: 200px !important; }
+.pet-drawer-controls .pet-dice-results { gap: 4px; }.pet-drawer-controls .pet-dice-results > div { gap: 5px; padding: 3px 7px; }
+.pet-drawer-controls .pet-dice-results b { font-size: 27px; }.pet-drawer-controls .pet-dice-button { font-size: 11px; }
+@media (min-width: 741px) { .pet-drawer-body { grid-template-rows: minmax(0, 1fr); }.pet-drawer-scene, .pet-drawer-controls { min-height: 0; }.pet-drawer-scene .pet-room-three { min-height: 0; height: 100%; } }
+@keyframes pet-prize-pop { 0% { transform: scale(.92); } 60% { transform: scale(1.03); } 100% { transform: scale(1); } }
+@media (max-width: 740px) { .lanpet-dialog .lanpet-home-layout { grid-template-columns: 1fr; }.pet-room-three.lanpet-room { height: 310px; }.pet-dice-results { gap: 7px; }.pet-dice-results > div { padding: 4px 8px; gap: 5px; }.pet-memory-cards { gap: 7px; } }
+@media (max-width: 440px) { .lanpet-dialog.lanpet-dialog { width: calc(100vw - 12px); }.pet-room-three.lanpet-room { height: 255px; }.lanpet-session.pet-social-race > .scene-race, .pet-active-game > .scene-race { height: 220px; }.pet-dice-results > div { flex-wrap: wrap; }.pet-memory-card { min-height: 80px; }.pet-memory-card > span { font-size: 28px; }.pet-ready-time { font-size: 10px; } }
+@media (prefers-reduced-motion: reduce) { .pet-dice-button, .pet-memory-card { transition: none; }.pet-prize.is-new-prize { animation: none; } }

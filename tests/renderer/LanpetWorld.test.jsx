@@ -5,7 +5,7 @@ import { EvolutionTree, WorldShop } from '../../src/components/lanpet/LanpetWorl
 import { SPECIES, FOODS, DECORATIONS } from '../../electron/lanpet/world'
 
 function snapshot() {
-  return { enabled: true, isWorkingTime: true, pet: { petId: 'own', name: '내 친구', stage: 'young', lifecycleState: 'active', appearanceId: 'young-fox-base' }, world: { balance: 100, bag: { rice: 2 }, owned: ['cream', 'parquet', 'plant'], room: {}, foods: FOODS, decorations: DECORATIONS }, invitations: [], sessions: [], peers: [
+  return { enabled: true, sharingEnabled: true, isWorkingTime: true, pet: { petId: 'own', name: '내 친구', energy: 80, stage: 'young', lifecycleState: 'active', appearanceId: 'young-fox-base' }, world: { balance: 100, bag: { rice: 2 }, owned: ['cream', 'parquet', 'plant'], room: {}, foods: FOODS, decorations: DECORATIONS }, invitations: [], sessions: [], peers: [
     { peerId: 'one', petName: '첫 친구', available: true, activities: ['race'] },
     { peerId: 'two', petName: '다른 방 친구', available: true, activities: ['race'] },
     { peerId: 'private', petName: '비공개 친구', available: false, activities: [] },

@@ -5,6 +5,16 @@ const ACTIVITIES = Object.freeze(['visit', 'cooperativePlay', 'gift', 'battle', 
 const CHOICES = Object.freeze(['focus', 'guard', 'spark'])
 const MESSAGE_TYPES = new Set(['summary', 'revoked', 'invite', 'respond', 'started', 'input', 'round', 'result', 'abort', 'cancel', 'status', 'ack'])
 const TERMINAL_STATUSES = new Set(['completed', 'declined', 'canceled', 'expired', 'keyChanged', 'resultDisputed', 'deleted'])
+const DICE_CAPABILITY = 'lanpet-dice-v1'
+
+function isDiceRace(session) { return session.activity === 'race' && session.ruleVersion === 2 }
+
+function sessionRoundScore(session, round) {
+  const [first, second] = session.participants
+  if (!isDiceRace(session)) return roundScore(round.inputs[first], round.inputs[second], session.activity)
+  assert(session.participants.every(id => round.inputs[id] === 'roll' && Number.isInteger(round.dice?.[id]) && round.dice[id] >= 1 && round.dice[id] <= 6), 'INVALID_DICE_ROLL')
+  return [round.dice[first], round.dice[second]]
+}
 
 function assert(condition, code = 'INVALID_PAYLOAD') {
   if (!condition) throw new Error(code)
@@ -51,4 +61,4 @@ function roundScore(first, second, activity) {
   return defeated[first] === second ? [1, 0] : [0, 1]
 }
 
-module.exports = { ACTIVITIES, CHOICES, MESSAGE_TYPES, TERMINAL_STATUSES, assert, isIdentifier, validateEnvelope, hashPayload, roundScore }
+module.exports = { ACTIVITIES, CHOICES, MESSAGE_TYPES, TERMINAL_STATUSES, DICE_CAPABILITY, isDiceRace, sessionRoundScore, assert, isIdentifier, validateEnvelope, hashPayload, roundScore }

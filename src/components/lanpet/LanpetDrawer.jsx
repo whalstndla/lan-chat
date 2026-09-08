@@ -5,9 +5,11 @@ import LanpetPanel, { Invitation, Session } from './LanpetPanel'
 import { PetRoom } from './LanpetWorld'
 import './Lanpet.css'
 import './LanpetWorld.css'
+import { Notice, PeerLimit, ReadyTime, activityReason, usePetClock } from './LanpetNotice'
 
 function DrawerContent({ currentRoom, openPanel }) {
-  const { snapshot, busy, error, command, loading } = useLanpet()
+  const { snapshot, busy, error, notice, effect, dismissNotice, command, loading } = useLanpet()
+  const now = usePetClock(snapshot?.serverNow)
   if (loading && !snapshot) return <p className="pet-drawer-note">친구들이 놀이방으로 오는 중…</p>
   if (!snapshot?.pet) return <div className="pet-drawer-note"><p>여섯 종류의 작은 친구 중 누가 찾아올까요?</p><button className="lanpet-button is-primary" onClick={() => openPanel('home')}>내 첫 랜펫 만나기</button></div>
   const paused = !snapshot.enabled || !snapshot.isWorkingTime || snapshot.pet.lifecycleState !== 'active'
@@ -16,14 +18,15 @@ function DrawerContent({ currentRoom, openPanel }) {
   const invitations = (snapshot.invitations || []).filter(inRoom)
   const sessions = (snapshot.sessions || []).filter(inRoom).slice(0, 1)
   return <div className="pet-drawer-body">
-    <div className="pet-drawer-scene"><PetRoom pet={snapshot.pet} peers={peers} room={snapshot.world?.room} roaming resting={paused} /></div>
+    <div className="pet-drawer-scene"><PetRoom pet={snapshot.pet} peers={peers} room={snapshot.world?.room} roaming resting={paused} effect={effect} /></div>
     <div className="pet-drawer-controls"><div className="pet-drawer-heading"><strong>{snapshot.pet.name}의 놀이방</strong><span>✦ {snapshot.world?.balance || 0}</span></div>
       <p>{peers.length ? '현재 채팅방 친구들과 함께 쉬어 가요.' : '이 채팅방에서 펫을 공개한 친구가 오면 함께 놀아요.'}</p>
-      <div className="lanpet-action-row"><button className="lanpet-button" disabled={busy || paused} onClick={() => command({ type: 'feed', itemId: 'snack' })}>간식 주기</button><button className="lanpet-button" onClick={() => openPanel('shop')}>상점·꾸미기</button><button className="lanpet-button" onClick={() => openPanel('games')}>미니게임</button></div>
-      {peers.map(peer => <div className="pet-drawer-peer" key={peer.peerId}><span>{peer.petName}</span><button className="lanpet-button" disabled={busy || paused || snapshot.allowCooperativePlay === false || !peer.activities?.includes('race')} onClick={() => command({ type: 'invite', peerId: peer.peerId, activity: 'race' })}>경주 초대</button><button className="lanpet-button" disabled={busy || paused || !peer.activities?.includes('cooperativePlay')} onClick={() => command({ type: 'invite', peerId: peer.peerId, activity: 'cooperativePlay' })}>같이 놀기</button></div>)}
+      <div className="lanpet-action-row"><button className="lanpet-button" disabled={busy || paused || snapshot.world?.snackReadyAt > now} onClick={() => command({ type: 'feed', itemId: 'snack' })}>간식 주기</button><button className="lanpet-button" onClick={() => openPanel('shop')}>상점·꾸미기</button><button className="lanpet-button" onClick={() => openPanel('games')}>미니게임</button></div>
+      <ReadyTime at={snapshot.world?.snackReadyAt} now={now} label="무료 간식 · 1시간마다" />
+      {peers.map(peer => <div className="pet-drawer-peer" key={peer.peerId}><span>{peer.petName}</span><button className="lanpet-button" disabled={busy || paused || !!activityReason(snapshot, peer, 'race', now) || snapshot.allowCooperativePlay === false || !peer.activities?.includes('race')} onClick={() => command({ type: 'invite', peerId: peer.peerId, activity: 'race' })}>경주 초대</button><button className="lanpet-button" disabled={busy || paused || !!activityReason(snapshot, peer, 'cooperativePlay', now) || snapshot.allowCooperativePlay === false || !peer.activities?.includes('cooperativePlay')} onClick={() => command({ type: 'invite', peerId: peer.peerId, activity: 'cooperativePlay' })}>같이 놀기</button><PeerLimit peer={peer} now={now} />{activityReason(snapshot, peer, 'race', now) && <p>{activityReason(snapshot, peer, 'race', now)}</p>}</div>)}
       {invitations.map(invitation => <Invitation key={invitation.sessionId} invitation={invitation} command={command} busy={busy} interactionPaused={paused} />)}
       {sessions.map(session => <Session key={session.sessionId} session={session} command={command} busy={busy} interactionPaused={paused} />)}
-      {error && <p role="alert">{error.message}</p>}
+      <Notice notice={error || notice} now={now} onDismiss={dismissNotice} />
       {paused && <p>월–금 09–18시, 펫이 깨어 있을 때 활동할 수 있어요.</p>}
     </div>
   </div>

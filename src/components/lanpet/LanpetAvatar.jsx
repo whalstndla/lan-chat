@@ -1,9 +1,24 @@
-import React, { useId } from 'react'
+import React, { useEffect, useId, useState } from 'react'
 
 const coats = { fox: '#ffb36f', rabbit: '#ffb6d6', otter: '#75d9d9', cat: '#baa7f2', bird: '#ffe16b', bear: '#a5dc8c' }
 const shadows = { fox: '#e67b49', rabbit: '#dc79a7', otter: '#36a8b7', cat: '#8267ce', bird: '#e8ad37', bear: '#65af65' }
 
 export default function LanpetAvatar({ stage = 'seed', appearanceId = '', resting = false, small = false }) {
+  const [portrait, setPortrait] = useState(null)
+  useEffect(() => {
+    let canceled = false
+    setPortrait(null)
+    if (!window.WebGL2RenderingContext) return undefined
+    import('./three/scene').then(({ petPortrait }) => {
+      if (!canceled) setPortrait(petPortrait(appearanceId, stage))
+    }).catch(() => { /* 그래픽 초기화에 실패하면 같은 종의 가벼운 대체 이미지를 유지한다. */ })
+    return () => { canceled = true }
+  }, [appearanceId, stage])
+  if (portrait) return <img className={`lanpet-avatar pet-three-portrait ${resting ? 'is-resting' : ''} ${small ? 'is-small' : ''}`} src={portrait} alt="" aria-hidden="true" />
+  return <FallbackAvatar stage={stage} appearanceId={appearanceId} resting={resting} small={small} />
+}
+
+function FallbackAvatar({ stage, appearanceId, resting, small }) {
   const id = useId().replace(/:/g, '')
   const parts = appearanceId.split('-')
   const species = coats[parts[1]] ? parts[1] : 'bear'

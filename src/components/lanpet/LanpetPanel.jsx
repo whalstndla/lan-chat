@@ -4,10 +4,13 @@ import LanpetAvatar from './LanpetAvatar'
 import useLanpet from './useLanpet'
 import { PetRoom, EvolutionTree, WorldShop, WorldGames } from './LanpetWorld'
 import './LanpetWorld.css'
+import LanpetScene from './LanpetScene'
+import LanpetRace, { SessionExplanation } from './LanpetRace'
+import { Notice, PeerLimit, ReadyTime, SocialRewardNotice, activityReason, usePetClock } from './LanpetNotice'
 
 const activityLabels = { visit: '방문하기', cooperativePlay: '함께 놀기', gift: '기념품 보내기', battle: '친선 배틀', race: '친구와 경주' }
 const activityDescriptions = { visit: '친구에게 들러 가볍게 인사해요.', cooperativePlay: '협동 놀이와 친구 경주를 허용해요.', gift: '친구에게 추억이 담긴 기념품을 선물해요.', battle: '다섯 판의 친선 대결이에요. 펫이나 아이템을 잃지 않아요.' }
-activityDescriptions.race = '세 구간을 달리는 경주예요. 함께 놀기 설정으로 허용해요.'
+activityDescriptions.race = '주사위를 굴려 다섯 턴 동안 전진해요. 한 턴에 15초, 에너지 6이 필요해요.'
 const activitySettings = { visit: 'allowVisit', cooperativePlay: 'allowCooperativePlay', gift: 'allowGift', battle: 'allowBattle' }
 const statusLabels = { outgoingPending: '수락 대기', incomingPending: '초대 도착', preparing: '준비 중', inProgress: '진행 중', resultUnknown: '결과 확인 대기', completed: '완료', declined: '거절됨', canceled: '종료됨', aborted: '중단됨', expired: '만료됨', reconciliationNeeded: '재연결 필요', keyChanged: '신원 확인 필요' }
 const outcomeLabels = { win: '이겼어요!', loss: '멋진 대결이었어요!', draw: '사이좋게 비겼어요', completed: '함께한 추억이 생겼어요' }
@@ -99,7 +102,8 @@ function Meter({ label, value }) {
   return <div className="lanpet-meter"><div><span>{label}</span><span>{Math.round(safeValue)}<small>/100</small></span></div><meter aria-label={label} min="0" max="100" value={safeValue} /></div>
 }
 
-function PetHome({ snapshot, command, busy }) {
+function PetHome({ snapshot, command, busy, effect }) {
+  const now = usePetClock(snapshot.serverNow)
   const pet = snapshot.pet
   const resting = ['resting', 'restingAway'].includes(pet.lifecycleState) || !snapshot.isWorkingTime
   const canCare = snapshot.enabled && snapshot.isWorkingTime && pet.lifecycleState === 'active'
@@ -108,7 +112,7 @@ function PetHome({ snapshot, command, busy }) {
     <div className="lanpet-home-layout">
       <section className="lanpet-pocket" aria-label={`${pet.name}의 작은 정원`}>
         <div className="lanpet-pocket-label"><span>랜펫 / 01</span><span className="lanpet-lamp">{resting ? '쉬는 중' : '집에 있어요'}</span></div>
-        <PetRoom pet={pet} room={snapshot.world?.room} resting={resting} />
+        <PetRoom pet={pet} room={snapshot.world?.room} resting={resting} effect={effect} roaming />
         <div className="lanpet-pocket-caption"><div><h2>{pet.name}</h2><span>{{ seed: '씨앗', young: '새싹', grown: '동반자' }[pet.stage] || '작은 친구'} · {temperamentLabels[pet.temperament] || '호기심 많은 친구'}</span></div><span className="lanpet-generation">하나뿐인<br />내 친구</span></div>
       </section>
       <section className="lanpet-care-panel" aria-labelledby="lanpet-care-title">
@@ -118,6 +122,7 @@ function PetHome({ snapshot, command, busy }) {
         <div className="lanpet-care-actions">{careActions.map(action => <button key={action.action} className="lanpet-care-button" disabled={busy || !canCare} onClick={() => command({ type: 'care', action: action.action })}><span aria-hidden="true">{action.symbol}</span>{action.label}</button>)}</div>
         {pet.lifecycleState === 'restingAway' && <button className="lanpet-button lanpet-welcome" disabled={busy || !snapshot.enabled || !snapshot.isWorkingTime} onClick={() => command({ type: 'care', action: 'welcomeBack' })}><Leaf size={16} /> 다시 만나기</button>}
         <NapNotice pet={pet} />
+        <div className="pet-limit-explanation"><p>돌보기 에너지 −5 · 정리 −3 · 놀아주기 −8. 같은 돌봄을 30분 안에 반복하면 효과가 25%예요. 쉬기는 업무시간 30분 낮잠이에요.</p>{careActions.filter(action => snapshot.careRepeatReadyAt?.[action.action] > now).map(action => <ReadyTime key={action.action} at={snapshot.careRepeatReadyAt[action.action]} now={now} label={`${action.label} 온전한 효과`} />)}</div>
         {!snapshot.isWorkingTime && <p className="lanpet-secondary">업무시간에 다시 돌볼 수 있어요. 지금까지의 성장은 그대로 간직해요.</p>}
         {['ownerConflict', 'recovering'].includes(pet.lifecycleState) && <p className="lanpet-notice">다시 놀기 전에 펫 상태를 복구해야 해요. {pet.lifecycleState === 'ownerConflict' ? '펫의 소유 정보를 확인해 주세요.' : '복구가 끝날 때까지 잠시 기다려 주세요.'}</p>}
       </section>
@@ -150,11 +155,11 @@ export function Invitation({ invitation, command, busy, interactionPaused }) {
 }
 
 export function Session({ session, command, busy, interactionPaused }) {
-  const [now, setNow] = useState(Date.now())
+  const now = usePetClock(session.serverNow)
   const active = session.status === 'inProgress'
-  const interactive = ['battle', 'cooperativePlay', 'race'].includes(session.activity)
-  const timed = ['battle', 'race'].includes(session.activity)
-  const moves = session.activity === 'race' ? { focus: '달리기', guard: '지름길', spark: '점프' } : choiceLabels
+  const interactive = ['battle', 'cooperativePlay'].includes(session.activity)
+  const timed = session.activity === 'battle'
+  const moves = choiceLabels
   const moveLabel = value => moves[value] || choiceLabel(value)
   const totalTurns = session.totalTurns || (session.activity === 'battle' ? 5 : 3)
   const secondsRemaining = Math.min(15, Math.max(0, Math.ceil((Number(session.turnEndsAt) - now) / 1000)))
@@ -163,17 +168,12 @@ export function Session({ session, command, busy, interactionPaused }) {
   let visitActionLabel = '친구를 기다리는 중…'
   if (canChoose) visitActionLabel = '방문 마치기'
   if (interactionPaused) visitActionLabel = '놀이가 일시 중지됐어요'
-  useEffect(() => {
-    if (!active || !timed) return undefined
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [active, timed])
+  if (session.activity === 'race') return <LanpetRace session={session} command={command} busy={busy} interactionPaused={interactionPaused} />
   return <article className="lanpet-session">
     <div className="lanpet-session-heading"><div><span className="lanpet-eyebrow">{activityLabels[session.activity] || '함께하는 시간'}</span><h3>{session.peerName || '친구'} 님과 함께</h3></div><span className="lanpet-badge">{statusLabels[session.status] || '상태 확인 중'}</span></div>
+    {(active || session.result) && session.activity !== 'gift' && <LanpetScene residents={[session.ownPet || {}, session.peerPet || {}]} roaming={!interactionPaused} effect={session.lastRound ? { id: `${session.sessionId}:${session.lastRound.turn}`, kind: session.activity } : null} label="친구와 함께 노는 입체 장면" />}
     {active && interactive && <>
-      {session.activity === 'race' && <div className="pet-peer-race"><p>달리기는 점프를, 점프는 지름길을, 지름길은 달리기를 앞서요. 15초씩 세 구간, 기본 3칸에 유리한 선택은 2칸 더 가요. 시간이 지나면 이번 구간은 쉬어요.</p></div>}
       {session.activity !== 'race' && <p className="lanpet-game-rules">{session.activity === 'battle' ? '집중은 불꽃을, 불꽃은 방어를, 방어는 집중을 이겨요. 한 판에 15초씩 총 다섯 판을 진행해요. 선택하지 않으면 쉬기로 처리돼요.' : '총 세 판 동안 친구와 함께 빛을 골라요. 어떤 조합이든 괜찮아요. 틀린 답은 없어요.'}</p>}
-      {session.raceProgress && <div className="pet-race-lanes">{[['내 펫', session.raceProgress.own, session.raceProgress.ownAppearance], ['친구 펫', session.raceProgress.peer, session.raceProgress.peerAppearance]].map(([label, distance, appearance]) => <div key={label}><span>{label} · {distance}칸</span><div className="pet-race-track"><div style={{ left: `${10 + Math.min(15, distance) * 5}%` }}><LanpetAvatar stage="young" appearanceId={appearance} small /></div><span>🏁</span></div></div>)}</div>}
       <div className="lanpet-game-progress"><span>{totalTurns}판 중 {session.turn || 1}판</span><span>{session.ownChoice ? `내 선택: ${moveLabel(session.ownChoice)}` : '행동을 골라 주세요'}</span>{timed && Number.isFinite(secondsRemaining) && <span>{secondsRemaining}초</span>}</div>
       <div className="lanpet-move-grid">{Object.entries(moves).map(([choice, label]) => <button key={choice} className={`lanpet-move ${session.ownChoice === choice ? 'is-selected' : ''}`} disabled={busy || !canChoose} onClick={() => command({ type: 'action', sessionId: session.sessionId, choice })}><span aria-hidden="true">{{ focus: '◎', guard: '◇', spark: '✦' }[choice]}</span>{label}</button>)}</div>
       {(session.ownChoice || session.waitingForPeer) && <p role="status" className="lanpet-secondary">선택을 보냈어요. 친구를 기다리고 있어요…</p>}
@@ -182,6 +182,7 @@ export function Session({ session, command, busy, interactionPaused }) {
     </>}
     {active && session.activity === 'visit' && <div className="lanpet-visit"><LanpetAvatar small stage="sprout" /><p>잠깐 함께하는 것만으로도 좋은 하루가 돼요.</p><button className="lanpet-button is-primary" disabled={busy || !canChoose} onClick={() => command({ type: 'action', sessionId: session.sessionId, choice: 'focus' })}>{visitActionLabel}</button></div>}
     {session.result && <div className="lanpet-result"><Sparkles size={19} /><div><strong>{outcomeLabels[session.result.outcome] || '함께한 추억이 생겼어요'}</strong>{timed && <p>최종 점수 · {session.result.ownScore}–{session.result.peerScore}</p>}<p>내 펫과 아이템은 그대로 간직해요.</p></div></div>}
+    <SessionExplanation session={session} />
     {session.settlementPending && <p className="lanpet-notice">결과를 내 기기에 저장했어요. 친구의 확인을 기다리고 있어요.</p>}
     {['resultUnknown', 'reconciliationNeeded', 'keyChanged'].includes(session.status) && <p className="lanpet-notice">아직 결과가 확인되지 않았어요. 친구와 다시 연결하면 활동을 복구할 수 있어요. 확인되지 않은 결과를 임의로 적용하지 않아요.</p>}
     {active && <button className="lanpet-button is-quiet" disabled={busy} onClick={() => command({ type: 'end', sessionId: session.sessionId })}>활동 끝내기</button>}
@@ -189,7 +190,10 @@ export function Session({ session, command, busy, interactionPaused }) {
 }
 
 function Friends({ snapshot, command, busy }) {
+  const now = usePetClock(snapshot.serverNow)
   const peers = snapshot.peers || []
+  const activeSessions = (snapshot.sessions || []).filter(session => ['inProgress', 'preparing', 'resultUnknown', 'reconciliationNeeded'].includes(session.status))
+  const visibleSessions = activeSessions.length ? activeSessions : (snapshot.sessions || []).slice(0, 1)
   const interactionPaused = !snapshot.enabled || !snapshot.sharingEnabled || !snapshot.isWorkingTime || Boolean(snapshot.pet?.napEndsAt) || !['active', 'visiting'].includes(snapshot.pet?.lifecycleState)
   return <div className="lanpet-section-stack">
     <div className="lanpet-section-heading"><div><span className="lanpet-eyebrow">가까이에 있는 우리 친구들</span><h2>함께라서 더 즐거워요.</h2><p>같은 네트워크에 있는 동료들의 펫을 만나 보세요.</p></div><span className="lanpet-badge">{peers.filter(peer => peer.available).length}명과 함께 놀 수 있어요</span></div>
@@ -198,14 +202,16 @@ function Friends({ snapshot, command, busy }) {
     {!snapshot.isWorkingTime && <p className="lanpet-notice">업무시간이 되면 친구들과 다시 놀 수 있어요.</p>}
     {snapshot.pet?.lifecycleState === 'restingAway' && <p className="lanpet-notice">함께 놀기 전에 내 펫 화면에서 다시 만나기를 눌러 주세요.</p>}
     {(snapshot.invitations || []).map(invitation => <Invitation key={invitation.sessionId} invitation={invitation} command={command} busy={busy} interactionPaused={interactionPaused} />)}
-    {(snapshot.sessions || []).map(session => <Session key={session.sessionId} session={session} command={command} busy={busy} interactionPaused={interactionPaused} />)}
+    {visibleSessions.map(session => <Session key={session.sessionId} session={session} command={command} busy={busy} interactionPaused={interactionPaused} />)}
+    <SocialRewardNotice world={snapshot.world} now={now} />
     {!peers.length && <div className="lanpet-empty"><Users size={28} /><h3>아직 주변에 친구가 없어요.</h3><p>랜챗이 같은 네트워크의 친구를 찾으면 여기에 표시돼요. 서로 랜펫을 지원하는 앱을 사용하고 펫 공개와 신뢰 연결을 켜야 해요.</p></div>}
     <div className="lanpet-peer-grid">{peers.map(peer => {
       const blockedPeerIds = snapshot.blockedPeerIds || []
       const blocked = blockedPeerIds.includes(peer.peerId) || peer.blocked === true
       const status = peerStatus(peer, blocked)
       const nextBlockedPeerIds = blocked ? blockedPeerIds.filter(peerId => peerId !== peer.peerId) : [...blockedPeerIds, peer.peerId]
-      return <article className="lanpet-peer" key={peer.peerId}><div className="lanpet-peer-heading"><div className="lanpet-peer-avatar"><LanpetAvatar stage={peer.stage} appearanceId={peer.appearanceId} small resting={!peer.available} /></div><div><h3>{peer.petName || peer.name || '주변 친구'}</h3><p>{peer.petName && peer.name}</p><span className={`lanpet-peer-status ${status.disabled ? '' : 'is-ready'}`}>{status.label}</span></div></div>{status.hint && <p className="lanpet-secondary">{status.hint}</p>}<div className="lanpet-peer-actions">{Object.entries(activityLabels).map(([activity, label]) => <button key={activity} className="lanpet-button" title={activityDescriptions[activity]} disabled={busy || interactionPaused || status.disabled || snapshot[activitySettings[activity]] === false || !peer.activities?.includes(activity)} onClick={() => command({ type: 'invite', peerId: peer.peerId, activity })}>{label}</button>)}</div><button className="lanpet-button is-quiet lanpet-peer-block" disabled={busy} onClick={() => command({ type: 'settings', blockedPeerIds: nextBlockedPeerIds })}>{blocked ? '초대 차단 해제' : '초대 차단'}</button></article>
+      const reason = activityReason(snapshot, peer, 'cooperativePlay', now)
+      return <article className="lanpet-peer" key={peer.peerId}><div className="lanpet-peer-heading"><div className="lanpet-peer-avatar"><LanpetAvatar stage={peer.stage} appearanceId={peer.appearanceId} small resting={!peer.available} /></div><div><h3>{peer.petName || peer.name || '주변 친구'}</h3><p>{peer.petName && peer.name}</p><span className={`lanpet-peer-status ${status.disabled ? '' : 'is-ready'}`}>{status.label}</span></div></div>{status.hint && <p className="lanpet-secondary">{status.hint}</p>}<div className="lanpet-peer-actions">{Object.entries(activityLabels).map(([activity, label]) => <button key={activity} className="lanpet-button" title={activityReason(snapshot, peer, activity, now) || activityDescriptions[activity]} disabled={busy || interactionPaused || status.disabled || !!activityReason(snapshot, peer, activity, now) || snapshot[activitySettings[activity] || 'allowCooperativePlay'] === false || !peer.activities?.includes(activity)} onClick={() => command({ type: 'invite', peerId: peer.peerId, activity })}>{label}</button>)}</div>{reason && <p className="lanpet-secondary">{reason}</p>}<PeerLimit peer={peer} now={now} /><button className="lanpet-button is-quiet lanpet-peer-block" disabled={busy} onClick={() => command({ type: 'settings', blockedPeerIds: nextBlockedPeerIds })}>{blocked ? '초대 차단 해제' : '초대 차단'}</button></article>
     })}</div>
   </div>
 }
@@ -230,7 +236,8 @@ function Preferences({ snapshot, command, busy, onDeleted }) {
 }
 
 export default function LanpetPanel({ onClose, initialTab = 'home' }) {
-  const { snapshot, loading, busy, error, command, refresh, retry } = useLanpet()
+  const { snapshot, loading, busy, error, notice, effect, dismissNotice, command, refresh, retry } = useLanpet()
+  const now = usePetClock(snapshot?.serverNow)
   const [tab, setTab] = useState(initialTab)
   const dialogReference = useRef(null)
 
@@ -248,15 +255,16 @@ export default function LanpetPanel({ onClose, initialTab = 'home' }) {
     <header className="lanpet-header"><div className="lanpet-wordmark"><span className="lanpet-brand-icon"><Leaf size={20} /></span><div><h1 id="lanpet-title">랜펫<span>내 곁의 작은 친구</span></h1></div></div><div className="lanpet-header-actions"><span className="lanpet-local-label"><span />로컬 전용</span><button type="button" className="lanpet-icon-button" aria-label="랜펫 닫기" onClick={onClose} autoFocus><X size={20} /></button></div></header>
     {snapshot?.pet && <nav className="lanpet-tabs" aria-label="랜펫 메뉴">{tabs.map(item => <button key={item.id} type="button" className={tab === item.id ? 'is-active' : ''} aria-current={tab === item.id ? 'page' : undefined} onClick={() => setTab(item.id)}><item.icon size={16} /><span>{item.label}</span>{item.id === 'friends' && invitationCount > 0 && <span className="lanpet-count">{invitationCount}</span>}</button>)}</nav>}
     <div className="lanpet-content" aria-busy={busy || loading}>
-      {(error || snapshot?.error) && <div className="lanpet-error" role="alert"><div><strong>잠깐 확인해 주세요.</strong><p>{(error || snapshot.error).message}</p></div><button className="lanpet-button" disabled={busy || loading} onClick={retry}><RefreshCw size={15} />다시 시도</button></div>}
+      <Notice notice={error || snapshot?.error || notice} now={now} onDismiss={dismissNotice} />
+      {error && <button className="lanpet-button" disabled={busy || loading || error.retryAt > now} onClick={retry}><RefreshCw size={15} />다시 시도</button>}
       {loading && !snapshot && <div className="lanpet-empty" role="status"><Leaf size={28} /><p>작은 친구의 공간을 여는 중…</p></div>}
       {snapshot && !snapshot.pet && !snapshot.error && <Onboarding snapshot={snapshot} command={command} busy={busy} />}
       {snapshot?.pet && <>
         {!snapshot.enabled && <div className="lanpet-notice"><Moon size={19} /><div><strong>랜펫이 일시 중지됐어요.</strong><p>펫이 조용히 쉬고 있어요.</p><button className="lanpet-button" disabled={busy} onClick={() => command({ type: 'settings', enabled: true })}>랜펫 다시 시작</button></div></div>}
-        {tab === 'home' && <PetHome snapshot={snapshot} command={command} busy={busy} />}
+        {tab === 'home' && <PetHome snapshot={snapshot} command={command} busy={busy} effect={effect} />}
         {tab === 'friends' && <Friends snapshot={snapshot} command={command} busy={busy} />}
-        {tab === 'shop' && <WorldShop snapshot={snapshot} command={command} busy={busy} />}
-        {tab === 'games' && <WorldGames snapshot={snapshot} command={command} busy={busy} />}
+        {tab === 'shop' && <WorldShop snapshot={snapshot} command={command} busy={busy} effect={effect} />}
+        {tab === 'games' && <WorldGames snapshot={snapshot} command={command} busy={busy} effect={effect} />}
         {tab === 'journal' && <Journal snapshot={snapshot} />}
         {tab === 'settings' && <Preferences snapshot={snapshot} command={command} busy={busy} onDeleted={() => setTab('home')} />}
       </>}

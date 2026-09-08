@@ -44,6 +44,8 @@ function speciesFromSeed(seed) {
   return SPECIES[crypto.createHash('sha256').update(seed).digest().readUInt32BE(0) % SPECIES.length]
 }
 
+function waitUntil(code, retryAt) { const error = new Error(code); error.retryAt = retryAt; throw error }
+
 class LanpetWorld {
   constructor(service) { this.service = service; this.db = service.db }
   read() {
@@ -62,6 +64,11 @@ class LanpetWorld {
       const fallback = { calm: 'care', active: 'active', social: 'social', balanced: 'care' }
       state.progress = { petId: pet.petId, seed, speciesId: speciesFromSeed(seed).id, scores: { care: 0, active: 0, social: 0 }, branch: pet.stage === 'grown' ? fallback[pet.temperament] || 'care' : null, lastScoreAt: {} }
       state.game = null
+      this.save(state)
+    }
+    if (state.game?.kind === 'race' && state.game.status === 'playing' && state.game.ruleVersion !== 2) {
+      state.game.status = 'expired'
+      state.game.upgraded = true
       this.save(state)
     }
     return state
@@ -89,7 +96,33 @@ class LanpetWorld {
     const state = this.ensure(pet, now)
     const game = state.game
     const activeGame = game && game.status === 'playing' && now <= game.expiresAt
-    return { balance: state.balance, bag: state.bag, owned: state.owned, room: state.room, foods: FOODS, decorations: DECORATIONS, species: SPECIES, ledger: state.ledger.slice(-12).reverse(), lotteryReadyAt: state.lotteryAt ? state.lotteryAt + DAY : null, lotteryPrize: state.lotteryPrize || null, gamePlaysRemaining: Math.max(0, 5 - state.gameStarts.filter(at => at > now - DAY).length), game: game ? { id: game.id, kind: game.kind, status: activeGame ? 'playing' : game.status === 'playing' ? 'expired' : game.status, round: game.round, score: game.score, reward: game.reward, target: activeGame ? game.targets[game.round] : null, expiresAt: game.expiresAt } : null }
+    const starts = state.gameStarts.filter(at => at > now - DAY)
+    const earnings = state.earnings.filter(entry => entry.at > now - DAY)
+    const feedReadyAt = state.fedAt == null ? 0 : state.fedAt + 300000
+    let publicGame = null
+    if (game) {
+      let status = game.status
+      if (status === 'playing' && !activeGame) status = 'expired'
+      const upgraded = game.kind === 'race' && game.ruleVersion !== 2
+      if (upgraded) status = 'archived'
+      publicGame = {
+        id: game.id, kind: game.kind, status, ruleVersion: game.ruleVersion || 1,
+        round: game.round, score: game.score, reward: game.reward,
+        target: activeGame && game.kind === 'memory' ? game.targets[game.round] : null,
+        expiresAt: game.expiresAt, inputReadyAt: game.lastInputAt + 1100,
+        distance: game.distance || 0, rivalDistance: game.rivalDistance || 0,
+        lastRoll: game.rolls?.at(-1) || null, lastCorrect: game.lastCorrect, upgraded,
+      }
+    }
+    return {
+      balance: state.balance, bag: state.bag, owned: state.owned, room: state.room,
+      foods: FOODS, decorations: DECORATIONS, species: SPECIES, ledger: state.ledger.slice(-12).reverse(),
+      feedReadyAt, snackReadyAt: Math.max(feedReadyAt, state.snackAt == null ? 0 : state.snackAt + 3600000),
+      lotteryReadyAt: state.lotteryAt == null ? 0 : state.lotteryAt + DAY, lotteryPrize: state.lotteryPrize || null,
+      gamePlaysRemaining: Math.max(0, 5 - starts.length), gameReadyAt: starts.length >= 5 ? Math.min(...starts) + DAY : 0,
+      socialCoinsRemaining: Math.max(0, 3 - earnings.length), socialCoinsReadyAt: earnings.length >= 3 ? Math.min(...earnings.map(entry => entry.at)) + DAY : 0,
+      game: publicGame,
+    }
   }
   changeCoins(state, amount, reason, now) {
     if (state.balance + amount < 0) throw new Error('NOT_ENOUGH_COINS')
@@ -153,7 +186,8 @@ class LanpetWorld {
       const free = input.itemId === 'snack'
       const food = free ? { care: 6, joy: 2, energy: 2, branch: 'care' } : FOODS.find(value => value.id === input.itemId)
       if (!food) throw new Error('INVALID_COMMAND')
-      if ((state.fedAt != null && now - state.fedAt < 300000) || (free && state.snackAt != null && now - state.snackAt < 3600000)) throw new Error('WORLD_COOLDOWN')
+      const readyAt = Math.max(state.fedAt == null ? 0 : state.fedAt + 300000, free && state.snackAt != null ? state.snackAt + 3600000 : 0)
+      if (now < readyAt) waitUntil('WORLD_COOLDOWN', readyAt)
       if (!free && !(state.bag[food.id] > 0)) throw new Error('ITEM_NOT_OWNED')
       if (free) state.snackAt = now
       else state.bag[food.id] -= 1
@@ -161,7 +195,7 @@ class LanpetWorld {
       this.addExperience(state, food.branch, 3, now)
       pet = this.service.store.savePet({ ...pet, care: clamp(pet.care + food.care, 0, 100), joy: clamp(pet.joy + food.joy, 0, 100), energy: clamp(pet.energy + food.energy, 0, 100), lastPetInteractionAt: now, stateRevision: pet.stateRevision + 1, updatedAt: now })
     } else if (input.type === 'lottery') {
-      if (state.lotteryAt != null && now - state.lotteryAt < DAY) throw new Error('LOTTERY_LIMIT')
+      if (state.lotteryAt != null && now - state.lotteryAt < DAY) waitUntil('LOTTERY_LIMIT', state.lotteryAt + DAY)
       const draw = crypto.randomInt(100)
       let prize = 10
       if (draw >= 60) prize = 20
@@ -174,21 +208,29 @@ class LanpetWorld {
       if (!['race', 'memory'].includes(input.kind)) throw new Error('INVALID_COMMAND')
       if (state.game?.status === 'playing' && state.game.expiresAt > now) throw new Error('SESSION_CONFLICT')
       state.gameStarts = state.gameStarts.filter(at => at > now - DAY)
-      if (state.gameStarts.length >= 5) throw new Error('GAME_LIMIT')
+      if (state.gameStarts.length >= 5) waitUntil('GAME_LIMIT', Math.min(...state.gameStarts) + DAY)
       state.gameStarts.push(now)
-      state.game = { id: crypto.randomUUID(), kind: input.kind, status: 'playing', round: 0, score: 0, targets: Array.from({ length: 5 }, () => crypto.randomInt(3)), lastInputAt: now, expiresAt: now + 60000 }
+      state.game = { id: crypto.randomUUID(), kind: input.kind, ruleVersion: 2, status: 'playing', round: 0, score: 0, distance: 0, rivalDistance: 0, rolls: [], targets: input.kind === 'memory' ? Array.from({ length: 5 }, () => crypto.randomInt(3)) : [], lastInputAt: now, expiresAt: now + 60000 }
     } else if (input.type === 'gameAction') {
       const game = state.game
       if (!game || game.id !== input.gameId || game.status !== 'playing' || now > game.expiresAt || input.round !== game.round) throw new Error('GAME_NOT_ACTIVE')
-      if (!Number.isInteger(input.choice) || input.choice < 0 || input.choice > 2) throw new Error('INVALID_GAME_INPUT')
-      if (now - game.lastInputAt < 600) throw new Error('GAME_TOO_FAST')
-      if (input.choice === game.targets[game.round]) game.score += 1
+      if (game.kind === 'race' ? input.choice !== 'roll' : !Number.isInteger(input.choice) || input.choice < 0 || input.choice > 2) throw new Error('INVALID_GAME_INPUT')
+      if (now - game.lastInputAt < 1100) waitUntil('GAME_TOO_FAST', game.lastInputAt + 1100)
+      if (game.kind === 'race') {
+        const roll = { own: crypto.randomInt(1, 7), rival: crypto.randomInt(1, 7) }
+        game.rolls.push(roll)
+        game.distance += roll.own
+        game.rivalDistance += roll.rival
+      } else {
+        game.lastCorrect = input.choice === game.targets[game.round]
+        if (game.lastCorrect) game.score += 1
+      }
       game.round += 1
       game.lastInputAt = now
       if (game.round === 5) {
         game.status = 'completed'
-        game.reward = 5 + game.score * 3
-        this.changeCoins(state, game.reward, game.kind === 'race' ? '장애물 경주' : '간식 짝맞추기', now)
+        game.reward = game.kind === 'race' ? 10 + Math.floor(game.distance / 3) : 5 + game.score * 3
+        this.changeCoins(state, game.reward, game.kind === 'race' ? '주사위 경주' : '간식 짝맞추기', now)
         this.addExperience(state, 'active', 3, now)
       }
     } else throw new Error('INVALID_COMMAND')

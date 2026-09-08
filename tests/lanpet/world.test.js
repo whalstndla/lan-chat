@@ -78,18 +78,25 @@ describe('Lanpet world durable progression and economy', () => {
     const initial = service.getSnapshot().world.game
     expect(initial).not.toHaveProperty('targets')
     expect(send({ type: 'gameStart', kind }).code).toBe('SESSION_CONFLICT')
-    expect(send({ type: 'gameAction', gameId: initial.id, round: 0, choice: initial.target }).code).toBe('GAME_TOO_FAST')
+    expect(send({ type: 'gameAction', gameId: initial.id, round: 0, choice: kind === 'race' ? 'roll' : initial.target }).code).toBe('GAME_TOO_FAST')
     for (let round = 0; round < 5; round++) {
       now += 1200
       const game = service.getSnapshot().world.game
       expect(send({ type: 'gameAction', gameId: game.id, round, choice: 99 }).code).toBe('INVALID_GAME_INPUT')
-      expect(send({ type: 'gameAction', gameId: game.id, round, choice: game.target }).ok).toBe(true)
+      const request = { type: 'gameAction', gameId: game.id, round, choice: kind === 'race' ? 'roll' : game.target, requestId: `game-${kind}-${round}` }
+      expect(send(request).ok).toBe(true)
+      const saved = service.getSnapshot().world.game
+      expect(send(request).ok).toBe(true)
+      expect(service.getSnapshot().world.game).toEqual(saved)
+      if (kind === 'race') { expect(saved.lastRoll.own).toBeGreaterThanOrEqual(1); expect(saved.lastRoll.own).toBeLessThanOrEqual(6) }
     }
-    expect(service.getSnapshot().world).toMatchObject({ balance: 120, game: { status: 'completed', score: 5, reward: 20 } })
+    const completed = service.getSnapshot().world.game
+    const reward = kind === 'race' ? 10 + Math.floor(completed.distance / 3) : 20
+    expect(service.getSnapshot().world).toMatchObject({ balance: 100 + reward, game: { status: 'completed', reward } })
     expect(send({ type: 'gameAction', gameId: initial.id, round: 4, choice: 0 }).code).toBe('GAME_NOT_ACTIVE')
     for (let index = 0; index < 4; index++) { expect(send({ type: 'gameStart', kind }).ok).toBe(true); now += 61000 }
     expect(send({ type: 'gameStart', kind }).code).toBe('GAME_LIMIT')
-    expect(service.getSnapshot().world.balance).toBe(120)
+    expect(service.getSnapshot().world.balance).toBe(100 + reward)
   })
   test('only the leading branch can evolve and final evolution remains fixed', () => {
     send({ type: 'buy', itemId: 'berry' })
