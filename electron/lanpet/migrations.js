@@ -1,4 +1,4 @@
-const LANPET_SCHEMA_VERSION = 1
+const LANPET_SCHEMA_VERSION = 2
 const DETAIL_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const TOMBSTONE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000
 
@@ -7,6 +7,10 @@ function migrateLanpetDatabase(db, now = Date.now()) {
 
   const migrate = db.transaction(() => {
     db.exec(`
+      CREATE TABLE IF NOT EXISTS lanpet_world (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        state_json TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS lanpet_schema (
         singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
         version INTEGER NOT NULL,

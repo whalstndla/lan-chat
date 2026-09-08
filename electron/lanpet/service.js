@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const { LanpetWorld, WORLD_ERRORS } = require('./world')
 const { createLanpetStore } = require('./store')
 const {
   WORK_HOURS,
@@ -19,6 +20,7 @@ const { TOMBSTONE_RETENTION_MS } = require('./migrations')
 const serviceCache = new WeakMap()
 const NETWORK_COMMANDS = new Set(['invite', 'respond', 'action', 'end'])
 const ERROR_MESSAGES = Object.freeze({
+  ...WORLD_ERRORS,
   DATABASE_UNAVAILABLE: '랜펫 저장소를 사용할 수 없어요.',
   SESSION_STALE: '로그인 정보가 바뀌었어요. 랜펫을 다시 열어 주세요.',
   FEATURE_DISABLED: '랜펫이 꺼져 있어요.',
@@ -58,6 +60,7 @@ const SOCIAL_REWARDS = Object.freeze({
   visit: Object.freeze({ joy: 4, bond: 1, growthPoints: 1, socialBias: 2, energyCost: 0, decorationProgress: 0 }),
   cooperativePlay: Object.freeze({ joy: 6, bond: 2, growthPoints: 2, socialBias: 2, energyCost: 6, decorationProgress: 0 }),
   battle: Object.freeze({ joy: 0, bond: 0, growthPoints: 0, socialBias: 0, energyCost: 6, decorationProgress: 1 }),
+  race: Object.freeze({ joy: 6, bond: 2, growthPoints: 2, socialBias: 2, energyCost: 6, decorationProgress: 0 }),
   gift: Object.freeze({ joy: 0, bond: 0, growthPoints: 0, socialBias: 0, energyCost: 0, decorationProgress: 0 }),
 })
 
@@ -106,6 +109,7 @@ class LanpetService {
     this.now = options.now || (() => Date.now())
     this.randomId = options.randomId || (prefix => `${prefix}_${crypto.randomUUID()}`)
     this.store = createLanpetStore(db, { now: this.now })
+    this.world = new LanpetWorld(this)
     this.protocolFactory = options.protocolFactory || null
     this.protocol = null
     this.protocolInitAttempted = false
@@ -130,7 +134,7 @@ class LanpetService {
 
   getLocalPet() {
     this.assertCurrentSession()
-    return this.store.getPet()
+    return this.world.decorate(this.store.getPet(), this.now())
   }
 
   getProtocol() {
@@ -183,7 +187,7 @@ class LanpetService {
     const settings = this.store.getSettings()
     const pet = settings.enabled ? this.store.transaction(() => this.evaluateAndSave(now)) : this.store.getPet()
     const decoratedPet = pet
-      ? { ...pet, mood: deriveMood(pet), growthChoices: getGrowthChoices(pet, now) }
+      ? { ...this.world.decorate(pet, now), mood: deriveMood(pet) }
       : null
     const protocol = this.getProtocol()
     let protocolSnapshot = {}
@@ -215,6 +219,7 @@ class LanpetService {
       sessions: Array.isArray(protocolSnapshot.sessions) ? protocolSnapshot.sessions : [],
       history,
       inventory: this.store.listInventory(pet && pet.petId),
+      world: this.world.snapshot(pet, now),
     }
   }
 
@@ -264,6 +269,7 @@ class LanpetService {
         if (input.type === 'create') this.create(input, now)
         else if (input.type === 'care') this.care(input, now)
         else if (input.type === 'grow') this.grow(input, now)
+        else if (['buy', 'feed', 'equip', 'lottery', 'gameStart', 'gameAction'].includes(input.type)) this.world.command(input, now)
         else if (input.type === 'settings') {
           this.settings(input, now)
           postCommitAction = 'refreshVisibility'
@@ -370,6 +376,7 @@ class LanpetService {
       appliedRevision: pet.stateRevision,
     })
     this.recordRewards(pet.petId, eventId, result.rewards, 'local', null, now)
+    if (!result.repeated && ['care', 'tidy', 'play'].includes(action)) this.world.experience(pet, action === 'play' ? 'active' : 'care', now)
   }
 
   grow(input, now) {
@@ -381,7 +388,7 @@ class LanpetService {
     if (now < pet.lastEvaluatedAt) throw new Error('CLOCK_ROLLBACK')
     if (pet.lifecycleState === 'restingAway') throw new Error('PET_RESTING_AWAY')
     if (pet.lifecycleState !== 'active') throw new Error('PET_UNAVAILABLE')
-    const result = applyGrowth(pet, input.choiceId, now)
+    const result = this.world.grow(pet, input, now)
     if (!result.ok) throw new Error(result.code)
     const saved = this.store.savePet(result.pet)
     this.store.appendEvent({
@@ -443,6 +450,8 @@ class LanpetService {
     if (protocol && typeof protocol.prepareDelete === 'function') protocol.prepareDelete()
     this.store.deleteGeneration(pet.generationId, now)
     this.store.removePet(pet.petId)
+    const world = this.world.read()
+    if (world) { world.progress = null; world.game = null; this.world.save(world) }
     this.store.updateSettings({ enabled: false, sharingEnabled: false }, now)
   }
 
@@ -549,6 +558,7 @@ class LanpetService {
         createdAt: now,
       })
       this.recordRewards(pet.petId, input.eventId, rewards, 'social', input.peerId, now)
+      if (input.activity !== 'gift') this.world.social(pet, input.eventId, now)
       this.store.appendEvent({
         eventId: input.eventId,
         petId: pet.petId,

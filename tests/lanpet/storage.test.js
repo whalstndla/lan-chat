@@ -69,7 +69,7 @@ describe('Lanpet encrypted storage', () => {
       'lanpet_sessions',
       'lanpet_settings',
     ]))
-    expect(db.prepare('SELECT version FROM lanpet_schema WHERE singleton_id = 1').get().version).toBe(1)
+    expect(db.prepare('SELECT version FROM lanpet_schema WHERE singleton_id = 1').get().version).toBe(2)
     expect(createLanpetStore(db).getSettings()).toMatchObject({
       enabled: false,
       sharingEnabled: false,
@@ -89,6 +89,7 @@ describe('Lanpet encrypted storage', () => {
     store.transaction(() => {
       store.createGeneration('generation_storage', timestamp)
       store.createPet(createPet(timestamp))
+      db.prepare('INSERT INTO lanpet_world VALUES (1, ?)').run(JSON.stringify({ balance: 42, progress: { seed: 'private-seed' }, room: { wall: 'rose' } }))
       store.setProtocolRecord('sessions', 'session_1', { status: 'resultUnknown', activity: 'battle' }, {
         now: timestamp,
         expiresAt: timestamp + 24 * 60 * 60 * 1000,
@@ -98,10 +99,12 @@ describe('Lanpet encrypted storage', () => {
     db = null
 
     expect(fs.readFileSync(databasePath).slice(0, 16).toString('utf8').startsWith('SQLite format 3')).toBe(false)
+    expect(fs.readFileSync(databasePath).includes(Buffer.from('private-seed'))).toBe(false)
 
     db = initDatabase(databasePath, key)
     store = createLanpetStore(db, { now: () => timestamp })
     expect(store.getPet()).toMatchObject({ name: 'Lumi', generationId: 'generation_storage' })
+    expect(JSON.parse(db.prepare('SELECT state_json FROM lanpet_world').get().state_json)).toMatchObject({ balance: 42, progress: { seed: 'private-seed' }, room: { wall: 'rose' } })
     expect(store.getProtocolRecord('sessions', 'session_1')).toMatchObject({
       activity: 'battle',
       status: 'resultUnknown',

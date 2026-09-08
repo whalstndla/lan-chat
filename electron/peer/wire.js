@@ -35,8 +35,8 @@ function buildHello({
   lanpetSharingEnabled = false,
 }) {
   // 펫 지원 여부도 명시적 공개 동의 뒤에만 hello에 추가한다.
-  const advertisedCapabilities = Array.isArray(capabilities) ? capabilities.filter(value => value !== 'lanpet-v1') : []
-  if (lanpetSharingEnabled) advertisedCapabilities.push('lanpet-v1')
+  const advertisedCapabilities = Array.isArray(capabilities) ? capabilities.filter(value => !['lanpet-v1', 'lanpet-world-v1'].includes(value)) : []
+  if (lanpetSharingEnabled) advertisedCapabilities.push('lanpet-v1', 'lanpet-world-v1')
   return {
     type: 'hello',
     v: WIRE_VERSION,

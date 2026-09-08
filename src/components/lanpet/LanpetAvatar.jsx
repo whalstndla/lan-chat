@@ -1,44 +1,45 @@
-import React from 'react'
+import React, { useId } from 'react'
+
+const coats = { fox: '#ffb36f', rabbit: '#ffb6d6', otter: '#75d9d9', cat: '#baa7f2', bird: '#ffe16b', bear: '#a5dc8c' }
+const shadows = { fox: '#e67b49', rabbit: '#dc79a7', otter: '#36a8b7', cat: '#8267ce', bird: '#e8ad37', bear: '#65af65' }
 
 export default function LanpetAvatar({ stage = 'seed', appearanceId = '', resting = false, small = false }) {
+  const id = useId().replace(/:/g, '')
+  const parts = appearanceId.split('-')
+  const species = coats[parts[1]] ? parts[1] : 'bear'
+  const branch = parts[2]
   const mature = stage === 'grown'
-  const young = stage === 'seed' || stage === 'egg'
-  const family = appearanceId.split('-')[1] || 'balanced'
-  const alternate = appearanceId.endsWith('-b')
-  const social = appearanceId.endsWith('-social')
-  const coatColors = { calm: '#b2c9c7', active: '#e0b67b', balanced: '#c5d88e' }
-  const coat = social ? '#d6bdd5' : coatColors[family] || coatColors.balanced
-
-  return (
-    <svg
-      className={`lanpet-avatar ${resting ? 'is-resting' : ''} ${small ? 'is-small' : ''}`}
-      viewBox="0 0 200 180"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <ellipse cx="100" cy="156" rx="43" ry="7" fill="currentColor" opacity=".12" />
-      <g className="lanpet-creature">
-        {!young && <>
-          <g transform={alternate ? 'translate(200 0) scale(-1 1)' : undefined}><path d="M98 65C99 41 119 29 139 35C137 54 121 63 98 65Z" fill="#668c43" stroke="#243b2b" strokeWidth="4" />
-          <path d="M100 64C95 47 78 40 63 45C67 60 81 66 100 64Z" fill="#a8c675" stroke="#243b2b" strokeWidth="4" /></g>
-        </>}
-        {mature && <>
-          <path d="M143 106Q174 84 171 113Q169 137 145 139" fill="#91b85e" stroke="#243b2b" strokeWidth="4" />
-          <path d="M57 106Q26 84 29 113Q31 137 55 139" fill="#91b85e" stroke="#243b2b" strokeWidth="4" />
-        </>}
-        <path d="M62 127L58 149Q66 159 82 149L83 139M117 139L118 149Q134 159 142 149L138 127" fill="#d5ad60" stroke="#243b2b" strokeWidth="4" strokeLinejoin="round" />
-        <path d="M52 113C52 86 71 62 100 62S148 86 148 113C148 140 127 151 100 151S52 140 52 113Z" fill={young ? '#edce90' : coat} stroke="#243b2b" strokeWidth="4" />
-        <path d="M65 91C76 73 101 69 119 81" fill="none" stroke="#fff7d0" strokeWidth="5" strokeLinecap="round" opacity=".65" />
-        <ellipse cx="73" cy="121" rx="9" ry="5" fill="#d99665" opacity=".65" />
-        <ellipse cx="127" cy="121" rx="9" ry="5" fill="#d99665" opacity=".65" />
-        {resting ? <path d="M78 109L86 112L78 114M122 109L114 112L122 114" fill="none" stroke="#243b2b" strokeWidth="3.5" strokeLinecap="round" /> : <g className="lanpet-eyes"><rect x="79" y="105" width="6" height="10" rx="3" fill="#243b2b" /><rect x="115" y="105" width="6" height="10" rx="3" fill="#243b2b" /></g>}
-        <path d="M94 119Q100 125 106 119" fill="none" stroke="#243b2b" strokeWidth="3" strokeLinecap="round" />
-        {young && <path d="M65 89L77 95L88 87L101 95L113 87L126 95L137 90" fill="none" stroke="#b48b4f" strokeWidth="3" />}
-        {alternate && !young && <g fill="#668c43" opacity=".7"><circle cx="96" cy="137" r="3" /><circle cx="105" cy="138" r="3" /><circle cx="114" cy="135" r="3" /></g>}
-        {social && <path d="M98 133L100 129L102 133L107 134L103 137L104 142L100 139L96 142L97 137L93 134Z" fill="#eac877" stroke="#765a47" strokeWidth="1.5" />}
-        {mature && <g fill="#ecc375" stroke="#243b2b" strokeWidth="2"><circle cx="105" cy="42" r="9" /><circle cx="118" cy="42" r="9" /><circle cx="111" cy="31" r="9" /><circle cx="111" cy="43" r="5" fill="#9c713d" /></g>}
-      </g>
-      {resting && <text x="145" y="63" fill="#668c43" fontFamily="sans-serif" fontSize="16">쿨쿨</text>}
-    </svg>
-  )
+  const coat = coats[species]
+  const roundEars = ['otter', 'bear'].includes(species)
+  const pointedEars = ['fox', 'cat'].includes(species)
+  return <svg className={`lanpet-avatar ${resting ? 'is-resting' : ''} ${small ? 'is-small' : ''}`} viewBox="0 0 200 180" aria-hidden="true" focusable="false">
+    <defs>
+      <radialGradient id={`${id}coat`} cx="36%" cy="25%" r="80%"><stop stopColor="#fff9e9" /><stop offset=".28" stopColor={coat} /><stop offset="1" stopColor={shadows[species]} /></radialGradient>
+      <radialGradient id={`${id}eye`} cx="35%" cy="25%"><stop stopColor="#426b8b" /><stop offset="1" stopColor="#203555" /></radialGradient>
+    </defs>
+    <ellipse cx="101" cy="162" rx="49" ry="8" fill="#784964" opacity=".15" />
+    <g className="lanpet-creature" strokeLinecap="round" strokeLinejoin="round">
+      {species === 'fox' && <path d="M140 135Q186 140 173 91Q165 106 148 102" fill={coat} stroke={shadows[species]} strokeWidth="2" />}
+      {species === 'otter' && <ellipse cx="147" cy="140" rx="25" ry="10" fill={shadows[species]} transform="rotate(-25 147 140)" />}
+      {species === 'cat' && <path d="M145 141Q181 132 162 113" fill="none" stroke={shadows[species]} strokeWidth="12" />}
+      <ellipse cx="77" cy="153" rx="18" ry="10" fill={shadows[species]} /><ellipse cx="126" cy="153" rx="18" ry="10" fill={shadows[species]} />
+      {roundEars && <g fill={`url(#${id}coat)`} stroke={shadows[species]} strokeWidth="2"><circle cx="57" cy="58" r="20" /><circle cx="144" cy="58" r="20" /><circle cx="57" cy="58" r="10" fill="#ffe7ce" /><circle cx="144" cy="58" r="10" fill="#ffe7ce" /></g>}
+      {pointedEars && <g fill={`url(#${id}coat)`} stroke={shadows[species]} strokeWidth="2"><path d="M45 80L45 27Q69 31 81 57M120 57Q137 29 156 27L155 81" /><path d="M54 60L54 40L71 58M130 58L148 40L148 65" fill="#ffdce7" stroke="none" /></g>}
+      {species === 'rabbit' && <g fill={`url(#${id}coat)`} stroke={shadows[species]} strokeWidth="2"><ellipse cx="73" cy="44" rx="17" ry="35" transform="rotate(-12 73 44)" /><ellipse cx="129" cy="44" rx="17" ry="35" transform="rotate(12 129 44)" /><path d="M72 23L75 53M130 23L126 53" stroke="#e988b5" strokeWidth="9" /></g>}
+      {species === 'bird' && <path d="M88 60Q67 31 88 32Q103 34 100 53Q118 24 128 40Q130 52 112 60" fill={coat} stroke={shadows[species]} strokeWidth="2" />}
+      <ellipse cx="47" cy="118" rx="11" ry="22" fill={coat} transform="rotate(30 47 118)" /><ellipse cx="155" cy="118" rx="11" ry="22" fill={coat} transform="rotate(-30 155 118)" />
+      <path d="M39 101C39 65 62 47 101 47S163 65 163 101C163 139 144 159 101 159S39 139 39 101Z" fill={`url(#${id}coat)`} stroke={shadows[species]} strokeWidth="1.5" />
+      <ellipse cx="101" cy="133" rx="29" ry="19" fill="#fff8e5" opacity=".82" />
+      {species === 'fox' && <path d="M49 93Q63 122 91 110Q84 135 64 122ZM153 93Q139 122 111 110Q118 135 138 122Z" fill="#fff4d9" />}
+      <ellipse cx="66" cy="72" rx="19" ry="7" fill="white" opacity=".45" transform="rotate(-22 66 72)" />
+      <ellipse cx="59" cy="116" rx="11" ry="7" fill="#ed819a" opacity=".65" /><ellipse cx="143" cy="116" rx="11" ry="7" fill="#ed819a" opacity=".65" />
+      {resting ? <path d="M72 101Q79 108 86 101M116 101Q123 108 130 101" fill="none" stroke="#263655" strokeWidth="4" /> : <g className="lanpet-eyes"><ellipse cx="78" cy="99" rx="12" ry="16" fill={`url(#${id}eye)`} /><ellipse cx="124" cy="99" rx="12" ry="16" fill={`url(#${id}eye)`} /><g fill="white"><ellipse cx="74" cy="92" rx="5" ry="7" /><ellipse cx="120" cy="92" rx="5" ry="7" /><circle cx="83" cy="107" r="3" /><circle cx="129" cy="107" r="3" /></g></g>}
+      {species === 'bird' ? <path d="M92 114L101 108L110 114L101 121Z" fill="#eb9444" /> : <path d="M91 119Q96 126 101 119Q106 126 112 119" fill="none" stroke="#49344a" strokeWidth="2.8" />}
+      {stage === 'seed' && <circle cx="101" cy="141" r="4" fill="white" opacity=".75" />}
+      {mature && branch === 'care' && <g><path d="M86 55Q75 23 61 43Q68 59 88 57" fill="#66b781" /><g fill="#ff96b9" stroke="#e8799b" strokeWidth="1"><circle cx="99" cy="40" r="11" /><circle cx="116" cy="46" r="11" /><circle cx="107" cy="58" r="11" /><circle cx="91" cy="56" r="11" /><circle cx="103" cy="48" r="7" fill="#ffe975" /></g></g>}
+      {mature && branch === 'active' && <g><path d="M50 69Q101 43 153 68L150 80Q101 59 52 81Z" fill="#68cdec" /><path d="M104 57L91 76L102 74L97 88L117 65L105 67Z" fill="#fff475" /><path d="M147 74L172 64L168 90L152 80" fill="#68cdec" /></g>}
+      {mature && branch === 'social' && <g fill="#ed78b3" stroke="#cb5896" strokeWidth="1.5"><path d="M96 133Q61 108 70 144Q87 150 100 137Q116 154 133 143Q143 108 105 132Z" /><circle cx="101" cy="135" r="7" fill="#fff3bd" /></g>}
+    </g>
+    {resting && <text x="151" y="40" fill="#76769e" fontSize="13">쿨쿨</text>}
+  </svg>
 }

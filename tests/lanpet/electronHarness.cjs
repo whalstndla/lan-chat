@@ -58,7 +58,11 @@ input.on('line', async (line) => {
       result = { path: request.path }
     } else if (request.operation === 'resize') {
       mainWindow.setSize(request.width, request.height)
+      if (Number.isInteger(request.x) && Number.isInteger(request.y)) mainWindow.setPosition(request.x, request.y)
       result = true
+    } else if (request.operation === 'bounds') {
+      const bounds = mainWindow.getBounds()
+      result = { ...bounds, workArea: require('electron').screen.getDisplayMatching(bounds).workArea }
     } else if (request.operation === 'zoom') {
       mainWindow.webContents.setZoomFactor(request.factor)
       result = true

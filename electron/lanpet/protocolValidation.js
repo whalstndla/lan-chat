@@ -1,7 +1,7 @@
 const crypto = require('crypto')
 const { DOMAIN, MAX_PLAINTEXT_BYTES } = require('./petCrypto')
 
-const ACTIVITIES = Object.freeze(['visit', 'cooperativePlay', 'gift', 'battle'])
+const ACTIVITIES = Object.freeze(['visit', 'cooperativePlay', 'gift', 'battle', 'race'])
 const CHOICES = Object.freeze(['focus', 'guard', 'spark'])
 const MESSAGE_TYPES = new Set(['summary', 'revoked', 'invite', 'respond', 'started', 'input', 'round', 'result', 'abort', 'cancel', 'status', 'ack'])
 const TERMINAL_STATUSES = new Set(['completed', 'declined', 'canceled', 'expired', 'keyChanged', 'resultDisputed', 'deleted'])
@@ -38,8 +38,12 @@ function hashPayload(payload) {
   return crypto.createHash('sha256').update(JSON.stringify(canonical(payload))).digest('hex')
 }
 
-function roundScore(first, second) {
+function roundScore(first, second, activity) {
   assert([...CHOICES, 'rest'].includes(first) && [...CHOICES, 'rest'].includes(second))
+  if (activity === 'race') {
+    const points = roundScore(first, second)
+    return [first === 'rest' ? 0 : 3 + points[0] * 2, second === 'rest' ? 0 : 3 + points[1] * 2]
+  }
   if (first === second) return [0, 0]
   if (first === 'rest') return [0, 1]
   if (second === 'rest') return [1, 0]

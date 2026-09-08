@@ -33,6 +33,7 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
   const sendWire = send || ((peerId, wrapper) => require('../utils/appUtils').sendPeerMessage(ctx, peerId, wrapper))
   const localPeerId = ctx.state.peerId
   const supportedPeers = new Map()
+  const worldPeers = new Set()
   let disposed = false
   let lastSummaryAt = 0
   let previousSharing = false
@@ -69,12 +70,13 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
   }
 
   function allowActivity(activity, peerId) {
+    if (activity === 'race' && peerId) assert(worldPeers.has(peerId), 'PEER_UNAVAILABLE')
     assert(sharing(), 'PET_SHARING_DISABLED')
     assert(working(), 'OUTSIDE_WORK_HOURS')
     assert(!(pet().napEndsAt > now()), 'PET_RESTING')
     if (peerId) assert(!blocked(peerId), 'PEER_BLOCKED')
     const value = settings()
-    const setting = { visit: 'allowVisit', cooperativePlay: 'allowCooperativePlay', gift: 'allowGift', battle: 'allowBattle' }[activity]
+    const setting = { visit: 'allowVisit', cooperativePlay: 'allowCooperativePlay', gift: 'allowGift', battle: 'allowBattle', race: 'allowCooperativePlay' }[activity]
     assert(ACTIVITIES.includes(activity) && value[setting] !== false, 'ACTIVITY_DISABLED')
   }
 
@@ -97,7 +99,7 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
   }
 
   function reserve(session) {
-    if (session.activity !== 'cooperativePlay' && session.activity !== 'battle') return
+    if (!['cooperativePlay', 'battle', 'race'].includes(session.activity)) return
     assert(pet().energy - getReservedEnergy() >= 6, 'NOT_ENOUGH_ENERGY')
     session.energyReserved = 6
   }
@@ -169,8 +171,8 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
       petName: String(current.name).slice(0, 40), stage: current.stage || current.growthStage,
       visibilityVersion: read('visibility', 'local')?.version || 1,
       appearanceId: current.appearanceId, activities: ACTIVITIES.filter(activity => {
-        const key = { visit: 'allowVisit', cooperativePlay: 'allowCooperativePlay', gift: 'allowGift', battle: 'allowBattle' }[activity]
-        return settings()[key] !== false
+        const key = { visit: 'allowVisit', cooperativePlay: 'allowCooperativePlay', gift: 'allowGift', battle: 'allowBattle', race: 'allowCooperativePlay' }[activity]
+        return settings()[key] !== false && (activity !== 'race' || worldPeers.has(peerId))
       }),
     }, null, SUMMARY_LIFETIME)
     transmit(envelope)
@@ -178,6 +180,8 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
 
   function onPeerHello(peerId, capabilities = []) {
     supportedPeers.set(peerId, capabilities.includes(CAPABILITY))
+    if (capabilities.includes('lanpet-world-v1')) worldPeers.add(peerId)
+    else worldPeers.delete(peerId)
     try {
       const identity = getIdentity(peerId)
       for (const session of currentSessions()) {
@@ -204,7 +208,7 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
     const last = session.rounds?.at(-1)
     const result = session.certificate?.result
     let ownOutcome = 'completed'
-    if (result && session.activity === 'battle') {
+    if (result && ['battle', 'race'].includes(session.activity)) {
       ownOutcome = 'draw'
       if (result.scores[localPeerId] > result.scores[session.peerId]) ownOutcome = 'win'
       if (result.scores[localPeerId] < result.scores[session.peerId]) ownOutcome = 'loss'
@@ -218,6 +222,12 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
       settlementPending: !!session.certificate && !session.remoteAcknowledged && session.role === 'host', error: session.error,
       lastRound: last ? { ownChoice: last.inputs[localPeerId], peerChoice: last.inputs[session.peerId], ownScore: last.scores[localPeerId], peerScore: last.scores[session.peerId] } : null,
       result: result ? { outcome: ownOutcome, ownScore: result.scores[localPeerId], peerScore: result.scores[session.peerId] } : null,
+      raceProgress: session.activity === 'race' ? {
+        own: (session.rounds || []).reduce((sum, round) => sum + round.scores[localPeerId], 0),
+        peer: (session.rounds || []).reduce((sum, round) => sum + round.scores[session.peerId], 0),
+        ownAppearance: service.getLocalPet()?.appearanceId,
+        peerAppearance: read('peers', session.peerId)?.appearanceId,
+      } : null,
     }
   }
 
@@ -313,18 +323,18 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
   function finishRound(session) {
     if (!session.participants.every(id => [...CHOICES, 'rest'].includes(session.inputs[id]))) return
     const [first, second] = session.participants
-    const [firstScore, secondScore] = roundScore(session.inputs[first], session.inputs[second])
+    const [firstScore, secondScore] = roundScore(session.inputs[first], session.inputs[second], session.activity)
     const round = { turn: session.turn, inputs: { ...session.inputs }, scores: { [first]: firstScore, [second]: secondScore }, timedOut: session.timedOut || [] }
     session.rounds.push(round)
     session.inputs = {}
-    const requiredRounds = { visit: 1, cooperativePlay: 3, battle: 5 }[session.activity]
+    const requiredRounds = { visit: 1, cooperativePlay: 3, battle: 5, race: 3 }[session.activity]
     if (session.rounds.length >= requiredRounds) {
       commitResult(session)
       return
     }
     session.turn += 1
     session.timedOut = []
-    if (session.activity === 'battle') session.turnEndsAt = now() + 15000
+    if (['battle', 'race'].includes(session.activity)) session.turnEndsAt = now() + 15000
     session.sequence += 1
     saveSession(session)
     queue(session.peerId, 'round', { round, turn: session.turn, sequence: session.sequence, turnEndsAt: session.turnEndsAt }, session)
@@ -376,7 +386,7 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
         } else if (input.type === 'action') {
           allowActivity(session.activity, session.peerId)
           assert(session.status === 'inProgress' && CHOICES.includes(input.choice), 'INVALID_STATE_TRANSITION')
-          if (session.activity === 'battle') assert(now() < session.turnEndsAt, 'TURN_EXPIRED')
+          if (['battle', 'race'].includes(session.activity)) assert(now() < session.turnEndsAt, 'TURN_EXPIRED')
           assert(!session.inputs[localPeerId], 'INPUT_ALREADY_SUBMITTED')
           session.inputs[localPeerId] = input.choice
           saveSession(session)
@@ -412,16 +422,16 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
     assert(session.accepted === true, 'ACTIVITY_NOT_ACCEPTED')
     assert(certificate.activity === session.activity && Array.isArray(certificate.rounds) && certificate.rounds.length <= 5, 'INVALID_CERTIFICATE')
     assert(certificate.inputHash === hashPayload(certificate.rounds), 'INVALID_CERTIFICATE')
-    const requiredRounds = { gift: 0, visit: 1, cooperativePlay: 3, battle: 5 }[session.activity]
+    const requiredRounds = { gift: 0, visit: 1, cooperativePlay: 3, battle: 5, race: 3 }[session.activity]
     assert(certificate.rounds.length === requiredRounds, 'INVALID_CERTIFICATE')
     const expectedScores = Object.fromEntries(session.participants.map(id => [id, 0]))
     certificate.rounds.forEach((round, index) => {
       const [first, second] = session.participants
       assert(round.turn === index + 1 && round.inputs && round.scores, 'INVALID_CERTIFICATE')
-      const scores = roundScore(round.inputs[first], round.inputs[second])
+      const scores = roundScore(round.inputs[first], round.inputs[second], session.activity)
       assert(round.scores[first] === scores[0] && round.scores[second] === scores[1], 'INVALID_CERTIFICATE')
       const ownSubmitted = session.rounds[index]?.inputs[localPeerId] || (session.turn === index + 1 ? session.inputs[localPeerId] : null)
-      const timedOut = !ownSubmitted && round.inputs[localPeerId] === 'rest' && round.timedOut?.includes(localPeerId) && session.activity === 'battle'
+      const timedOut = !ownSubmitted && round.inputs[localPeerId] === 'rest' && round.timedOut?.includes(localPeerId) && ['battle', 'race'].includes(session.activity)
       assert(ownSubmitted === round.inputs[localPeerId] || timedOut, 'INPUT_MISMATCH')
       expectedScores[first] += scores[0]
       expectedScores[second] += scores[1]
@@ -497,7 +507,7 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
       session.accepted = true
       session.status = 'inProgress'
       session.startedAt = now()
-      if (session.activity === 'battle') session.turnEndsAt = now() + 15000
+      if (['battle', 'race'].includes(session.activity)) session.turnEndsAt = now() + 15000
       session.expiresAt = now() + 10 * 60000
       session.sequence += 1
       saveSession(session)
@@ -509,11 +519,12 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
       session.status = 'inProgress'
       session.sequence = 1
       session.startedAt = now()
-      if (session.activity === 'battle') session.turnEndsAt = now() + 15000
+      if (['battle', 'race'].includes(session.activity)) session.turnEndsAt = now() + 15000
       session.expiresAt = now() + 10 * 60000
       saveSession(session)
     } else if (messageType === 'input') {
       assert(session.role === 'host' && session.status === 'inProgress', 'INVALID_STATE_TRANSITION')
+      if (['battle', 'race'].includes(session.activity)) assert(now() < session.turnEndsAt, 'TURN_EXPIRED')
       assert(envelope.payload.turn === session.turn && CHOICES.includes(envelope.payload.choice), 'INVALID_TURN')
       assert(!session.inputs[peerId], 'INPUT_ALREADY_SUBMITTED')
       session.inputs[peerId] = envelope.payload.choice
@@ -523,15 +534,15 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
       assert(session.role === 'guest' && session.status === 'inProgress', 'INVALID_STATE_TRANSITION')
       const { round, turn, sequence } = envelope.payload
       assert(round && round.turn === session.turn && turn === session.turn + 1 && sequence === session.sequence + 1, 'EVENT_SEQUENCE_GAP')
-      const timedOut = !session.inputs[localPeerId] && round.inputs[localPeerId] === 'rest' && round.timedOut?.includes(localPeerId) && session.activity === 'battle'
+      const timedOut = !session.inputs[localPeerId] && round.inputs[localPeerId] === 'rest' && round.timedOut?.includes(localPeerId) && ['battle', 'race'].includes(session.activity)
       assert(round.inputs[localPeerId] === session.inputs[localPeerId] || timedOut, 'INPUT_MISMATCH')
-      const scores = roundScore(round.inputs[session.participants[0]], round.inputs[session.participants[1]])
+      const scores = roundScore(round.inputs[session.participants[0]], round.inputs[session.participants[1]], session.activity)
       assert(session.participants.every((id, index) => round.scores[id] === scores[index]), 'INVALID_ROUND')
       session.rounds.push(round)
       session.inputs = {}
       session.turn = turn
       session.sequence = sequence
-      if (session.activity === 'battle') session.turnEndsAt = now() + 15000
+      if (['battle', 'race'].includes(session.activity)) session.turnEndsAt = now() + 15000
       saveSession(session)
     } else throw new Error('UNSUPPORTED_MESSAGE')
   }
@@ -733,7 +744,7 @@ function createLanpetProtocol({ ctx, service, now = Date.now, send, connectedPee
         if (session.role === 'host' && (session.expiresAt <= now() || !working() || !sharing() || blocked(session.peerId))) {
           transact(() => commitAbort(session, session.expiresAt <= now() ? 'expired' : 'canceled'))
           changed = true
-        } else if (session.role === 'host' && session.activity === 'battle' && session.status === 'inProgress' && session.turnEndsAt <= now()) {
+        } else if (session.role === 'host' && ['battle', 'race'].includes(session.activity) && session.status === 'inProgress' && session.turnEndsAt <= now()) {
           transact(() => {
             session.timedOut = session.participants.filter(id => !session.inputs[id])
             for (const id of session.timedOut) session.inputs[id] = 'rest'
