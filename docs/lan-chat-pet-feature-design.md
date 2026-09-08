@@ -1,0 +1,857 @@
+# LAN Chat Lanpet 기능 상세 설계
+
+> 문서 상태: 사용자 결정 반영 · Lanpet 출시 설계
+>
+> 조사 기준일: 2026-09-08 (Asia/Seoul)
+>
+> 구현 상태: v0.13.0 구현·검증 진행 중. 아래 수용 기준의 통과 여부와 실제 배포 완료 여부는 출시 검증 기록으로 구분한다.
+
+## 0. 읽는 법과 결정 요약
+
+### 0.1 표기
+
+| 표기 | 뜻 |
+|---|---|
+| **[확인]** | 공식 자료 또는 현재 저장소에서 확인한 사실 |
+| **[구현]** | `feature/lanpet` 출시 후보 코드에 반영된 현재 계약 |
+| **[제안]** | LAN Chat에 적용할 제품·기술 설계 |
+| **[후속]** | 현재 출시 후보에 없거나 추가 검증이 필요한 항목 |
+
+외부 제품명과 상표는 비교 연구를 위한 참조다. 신규 기능은 독자적인 캐릭터, 명칭, 세계관, 그래픽, 소리, 진화 구조를 사용한다.
+
+### 0.2 한 페이지 결정
+
+| 주제 | 결정 |
+|---|---|
+| 제품 역할 | 채팅의 경쟁 지표가 아니라, 짧은 휴식과 동의 기반 교류를 돕는 선택 기능 |
+| 핵심 루프 | 돌봄 30–90초 → 시간 경과 → 선택형 성장 → 친구 초대 → 짧은 놀이 → 기록 |
+| 이름·사용 시간 | **Lanpet** · 로컬 시간 평일 09:00–18:00. 야간·주말에는 모든 성장·소모·새 교류를 멈춤 |
+| 부재 정책 | 업무시간만 계산하며 마지막 행동 24시간 이후 필요치 감소도 동결. 복귀 시 사망·퇴화·누적 벌점 없음 |
+| 채팅 연계 | 메시지 내용, 메시지 수, 접속 시간, 빠른 답장을 성장 재화로 쓰지 않음 |
+| 공개 범위 | 기존 프로필 공개와 별개의 `sharingEnabled` 명시적 opt-in |
+| 교류 | 최초 출시에 방문·협동 놀이·정액 선물·양측 동의 친선 배틀 포함. 교배·소유권 교환은 제외 |
+| 네트워크 | LAN P2P만 사용. 중앙 서버, 외부 인터넷, 공개 IP, 클라우드 계정 불필요 |
+| 상태 권한 | 펫 소유 기기가 영구 상태의 단일 권한자. 초대자는 세션 권한자 |
+| 중복 방지 | `eventId`, `requestId`, payload hash와 암호화 DB 원장 unique 제약 사용 |
+| 보안 | 암호화 DB에 상태·원장 저장, 입력 스키마 검증, 크기/빈도 제한, 명시적 동의 |
+| 출시 전략 | 로컬 육성 → P2P 교류·배틀 → 회귀·실제 renderer 검증 → 서명·공증·업데이트 무결성 검증 → 출시 |
+
+### 0.3 설계 원칙
+
+1. 업무나 일상으로 자리를 비운 사용자를 벌주지 않는다.
+2. 친구와의 관계를 돕되 채팅 감시나 사용량 경쟁을 만들지 않는다.
+3. 양쪽이 같은 화면을 보았다고 가정하지 않는다. 모든 P2P 작업은 재전송과 재시작을 견딘다.
+4. 펫의 영구 상태는 한 기기에서만 확정하고, 상대 기기는 제안과 결과 복사본만 가진다.
+5. MVP는 한 번에 설명할 수 있는 상태와 보상만 제공한다.
+
+## 1. 참고 제품 조사와 적용 판단
+
+### 1.1 비교 기준
+
+비교 항목은 `돌봄 입력`, `시간 경과`, `성장 분기`, `기기 간 교류`, `부재 복구`, `네트워크 의존성`이다. 출시일과 기능은 제조사 공식 페이지를 우선하며, 확인되지 않은 세부 수치나 숨은 진화 조건은 설계 근거로 사용하지 않는다.
+
+### 1.2 초기 Digital Monster와 진화 계열
+
+| 제품/계열 | 검증된 특징 | LAN Chat에 주는 시사점 | 상태 |
+|---|---|---|---|
+| Digital Monster 원형 | 1997-06-26 출시. 실제 시간에 따라 육성·진화하고, 식사·훈련·화장실 돌봄을 제공하며 두 기기를 연결해 통신 대전. 유년기→성장기→성숙기→완전체 계열 | 적은 입력으로 상태 변화가 명확하고, 가까운 사용자와 짧게 교류하는 원형 | **[확인]** [Bandai 20주년 자료](https://p-bandai.jp/press/2017/01/1000005357/), [Toei Ver.1 재현 설명](https://www.toei-anim.co.jp/tv/digimon/news/20200402.php) |
+| Digital Monster Ver.20th | 2017 기념 복각은 2마리 동시 육성, 태그 배틀 등 원형을 확장 | 복각 신기능을 1997 원형으로 역투영하지 않고, 여러 펫 동시 소유는 MVP 범위에서 제외 | **[확인]** [Bandai 20주년 자료](https://p-bandai.jp/press/2017/01/1000005357/) |
+| Digital Monster Pendulum 원형 | 1998년 출시. 흔드는 조작, 조그레스(합체 진화), 완전체 위 궁극체를 원형 대비 추가 | 물리 센서 대신 양쪽 동의 행동을 사용하고, 합체의 영감은 소유권을 건드리지 않는 후속 기념 성장으로만 검토 | **[확인]** [Bandai 20주년 Pendulum 자료](https://p-bandai.jp/press/2018/01/1000006857/) |
+| Digital Monster COLOR | 2023년 COLOR/Ver.2는 컬러 캐릭터·교체 배경·충전, 솔로 배틀, 빠른 성장, 허기·근력 감소를 멈추는 콜드 모드, 1마리 백업과 일부 버전 간 합체를 안내 | 사용자가 정하는 휴식은 부재 벌점을 없애는 근거가 됨. 백업·합체는 단일 소유자 MVP 이후 검토 | **[확인]** [Bandai COLOR 자료](https://p-bandai.jp/press/2023/08/1000014098/) |
+| Pendulum COLOR 8/9 | 2026-06-26 발표, 2026-12 배송 예정. 가속도 센서 훈련, 솔로 배틀, 특정 조그레스, 콜드, 백업을 안내 | 아직 출시되지 않은 발표 모델이므로 미래 방향 참고로만 사용. 본체 근접 연결은 LAN/인터넷 기능이 아님 | **[확인]** [Premium Bandai 공식 발표](https://p-bandai.jp/press/2026/06/1000017073/) |
+
+초기 계열에서 채택하는 것은 “소수의 돌봄 선택이 다음 성장 모습에 흔적을 남기는 구조”다. 질병·사망을 일상 부재의 벌로 쓰는 긴장감, 승패를 성장의 필수 관문으로 만드는 구조, 기존 명칭·실루엣·진화 트리를 모사하는 방식은 채택하지 않는다. 공식 1997 원본 설명서를 이번 조사에서 직접 확보하지 못했으므로 수명, 정밀 진화 수치, 배틀 공식은 비교 근거로 쓰지 않는다.
+
+### 1.3 최신 Tamagotchi 제품 비교
+
+| 제품 | 공식 자료에서 확인할 범위 | 연결/온라인 특성 | LAN Chat 판단 |
+|---|---|---|---|
+| Tamagotchi Connection 리바이벌 | 미국 2024-07-09 출시. 먹이·놀이·치료와 돌봄에 따른 성장, 50+ 캐릭터, 150+ 아이템과 Gotchi Points | 적외선으로 근처 두 기기가 게임·선물·방문. 반복 연결로 관계·결혼·다음 세대 육성 | 방문과 선물의 가벼운 관계 표현은 채택. 결혼·세대는 소유권과 동의가 복잡해 제외. [공식 발표](https://tamagotchi-official.com/us/series/connection/news/01_430/) |
+| Tamagotchi Uni | 2023 세대. 개성·좋아하는 물건, 액세서리·가구, 걷기 재료와 DIY, sitter, 음식·화장실·목욕을 제공 | 친구 기기 연결은 Wi-Fi 없이 선물·함께 제작·프로포즈·게임 가능. Wi-Fi는 다운로드·업데이트·Tamaverse에 사용. Tamaverse 표시는 실시간이 아니며 사용자 메시지 기능 없음 | 꾸미기·공동 제작·부재 sitter는 참고. 인터넷·걷기 센서와 사용자 간 메시지는 펫 기능 범위에서 제외. [공식 사용법](https://tamagotchi-official.com/us/series/uni/howtoplay/), [공식 FAQ](https://tamagotchi-official.com/us/series/uni/faq/) |
+| Tamagotchi Paradise 첫 모델 | 일본 2025-07-12 출시. Zoom Dial로 우주·필드·개체·세포를 보는 4단계 관찰, 25 육성 메뉴, 환경·돌봄에 따른 12종족·50+ 캐릭터, 조합 50,000+ 안내 | 본체 도킹으로 궁합에 따른 자녀 탄생. 매장 Lab Tama 연결은 매장 장치이며 온라인 서버가 아님 | 관찰 깊이와 환경별 외형은 후속 도감에 참고. 조합 수를 독립 수작업 캐릭터 수로 해석하지 않음. [공식 발표](https://tamagotchi-official.com/jp/series/paradise/news/01_1010/) |
+| Tamagotchi Paradise Orange Tropics / White Glacier | 일본 2026-07-11 출시. 두 신모델 사이에서만 연결 협력/대전 미니게임 지원 | 기존 Pink/Blue/Purple/Jade에는 없는 신모델 한정 연결 기능 | 협력과 경쟁을 같은 통신 세션의 선택 모드로 두는 발상만 참고. [공식 발표](https://tamagotchi-official.com/jp/news/01_1447/) |
+
+> **[확인] 최신성 주의:** “Paradise가 모두 연결 협력/대전을 지원한다”거나 “Uni 인터넷 기능이 2026-07 종료됐다”는 표현은 공식 자료와 맞지 않으므로 사용하지 않는다. Uni 페이지의 `Security support until 2026-07-13` 문구도 서버 종료일로 해석하지 않는다. 2026-08 Uni 공지는 온라인 기능이 계속 소개된다는 근거일 뿐 실기 서비스 가동 검증은 아니다. 최신 제품은 공식 글로벌 전 지역·색상 재고 전수조사가 아니라 공식 발표 기준이다.
+
+### 1.4 채택·변형·제외 매핑
+
+| 참고 메커니즘 | 판단 | LAN Chat 변형 |
+|---|---|---|
+| 시간 기반 성장 | 변형 채택 | 평일 09–18 업무시간만 계산하고 장기 부재 시 추가 동결 |
+| 먹이·위생·놀이 | 변형 채택 | `care`, `tidy`, `play` 세 행동으로 단순화하고 과잉 반복 효율 감소 |
+| 조건 기반 진화 | 채택 | 정확한 조건과 진행도를 UI에서 설명 가능한 범위로 공개 |
+| 기기 연결 교류 | 채택 | mDNS로 이미 발견된 피어에 명시적 초대·수락 후 세션 생성 |
+| 배틀 | 출시 포함 | 같은 조건의 선택형 친선 배틀. 순위·약탈·연승 보상 없음 |
+| 교배 | 제외 | 동의, 혈통 데이터, 캐릭터 조합, 미성년 친화성까지 범위가 급증 |
+| 소유권 교환 | 제외 | 단일 소유자와 복구 모델을 깨고 사기·분쟁·중복 자산 문제를 만듦 |
+| 사망·퇴화 | 제외 | 업무 부재를 벌주고 복귀 장벽을 높임 |
+| 메시지 활동 보상 | 제외 | 대화 감시 인식, 스팸 경쟁, 직장 내 압박을 유발할 수 있음 |
+| 인터넷 이벤트·유료 아이템 | MVP 제외 | 완전 단절 원칙과 중앙 서버 없는 제품 구조에 맞지 않음 |
+
+## 2. 목표, 비목표, 대상 사용자
+
+### 2.1 목표
+
+- **[제안]** 사용자가 하루 1–3회, 회당 30–90초만으로 펫 상태를 이해하고 돌볼 수 있다.
+- **[제안]** 부재 후 돌아왔을 때 1분 이내에 정상 루프로 복귀한다.
+- **[제안]** 동료와 교류할 때 채팅 상대 관계를 활용하지만 대화 내용은 읽지 않는다.
+- **[제안]** 오프라인, 중복 패킷, 앱 재시작에도 영구 보상과 펫 상태가 중복 적용되지 않는다.
+- **[제안]** 기능을 꺼 둔 사용자와 구버전 피어의 채팅 경험을 바꾸지 않는다.
+
+### 2.2 비목표
+
+- 장시간 접속을 요구하는 게임, 글로벌 수집 경제, 공개 랭킹, 실시간 서비스 운영
+- 메시지 감정 분석, 키워드 판독, 메시지 수·응답 속도·온라인 시간을 통한 성장
+- 현금 결제, NFT, 거래 시장, 희소성 투기, 소유권 이전
+- 외부 인터넷 중계, 푸시 서버, 공인 IP 노출, NAT 통과
+- 원작 캐릭터·명칭·음원·픽셀 아트·진화표의 재사용 또는 혼동 유도
+
+### 2.3 핵심 사용자
+
+| 사용자 | 상황 | 필요한 경험 |
+|---|---|---|
+| 업무 중 간헐 사용자 | 회의와 집중 작업 사이에 앱을 확인 | 한눈에 상태 확인, 짧은 행동, 알림 최소화 |
+| LAN 친구 그룹 | 같은 사무실·가정·행사 네트워크에 있음 | 상대 동의가 분명한 방문과 짧은 협동 놀이 |
+| 장기 부재 사용자 | 휴가·출장·앱 종료 후 복귀 | 손실 없이 환영받고 즉시 회복 가능 |
+| 프라이버시 우선 사용자 | 프로필과 게임 노출을 원치 않음 | 기본 비공개, 기능 전체 비활성화, 흔적 최소화 |
+
+## 3. 독자 IP와 콘텐츠 규칙
+
+### 3.1 제안 콘셉트
+
+사용자가 확정한 기능 명칭은 **Lanpet**이다. LAN 안에서 친구의 존재를 감지하면 작은 등불이 반응하는 생명체라는 독자 설정을 사용한다. 독자 SVG·CSS 캐릭터를 번들하며 원작 캐릭터·음원·진화표를 재사용하지 않는다. 명칭 확정은 상표 등록이나 법률 검토 완료를 의미하지 않는다.
+
+**[구현]** 최초 생성은 `balanced` 성향의 `seed-balanced-a` 외형 하나로 시작한다. 성장 때 누적 `careBias`에 따라 `calm`, `active`, `balanced` family 중 하나가 정해지고, 사용자는 같은 family의 `a`·`b` 두 외형에서 고른다. `socialBias >= 20`이면 social 장식 후보가 하나 더 열린다. 성장 단계는 `seed`, `young`, `grown` 세 단계이며 제품 문구로는 “성장”을 쓴다.
+
+### 3.2 자산 원칙
+
+- 모든 캐릭터, 아이콘, 애니메이션, 효과음은 신규 제작하고 제작 근거를 보관한다.
+- 검은 윤곽의 몬스터, 알 모양 기기 프레임, 특정 프랜차이즈의 눈·뿔·문장·픽셀 비율을 복제하지 않는다.
+- 최초 출시 자산은 stage·family·variant를 표현하는 독자 inline SVG와 호흡·눈 깜빡임·휴식 상태를 CSS로 렌더링한다.
+- 색상만 바꾼 희귀도는 두지 않는다. 색은 가독성과 사용자 선택을 위한 장식으로 취급한다.
+
+## 4. 육성 규칙과 상태 전이
+
+### 4.1 영구 수치
+
+| 필드 | 범위/형식 | 초기값 | 의미 |
+|---|---|---:|---|
+| `care` | 0–100 정수 | 70 | 안정감. 먹이와 정돈 행동이 올림 |
+| `joy` | 0–100 정수 | 70 | 즐거움. 로컬 놀이와 동의 기반 교류가 올림 |
+| `energy` | 0–100 정수 | 80 | 행동 가능량. 시간에 따라 회복 |
+| `bond` | 0–100 정수 | 0 | 성장 선택 해금. rolling 24시간 상한 적용 |
+| `growthPoints` | 0 이상 정수 | 0 | 단계 성장 진행도 |
+| `careBias` | -100–100 정수 | 0 | 차분한 돌봄과 활동적 놀이의 누적 선택 경향 |
+| `socialBias` | -100–100 정수 | 0 | 혼자 활동과 친구 활동의 누적 선택 경향 |
+| `growthAgeMinutes` | 0 이상 실수 | 0 | 업무시간 안에서 누적된 성장 가능 시간 |
+
+**[구현]** 사용자에게 보이는 상태·보상 수치는 정수다. 시간 나머지와 `growthAgeMinutes`는 30초 폴링에서도 누락되지 않도록 SQLite `REAL`로 저장한다. 렌더러는 결과를 직접 확정하지 않고 main 프로세스가 트랜잭션 안에서 제한과 시간을 적용한다.
+
+### 4.2 시간 경과
+
+**[구현]** `lastEvaluatedAt`과 현재 로컬 벽시계 사이에서 **평일 09:00–18:00과 겹치는 밀리초**를 계산해 실수 분으로 누적한다. 필요치·에너지·`growthAgeMinutes`가 변할 수 있는 구간은 `lastPetInteractionAt` 뒤 24시간 이내로 제한한다. 밤·주말과 24시간을 넘긴 부재 구간에는 에너지까지 그대로 유지한다.
+
+```text
+candidateEnd = min(wallNow, lastPetInteractionAt + 24h)
+effectiveMinutes = workingMillisecondsWithin(lastEvaluatedAt, candidateEnd) / 60000
+nextRemainder = (storedRemainder + effectiveMinutes) % intervalMinutes
+growthAgeMinutes += effectiveMinutes
+```
+
+- `care`: 업무 유효시간 180분마다 1 감소, 한 평가에서 최대 6 감소.
+- `joy`: 업무 유효시간 240분마다 1 감소, 한 평가에서 최대 4 감소.
+- `energy`: 업무시간에 깨어 있을 때 30분마다 1 회복. 업무시간 밖에는 변화 없음.
+- 시간 나머지는 소수 분까지 저장한다. `30초 × 120회` 평가와 `60분 × 1회` 평가가 같은 필요치·에너지·성장 시간을 만든다.
+- 시간이 뒤로 가면 경과를 0으로 두고 `lastEvaluatedAt`을 낮추지 않는다. 벽시계가 저장 cursor를 따라잡을 때까지 새 돌봄·성장·보상을 `CLOCK_ROLLBACK`으로 막는다.
+- 평가 cursor는 이미 처리한 시점보다 뒤로 낮추지 않는다. 역행 뒤 벽시계가 회복돼도 같은 구간을 재반영하지 않는다.
+- 큰 양의 차이는 정상 부재로 보고 첫 24시간 창만 계산한 뒤 `restingAway`로 전환한다.
+- 저장 시각은 Unix epoch milliseconds다. 사용한 소수 분, 나머지, cursor, revision을 같은 트랜잭션에 기록한다.
+- `lastPetInteractionAt`은 `care`, `tidy`, `play`, `rest`, `welcomeBack`, 완료된 친구 활동만 갱신한다. 채팅 송수신, 앱 focus, 온라인 상태, snapshot evaluator는 갱신하지 않는다.
+- **[후속]** 현재 구현은 실행 중 monotonic clock과 벽시계를 비교하지 않는다. 큰 미래 시계 이동으로 24시간 원장 시간을 앞당기는 공격은 중앙 시간 권위가 없는 로컬 앱의 남는 한계다.
+
+### 4.3 업무시간과 자동 휴식
+
+- 기본 활동 시간은 **평일 월–금 09:00 이상 18:00 미만**, 사용 중인 OS의 로컬 시간대 기준이다. 공휴일 캘린더는 외부 조회하지 않는다.
+- 업무시간 밖에는 `care`, `joy`, `energy`, 성장, 보상 계산을 정지한다. 로컬 기록 확인·공유 해제·기능 해제·삭제는 가능하다.
+- 업무시간 밖에는 새 돌봄·초대·수락·게임 입력을 시작하지 않는다. 이미 확정된 결과의 ACK·상태 조회·복구는 데이터 정합성을 위해 허용한다.
+- 18:00에 미확정 세션은 안전 종료하며, 이미 확정되었거나 결과를 모르는 세션은 canonical 결정 조회로 수렴한다.
+- 09:00 복귀 시 팝업이나 OS 알림을 띄우지 않는다. 펫 화면을 열면 활동 가능 상태를 보여 준다.
+- 시스템 시간대 변경 시 다음 평가부터 새 로컬 시간대를 사용하며 과거 구간을 재계산하지 않는다.
+- `enabled=false`로 기능을 일시 중지하면 시간 cursor와 모든 수치를 동결한다. 다시 켤 때 `lastEvaluatedAt`과 `lastPetInteractionAt`을 재개 시각으로 옮겨 중지 기간을 소급 계산하지 않는다.
+- 일시 중지 전에 시작한 `rest`는 남은 **업무 유효시간**을 보존하고 재개 뒤 이어 간다. 일시 중지 중 도착한 과거 canonical terminal 결과는 중복 방지에 필요한 최소 정산만 허용하며 시간 cursor는 전진시키지 않는다.
+
+### 4.4 사용자 행동
+
+| 행동 | 비용 | 즉시 효과 | 반복 제한 |
+|---|---:|---|---|
+| `care` | `energy` 5 | `care` +12, `bond` +2, `growthPoints` +2, `careBias` +2 | 30분 안의 2회째부터 수치 보상 25% |
+| `tidy` | `energy` 3 | `care` +8, `bond` +1, `growthPoints` +1, `careBias` +1 | 30분 안의 2회째부터 수치 보상 25% |
+| `play` | `energy` 8 | `joy` +14, `bond` +2, `growthPoints` +2, `careBias` -2, `socialBias` -1 | 30분 안의 2회째부터 수치 보상 25% |
+| `rest` | 없음 | 업무 유효시간 30분을 예약하고 종료 시 `energy` +12 | 동시에 하나만 예약, 야간·주말에는 timer 정지 |
+| `welcomeBack` | 없음 | `care`와 `joy`를 각각 최소 60으로 보정, `energy` 최소 70 | `restingAway` 복귀 시 1회 |
+
+반복 제한은 행동 자체를 막지 않고 `care`, `joy`, `bond`, `growthPoints`, bias 효과를 25%로 낮춘다. 정수 효과는 `floor(baseEffect * 0.25)`로 계산하되 상태 회복량은 최소 1, `bond`, `growthPoints`, bias는 0이 될 수 있다. 비용은 그대로다. 사용자는 애니메이션을 보고 싶을 때 계속 상호작용할 수 있다.
+
+최근 24시간 rolling window에서 `bond`는 최대 10, `growthPoints`는 최대 12까지만 증가한다. 친구 활동 몫은 이 중 `bond` 6, `growthPoints` 6을 넘지 못한다. 자정에 초기화되지 않는다. `careBias`와 `socialBias`는 같은 window에서 합산 절댓값 12까지만 변한다. 방문과 협동 완료는 `socialBias +2`이고 배틀·선물·거절·오프라인은 bias를 바꾸지 않는다.
+
+행동 적용 순서는 `시간 평가 → request 멱등 확인 → lifecycle/예약 energy 검증 → energy 비용 차감 → care/joy 회복 → 저상태 성장 배율 → 반복 배율 → rolling 상한 → 정수 floor → lastPetInteractionAt 갱신 → event/revision 저장`이다. `rest`는 `napEndsAt`을 DB에 저장하고 완료 평가에서 값을 지운 뒤 한 번만 `energy +12`를 적용한다. 휴식 중에는 일반 30분 energy 회복을 중복 적용하지 않는다.
+
+### 4.5 생활 상태
+
+```text
+active ── 24h 펫 행동 없음 ──> restingAway
+  │                         │
+  ├─ 업무시간 밖 ──> resting
+  │                │        └─ 업무시간 + welcomeBack ──> active
+  └<── 업무 시작 ──┘
+```
+
+| 상태 | 진입 조건 | 수치 변화 | 사용자 표현 |
+|---|---|---|---|
+| `active` | 일반 사용 구간 | 정상 규칙 적용 | 기본 홈과 행동 버튼 |
+| `resting` | 평일 09–18 밖·주말 또는 수동 휴식 중 | 필요치·에너지·성장 동결; 수동 휴식 완료 보상만 1회 | 조용한 애니메이션, 알림 없음 |
+| `restingAway` | `lastPetInteractionAt` 뒤 24시간 초과 | 모든 감소·성장 정지 | “기다리며 쉬고 있었어요” |
+| `visiting` | engine이 보호하는 예약 상태 | 로컬 행동 잠금 | **[후속]** 현재 protocol은 session을 별도 snapshot에 표시하며 pet row를 이 상태로 바꾸지 않음 |
+| `recovering` | engine이 보호하는 복구 상태 | 사용자 행동 잠금 | **[후속]** 자동 진입·복구 UX 미구현 |
+| `ownerConflict` | engine이 보호하는 충돌 상태 | 읽기 전용 | **[후속]** 자동 감지·가져오기 UX 미구현 |
+
+`care`나 `joy`가 0이어도 펫은 죽거나 사라지지 않는다. 표정이 차분해지고 성장 진행이 멈출 뿐이다. 두 수치 중 하나가 30 미만이면 `growthPoints` 획득은 50%, 둘 다 30 미만이면 0이 된다.
+
+### 4.6 성장 단계와 분기
+
+| 단계 | 진입 조건 | 최소 실제 시간 | 선택 |
+|---|---|---:|---|
+| `seed` | 최초 생성 | 0시간 | 네 가지 기질의 중립형 |
+| `young` | `growthPoints >= 40`, `bond >= 15` | 업무 유효시간 540분(1 근무일) | `careBias`에 따른 외형 2개 |
+| `grown` | `growthPoints >= 140`, `bond >= 50` | 업무 유효시간 3,780분(7 근무일) | bias 외형 2개, `socialBias >= 20`이면 social 후보 1개 추가 |
+
+조건을 충족하면 자동으로 외형을 바꾸지 않는다. 후보와 조건을 보여 주고 사용자가 선택한다. 선택하지 않은 후보는 사라지지 않는다. 성장 후 수치는 유지되고 단계별 외형 선택 기록만 추가된다.
+
+성장 후보는 다음 규칙으로 제안한다.
+
+- `careBias >= 20`: 차분 계열 후보 우선.
+- `careBias <= -20`: 활동 계열 후보 우선.
+- `socialBias >= 20`: 교류 장식 후보 추가.
+- 그 외: 균형 계열 후보.
+- 친구 교류는 후보의 장식만 넓히며 성장 단계의 필수 조건이 아니다.
+
+### 4.7 부재와 복귀 예시
+
+금요일 18:00에 앱을 닫고 월요일 09:00에 열면, 해당 구간의 업무시간은 0분이므로 필요치·에너지·성장이 그대로 유지된다. 장기 부재 복귀 안내에서 `welcomeBack`을 누르면 `care >= 60`, `joy >= 60`, `energy >= 70`이 되고 정상 행동을 바로 할 수 있다. 부재 기간에 비례한 빚, 치료 타이머, 성장 후퇴는 없다.
+
+## 5. 친구 교류 상세 명세
+
+### 5.1 공개와 발견
+
+`enabled`와 `sharingEnabled`는 별도 설정이며 둘 다 기본값은 `false`다. 현재 소스에서 전역 프로필 공개 master setting을 확인하지 못했으므로 출시 구현의 펫 공개 동의는 독립 `sharingEnabled`가 유일한 권한이다.
+
+- `enabled=false`: 새 펫 데이터 생성·광고·초대·미확정 행동 처리를 하지 않는다. 이미 불가역 commit한 event의 중복 확인과 terminal ACK만 최소 처리한다.
+- `enabled=true`, `sharingEnabled=false`: 로컬 육성만 사용하고 `lanpet-v1`을 광고하지 않는다.
+- `sharingEnabled=true`: 승인되고 차단되지 않은 피어에게 펫 이름, 단계, 대표 외형, 허용 교류를 90초 summary로 광고한다.
+- `allowVisit`, `allowCooperativePlay`, `allowGift`, `allowBattle`은 활동별 수신 권한이며, `blockedPeerIds`는 채팅 음소거와 분리된 펫 교류 차단 목록이다.
+- 설정을 끄면 새 초대를 거절하고 commit 전 세션·선물 동의를 취소한 뒤 광고 캐시를 제거한다. 철회 전에 한쪽에서 이미 불가역 commit된 result는 새 공개 없이 `session.status`와 terminal ACK만 최소 정산한다.
+
+향후 검증된 전역 visibility master setting이 도입되면 펫 공개는 `globalVisibilityAllowed && sharingEnabled`의 AND gate로 계산한다. 전역 설정은 deny override만 하며, 다시 허용돼도 `sharingEnabled`를 자동으로 켜지 않는다. 이 연동은 최초 출시를 위해 기존 채팅 hello와 프로필 정책 전체를 재설계한다는 뜻이 아니다.
+
+설정 해제 사실은 암호화 내부 `revoked` 메시지로 현재 연결된 피어에 알린다. 오프라인 피어의 복사본을 원격 삭제할 수 있다고 약속하지 않으며, summary는 90초 뒤 재광고 없이는 만료된다.
+
+### 5.2 세션 흐름
+
+```text
+hello: lanpet-v1
+  → invite
+  → respond: accept | decline
+  → started
+  → input → round (활동별 1·3·5턴)
+  → result | abort
+  → ack
+```
+
+1. 초대자가 상대 프로필의 “펫 초대”를 누른다.
+2. main이 상대 capability, 프로토콜 버전, 공개 상태, 로컬 rate limit을 확인한다.
+3. `invite.request`를 전송하고 로컬 받은 편지함에 `outgoingPending`을 만든다.
+4. 수신자는 상대 이름, 요청 활동, 예상 시간, 보상 상한을 보고 수락 또는 거절한다.
+5. 양쪽 main이 같은 `sessionId`, 참가자, 만료 시간을 저장한 뒤 준비 확인을 교환한다.
+6. 초대자 main이 시작 이벤트를 확정한다.
+7. 초대자 main이 canonical result 또는 abort를 먼저 영속하고, 각 펫의 소유 main이 같은 certificate로 자기 펫 결과를 검증·커밋한다.
+8. 종료 요약은 양쪽에 저장하되 상대 펫의 상세 수치는 저장하지 않는다.
+
+### 5.3 중복·오프라인·거절·재시작
+
+| 상황 | 처리 | 사용자 표현 |
+|---|---|---|
+| 같은 초대 중복 도착 | `requestId` unique 제약으로 기존 상태 반환 | 초대 카드 하나만 표시 |
+| 상대 오프라인 | 초대 전 연결 상태를 검사해 `PEER_OFFLINE` | “상대가 현재 연결되어 있지 않아요” |
+| 수락 전 연결 끊김 | 초대는 2분 뒤 만료 | 다시 초대 버튼 |
+| 수락 후 준비 중 끊김 | 초대자 상태 조회·abort 또는 수신자 `resultUnknown` 복구 | 보상 없음 또는 결과 확인 중 |
+| 명시적 거절 | `declined`; 10분간 같은 활동 재초대 제한 | 이유를 상대에게 강요하지 않음 |
+| 앱 재시작 | DB의 미완료 세션을 읽고 상태 질의. canonical certificate가 있으면 그 결정을 따르고, 없으면 초대자만 result/abort를 확정 | “세션을 복구했어요” 또는 “안전하게 종료했어요” |
+| 버전 불일치 | 공통 capability가 없으면 시작 전 거절 | 필요한 최소 앱 버전 표시 |
+| 결과 ACK 유실 | 동일 `eventId` 재전송. unique 원장이 기존 결과 반환 | 중복 애니메이션·보상 없음 |
+| 동시 초대 | 같은 두 피어이면 정렬한 peer ID로 수신 초대 하나를 승격하고 나머지는 `SESSION_CONFLICT` | 확정된 초대만 표시 |
+
+### 5.4 방문
+
+**[구현]** 방문은 양쪽이 `focus`, `guard`, `spark` 중 하나를 고르는 1턴 친선 세션이다. 양쪽 펫은 각자의 기기에 남고 상대 화면에는 암호화된 공개 summary만 렌더링한다.
+
+- 채팅 메시지는 방문 세션으로 복사하지 않는다.
+- 종료 시 양쪽 `joy +4`, `bond +1`, `growthPoints +1`을 각 소유 main이 적용한다.
+- rolling 24시간 첫 3회의 완료된 방문만 수치 보상을 준다. 이후 방문은 결과와 기록만 남긴다.
+
+### 5.5 협동 놀이
+
+**[구현]** 협동 놀이는 양쪽이 `focus`, `guard`, `spark`를 선택하는 3턴 세션이다. 승패 대신 모든 라운드가 검증된 `completedTogether`만 영구 보상 조건으로 쓴다.
+
+- 참가 비용: 각 펫 `energy 6`을 시작 전 예약하고 영구 차감하지 않는다.
+- 완료 보상: 각 펫 `joy +6`, `bond +2`, `growthPoints +2`.
+- rolling 24시간 수치 보상: 최대 3회.
+- 초대자 main이 세션 결과 계산자이자 canonical finality 권한자다. 양쪽의 마지막 확정 입력을 정렬한 deterministic input, 규칙 버전, 참가자, 최종 점수, 완료 여부, 마지막 sequence를 DB에 저장하고 `resultCertificate` 또는 `abortCertificate` 하나를 발행한다.
+- 양쪽 완료 입력을 받은 경우에만 `completedTogether=true`로 확정한다. 진행률만으로 한쪽 보상을 먼저 확정하지 않는다.
+- 초대자 main은 canonical result 결정과 자기 펫의 예약 비용·보상을 하나의 트랜잭션으로 영속한 뒤 certificate를 전송한다. abort를 결정하면 abort 상태와 자기 예약 해제를 하나의 트랜잭션으로 영속한다. terminal 결정은 뒤집지 않는다.
+- 수신 소유 main은 새 pet encrypted channel에서 받은 certificate의 `sessionId`, 참가자, 규칙 버전, input hash를 검증한 뒤 예약 비용과 보상을 한 트랜잭션으로 적용한다.
+- result 또는 ACK가 유실되면 즉시 롤백하지 않고 `resultUnknown`으로 두고 `session.status`를 재조회한다. 이는 상대 commit 확인 여부가 아니라 canonical certificate 전달 결과를 모르는 상태다. 초대자는 저장된 certificate를 재전송한다.
+- 참가자가 완료 입력을 제출하기 전에는 cancel할 수 있다. 제출 뒤에는 초대자의 `abortCertificate` 없이 일방적으로 예약을 환불하지 않는다. 결과가 7일간 전달되지 않으면 `reconciliationNeeded`로 보존하고 예약 6 energy도 유지한다. 이 드문 상태를 해결하는 운영 절차는 MVP 출시 전 장애 주입 테스트로 확정한다.
+- 중앙 서버가 없으므로 두 DB의 동시 원자 커밋은 보장하지 않는다. 양쪽은 같은 certificate와 멱등 원장으로 최종 수렴하며, 상대가 영구 오프라인이면 한쪽만 커밋된 상태가 남을 수 있음을 UI의 교류 기록에 표시한다.
+
+### 5.6 선물
+
+MVP 선물은 발신자의 인벤토리를 이전하는 거래가 아니다. 방문을 기념해 수신자 소유 main이 새 기념품을 정액 발급하는 동의 기반 이벤트다. 희귀 자산, 환금성, 소유권 이전이 없으므로 두 DB 원자 거래와 복제 문제를 피한다.
+
+| 규칙 | 값 |
+|---|---:|
+| 발신 제안 한도 | rolling 24시간 상대별 1개, 전체 3개 |
+| 수신 발급 한도 | rolling 24시간 3개 |
+| 보유 한도 | 기념품 유형별 10개. 초과 시 발급 없이 기록만 저장 |
+| 제안 만료 | 발송 후 24시간 안에 미수락 시 종료 |
+| 재선물 | 기념품은 양도할 수 없음 |
+| 성장 영향 | 없음 |
+
+**[구현]** 선물은 일반 `invite → respond → result → ack` 세션으로 처리한다. 발신자는 제안 횟수만 기록하고 아이템을 차감하지 않는다. 수신 main은 result `eventId`를 unique 원장으로 확인해 `friendshipStar`를 한 번만 발급한다. 한도 또는 보유량 초과도 `capped` terminal 기록으로 확정해 ACK 유실 뒤 자산을 새로 만들지 않는다.
+
+### 5.7 훈련, 배틀, 교배, 교환
+
+| 기능 | 단계 | 이유와 제한 |
+|---|---|---|
+| 친선 훈련 | P1 | 승패 없이 선택 패턴을 연습. 양쪽 완료 보상 동일, 성장 필수 아님 |
+| 친선 배틀 | 최초 출시 | 명시적 별도 동의, 약탈·랭킹·연승 보상 없음. 동등 조건의 5턴 선택형 게임 |
+| 교배 | 제외 | 콘텐츠·동의·혈통·중복 상태 범위가 MVP 가치보다 큼 |
+| 기념 알/교류 성장 | P2 검토 | 조그레스·브리드의 공동 성장 감각만 변형. 양쪽 소유 펫은 유지하고, 각각 독립된 기념 개체 또는 장식 후보를 발급 |
+| 펫 교환 | 제외 | 단일 소유자 복구, 사기 방지, 중복 삭제 문제를 유발 |
+
+### 5.8 출시 친선 배틀과 후속 훈련 규칙
+
+**[후속]** 친선 훈련은 출시 범위가 아니다. 추가한다면 기존 선택 프로토콜을 사용하되 승패 없이 같은 보상을 주는 별도 활동으로 검토한다.
+
+친선 배틀은 사용자의 2026-09-08 결정에 따라 최초 출시 범위에 포함한다. 별도 친선 훈련 모드는 후속 기능으로 유지한다.
+
+1. 초대 카드에 “순위·아이템 손실·성장 필수 조건 없음”을 표시한다.
+2. 수락 후 양쪽 main은 동일한 5턴 규칙, 정규화된 자원, 세션 nonce를 저장한다.
+3. 각 턴은 15초 입력 창을 갖되 시간 초과는 패배가 아니라 `rest` 기본 입력이다.
+4. 초대자 main이 deterministic result를 계산하고 협동 놀이와 같은 `resultCertificate`를 발행한다.
+5. 수신 main은 자신의 입력 hash가 포함됐는지 검증한다. 불일치하면 보상 없이 `resultDisputed`로 닫는다.
+6. 결과 화면은 승·패를 표현할 수 있지만 영구 보상은 양쪽 동일한 장식 진행도 1이며 rolling 24시간 최대 3이다.
+7. 어느 쪽이든 확정 전 중단할 수 있고 불이익이 없다. 확정 뒤 ACK 유실은 상태 조회와 certificate 재전송으로 수렴한다.
+
+도감·꾸미기는 P1에 적합하다. 이미 소유한 외형과 만난 친구 종의 공개 요약만 기록하며 상대의 상세 상태나 과거 활동을 수집하지 않는다. 공동 제작은 Uni의 가까운 기기 교류에서 영감을 얻되, 양쪽이 같은 세션을 완료하면 각자의 기기에 독립 장식을 발급한다.
+
+P2 기념 알/교류 성장은 Paradise의 브리드와 Pendulum의 조그레스에서 “함께 만든 다음 성장”만 추상화한다. 기존 펫을 소비·이전·병합하지 않고, 양쪽 동의와 세션 certificate로 각자 독립된 기념 외형 후보를 해금한다. 혈통, 희귀도, 거래 가치는 만들지 않는다. 이 방식도 콘텐츠 조합 수와 동의 표현이 충분히 검증되지 않으면 도입하지 않는다.
+
+### 5.9 exploit 방지 경계
+
+- 보상은 렌더러가 제안해도 main만 확정한다.
+- 각 보상 원장은 `ownerPetId + eventId + rewardType` unique 키를 가진다.
+- 한도는 펫 소유자의 최근 24시간 원장 합계로 계산한다. 로컬 자정은 한도를 초기화하지 않는다.
+- 큰 양의 시계 차이는 정상 부재로 처리하되 최근 24시간 원장이 즉시 반복 보상을 제한한다. 악의적인 미래 시계 이동을 완전히 증명할 중앙 권위는 없다.
+- 앱 재설치, DB 복제, 여러 기기 동시 소유를 방어하는 중앙 권한은 없다. MVP는 한 설치·한 펫을 제품 전제로 명시한다.
+- 상대가 변조된 클라이언트를 쓰면 상대 펫 상태까지 신뢰할 수 없다. 내 펫 보상 상한과 입력 검증으로 영향 범위를 내 기기에서 제한한다.
+
+## 6. UI와 사용자 경험
+
+### 6.1 진입점
+
+1. 좌측 또는 상단 앱 탐색에 선택형 `Pet` 항목을 둔다.
+2. 처음 열면 기능 설명, 로컬 저장, LAN 공개 여부, 메시지 비분석 원칙을 보여 준다.
+3. “로컬에서 시작” 후에만 펫을 생성한다.
+4. 친구 교류를 처음 누를 때 별도 opt-in을 요청한다.
+5. 공개된 상대 프로필에는 capability가 확인될 때만 “펫 초대”를 보여 준다.
+
+### 6.2 화면별 상태
+
+| 화면 | 필수 상태 |
+|---|---|
+| 온보딩 | 3단계 설명, 이름 입력, 선택적 공유 opt-in, 저장 실패 |
+| 펫 홈 | `active`, `resting`, `restingAway`, `visiting`, `recovering`, `ownerConflict`, 데이터 없음 |
+| 친구 목록 | 로딩, 공개 펫 있음, 공개 펫 없음, 상대 구버전, 연결 끊김 |
+| 초대함 | 수신 대기, 발신 대기, 수락, 거절, 만료, 취소, 조용한 시간 |
+| 놀이 | 준비, 동기화, 진행, 일시 중단, 재연결, 완료, 안전 종료 |
+| 선물 | 선택, 발신 한도, 전송, 수락 대기, 기념품 발급, 만료 |
+| 성장 | 진행도, 후보 잠김 이유, 선택 가능, 선택 확인, 저장 실패 |
+| 설정 | 기능 사용, 공유 사용, 허용 활동, 업무시간 안내, 데이터 삭제 |
+
+### 6.3 상태 표현 원칙
+
+- 수치가 낮아도 비난형 문구, 빨간 경보, 연속 알림을 쓰지 않는다.
+- “3일 동안 방치했어요” 대신 “쉬고 있었어요. 다시 시작할까요?”를 쓴다.
+- 실패 시 기술 코드보다 사용자가 할 수 있는 행동을 먼저 보여 준다.
+- 보상 상한에 도달하면 “오늘의 성장은 충분해요. 놀이는 계속할 수 있어요.”로 설명한다.
+- 상대 거절은 이유를 추정하거나 부정적 감정으로 표현하지 않는다.
+
+### 6.4 알림 제한
+
+- **[구현]** 최초 출시는 OS 알림·소리·dock badge를 사용하지 않는다.
+- 상태 감소와 성장 가능 여부는 펫 화면을 열었을 때만 표시한다. 배경 toast나 채팅 unread를 만들지 않는다.
+- 친구 초대와 결과도 펫 화면 내부에만 한 번 표시한다. 같은 상대의 새 초대는 10분에 한 번만 허용한다.
+- `notifications_enabled`는 schema에서 항상 0이며 renderer에 알림 권한 요청 API를 노출하지 않는다.
+
+### 6.5 접근성
+
+- 모든 상태를 색상 외에 아이콘, 레이블, 텍스트로 전달한다.
+- 키보드만으로 온보딩, 돌봄, 초대 수락·거절, 세션 종료가 가능해야 한다.
+- 애니메이션 감소 설정에서는 150ms 이하의 opacity 전환과 정지 프레임을 사용한다.
+- 스크린 리더 이름에 감정 추측 대신 상태를 사용한다. 예: “에너지 70, 쉬는 중”.
+- 미니게임은 빠른 반응만 요구하지 않고 2초 이상의 입력 창 또는 턴 방식을 제공한다.
+- 기본 텍스트 대비는 WCAG AA를 만족하고 200% 확대에서 기능 손실이 없어야 한다.
+
+### 6.6 성능 예산
+
+- 펫 홈이 숨겨져 있을 때 애니메이션 루프를 중지한다.
+- 대표 스프라이트 세트의 압축 후 총량 목표는 2MB 이하, 한 상태 애니메이션은 12프레임 이하로 둔다.
+- 1초 단위 DB 쓰기를 금지한다. renderer는 30초 snapshot polling과 push event를 병행하며, main은 소수 업무분을 잃지 않고 평가 cursor를 저장한다.
+- 피어 hello에는 문자열 `lanpet-v1`만 추가하고, 암호화 summary에는 이름·단계·외형·허용 활동·visibility version만 보낸다.
+- service snapshot은 로컬·교류 history를 합쳐 최근 50개만 반환하고, protocol 화면 목록은 최대 100개로 제한한다.
+
+## 7. 현재 저장소 연결점과 프로세스 책임
+
+> **[구현]** 아래 연결점은 `feature/lanpet` 출시 후보의 현재 코드다. 배포·공증 완료 여부는 [`Docs/lanpet-release-validation.md`](./lanpet-release-validation.md)의 실행 증거로 별도 판정한다.
+
+### 7.1 main 프로세스
+
+- [`electron/peer/wire.js`](../electron/peer/wire.js)는 `WIRE_VERSION=2`를 유지하고, 공유가 켜진 경우에만 hello에 `lanpet-v1`을 추가한다. 미지원 피어와 기존 채팅은 그대로 유지된다.
+- [`electron/peer/wsServer.js`](../electron/peer/wsServer.js)는 외부 type `lanpet`을 허용하고 23,000 byte보다 큰 wire frame을 버린다. [`electron/peer/inbound/handlers/lanpet.js`](../electron/peer/inbound/handlers/lanpet.js)가 암호문을 도메인 프로토콜로 전달한다.
+- [`electron/lanpet/petCrypto.js`](../electron/lanpet/petCrypto.js)는 `lan-chat.lanpet.v1` HKDF domain, ECDH, AES-256-GCM을 사용한다. [`electron/lanpet/protocolValidation.js`](../electron/lanpet/protocolValidation.js)가 내부 평문 16KB, 식별자, fingerprint, 기한, message type을 검증한다.
+- [`electron/lanpet/protocol.js`](../electron/lanpet/protocol.js)는 TOFU 고정 키와 `pendingKeyChangeMap`을 검사하고 초대, 3턴 협동, 5턴 배틀, 선물, ACK, 복구를 영속 상태 머신으로 처리한다.
+- [`electron/lanpet/engine.js`](../electron/lanpet/engine.js)는 로컬 시간·돌봄·성장 계산만 담당한다. [`electron/lanpet/store.js`](../electron/lanpet/store.js)는 SQL 문과 원장을, [`electron/lanpet/service.js`](../electron/lanpet/service.js)는 트랜잭션·snapshot·명령·세션 교체 차단을 담당한다.
+- [`electron/lanpet/migrations.js`](../electron/lanpet/migrations.js)는 기존 SQLCipher DB 안에 schema version 1을 transaction으로 추가한다. 로그인 DB가 바뀌거나 로그아웃하면 service를 dispose해 이전 계정 상태를 차단한다.
+
+### 7.2 preload
+
+[`electron/preload.js`](../electron/preload.js)는 다음 세 API만 `contextBridge`로 노출한다.
+
+```text
+electronAPI.lanpet.getSnapshot()
+electronAPI.lanpet.command(command)
+electronAPI.lanpet.onChanged(listener)
+```
+
+임의 채널 이름, DB 쿼리, 파일 경로, raw socket 송신, 상대 주소는 renderer에 노출하지 않는다. `nodeIntegration` 또는 `contextIsolation` 변경은 필요하지 않으며, 변경 제안이 생기면 보안 영향 변경으로 사용자 확인을 먼저 받아야 한다.
+
+### 7.3 renderer
+
+- [`src/App.jsx`](../src/App.jsx)는 인증 뒤 `LanpetLauncher`를 렌더링한다. [`src/components/lanpet/LanpetPanel.jsx`](../src/components/lanpet/LanpetPanel.jsx), `LanpetLauncher.jsx`, `LanpetCharacter.jsx`, `useLanpet.js`, `lanpet.css`가 로컬 snapshot을 표시한다.
+- renderer는 30초 polling과 `lanpet:changed`를 함께 사용하고, main의 immutable snapshot만 표시한다. 영구 보상은 낙관적으로 적용하지 않는다.
+- 펫 상태는 chat message 배열, unread, search, toast, virtualization 경로에 들어가지 않는다. OS 알림·소리·dock badge도 만들지 않는다.
+
+### 7.4 IPC 변경 영향
+
+[`electron/ipcHandlers/lanpet.js`](../electron/ipcHandlers/lanpet.js)는 `lanpet:get-snapshot`, `lanpet:command`만 등록하고 top-level main frame, 로그인 DB, peer ID, master key, 16KB command 크기, command type을 검사한다. 변경 이벤트는 같은 microtask의 알림을 합쳐 `lanpet:changed`로 보낸다. 허용 command type은 `create`, `care`, `grow`, `settings`, `delete`, `invite`, `respond`, `action`, `end`다.
+
+| command type | 현재 입력 계약 |
+|---|---|
+| `create` | `{ type, name, requestId? }`; 이름 trim 뒤 1–24자 |
+| `care` | `{ type, action, requestId? }`; action은 `care`, `tidy`, `play`, `rest`, `welcomeBack` |
+| `grow` | `{ type, choiceId, requestId? }`; snapshot이 제공한 해금 후보만 허용 |
+| `settings` | `{ type, enabled?, sharingEnabled?, allowVisit?, allowCooperativePlay?, allowGift?, allowBattle?, blockedPeerIds?, requestId? }` |
+| `delete` | `{ type, requestId? }` |
+| `invite` | `{ type, peerId, activity, requestId }`; activity는 `visit`, `cooperativePlay`, `gift`, `battle` |
+| `respond` | `{ type, sessionId, response, requestId }`; response는 `accept`, `decline` |
+| `action` | `{ type, sessionId, choice, requestId }`; choice는 `focus`, `guard`, `spark` |
+| `end` | `{ type, sessionId, requestId }` |
+
+성공 응답은 `{ ok: true, snapshot }`, 실패 응답은 `{ ok: false, code, message }`다. snapshot 최상위에는 `enabled`, `sharingEnabled`, 활동별 허용값, `blockedPeerIds`, `workHours`, `isWorkingTime`, `pet`, `peers`, `invitations`, `sessions`, `history`, `inventory`가 있다. UI hook은 누락된 `requestId`를 생성해 모든 command 재시도에서 같은 요청을 식별한다.
+
+### 7.5 정책과 현행 구현의 경계
+
+프로젝트 지침은 완전 단절과 프로필 공개 opt-in을 확정 정책으로 둔다. Lanpet은 기존 전체 프로필 정책을 재설계하지 않고 독립 `sharingEnabled`를 구현했다. 피어 차단도 `blockedPeerIds`로 분리했다.
+
+현재 [`electron/ipcHandlers/app.js`](../electron/ipcHandlers/app.js)에는 URL fetch와 `autoUpdater.checkForUpdates()`가 있으므로 앱 전체가 외부 요청 0이라고 주장하지 않는다. **[구현]** Lanpet 자체는 bundled SVG/CSS만 사용하고 인터넷 요청, 외부 이미지 URL, 원격 분석, 공개 IP 기능을 만들지 않는다.
+
+### 7.6 검증 harness 경계
+
+[`tests/lanpet/`](../tests/lanpet/)에는 engine, crypto, protocol, service, migration과 file-backed encrypted restart 검증이 있다. IPC와 preload, renderer 테스트도 별도로 존재한다. 최신 자동 검증 결과와 배포 경계는 [`Docs/lanpet-release-validation.md`](./lanpet-release-validation.md)를 권위 기록으로 사용한다. **[후속]** 실제 두 PC LAN, 서명된 앱, 공증·업데이트 설치는 자동 테스트와 별도다.
+
+## 8. 데이터, 프로토콜, 일관성
+
+### 8.1 암호화 스키마 구현
+
+**[구현]** 모든 Lanpet 표는 기존 SQLCipher SQLite 파일 안에 있고 별도 평문 JSON 캐시는 없다.
+
+| 실제 표 | 현재 용도 | 핵심 제약·보존 |
+|---|---|---|
+| `lanpet_schema` | Lanpet schema version | singleton, 현재 version 1 |
+| `lanpet_settings` | 기능·공유·활동별 허용·차단 목록·고정 업무시간 | `enabled=false`, `sharing_enabled=false`, OS 알림 0 기본 |
+| `lanpet_generations` | 생성·삭제 generation tombstone | active generation 하나, 삭제 tombstone 90일 |
+| `lanpet_pets` | 한 펫의 수치·성장·시간 cursor·`nap_ends_at` | 수치 CHECK, generation unique, `state_revision` |
+| `lanpet_events` | 로컬 행동·성장·교류 상세 history | `event_id` PK, `(session_id, sequence)` partial unique, 상세 30일 |
+| `lanpet_inventory` | `friendshipStar` 수량 | `(pet_id, item_type)` PK, 유형별 최대 10은 service가 검사 |
+| `lanpet_reward_ledger` | rolling 24시간 보상·멱등 marker | `(pet_id, event_id, reward_type)` unique, 상세 30일 |
+| `lanpet_gift_ledger` | 선물 issued/capped tombstone | `gift_event_id` PK, 90일 |
+| `lanpet_protocol_records` | 실제 protocol sessions/inbox/outbox/peers/commands/visibility JSON | `(namespace, record_id)` PK, 상세 30일 뒤 compact·tombstone 90일 |
+| `lanpet_invitations`, `lanpet_sessions`, `lanpet_inbox`, `lanpet_outbox` | typed forward schema | 현재 protocol runtime은 위 generic record 표를 사용하므로 이 네 표에는 활성 데이터를 이중 기록하지 않음 |
+
+`lanpet_pets`의 사용자 상태는 정수지만 세 시간 remainder와 `growth_age_minutes`는 `REAL`이다. `lanpet_settings`에는 `allow_visit`, `allow_cooperative_play`, `allow_gift`, `allow_battle`, `blocked_peer_ids_json`, 09·18시, `[1,2,3,4,5]`가 저장된다. JSON payload에는 채팅 내용과 IP 주소를 넣지 않는다.
+
+### 8.2 트랜잭션 경계
+
+로컬 행동은 `시간 평가 → 입력 검증 → 예약 energy 포함 비용 검사 → 상태 효과 → event·reward 삽입 → revision 증가`를 하나의 SQLite transaction으로 실행한다. 기능을 끈 동안에는 시간 cursor와 수치를 동결하고, 다시 켤 때 지난 pause 구간을 재계산하지 않는다. 진행 중 `rest`는 남은 업무 유효시간만 이어 간다.
+
+원격 보상은 양쪽 DB를 분산 transaction으로 묶지 않는다. 초대자 main이 session의 canonical result/abort와 자기 상태를 먼저 commit하고, 상대 소유 main은 검증된 certificate를 자기 DB에 한 번 적용한다. 공유를 끈 뒤 도착한 과거 terminal result도 동일 session·generation·event가 확인되면 정산한다.
+
+### 8.3 마이그레이션
+
+1. `migrateLanpetDatabase()`가 `CREATE TABLE/INDEX IF NOT EXISTS`와 기본 singleton 삽입을 하나의 transaction에서 실행한다.
+2. 기본 설정은 기능·공유 off, 네 활동 허용 on, block 목록 비어 있음, OS 알림 off다.
+3. 기존 사용자는 `create` 명령 전까지 `lanpet_pets` row가 없다.
+4. 인증 DB open 뒤 migration을 호출하며 실패는 Lanpet snapshot 오류로 격리해 채팅을 계속 사용하게 한다.
+5. file-backed SQLCipher DB를 닫고 같은 key로 다시 열어 펫과 protocol record가 유지되는 테스트가 있다.
+
+DB 암호화 또는 키 관리 흐름을 바꾸는 설계는 현재 범위에 없다. 실제 구현에서 키나 cipher 설정 변경이 필요하다고 판단되면 보안 영향과 마이그레이션 계획을 제시하고 명시적 확인을 받아야 한다.
+
+### 8.4 시계 권한
+
+- 영구 수치의 시간 기준은 펫 소유 기기 main의 `Date.now()`다. 상대 timestamp는 보상 권위가 아니다.
+- engine은 로컬 업무시간 교집합을 밀리초 정밀도로 계산하고 소수 분 remainder를 저장한다.
+- 음의 경과는 0이며 cursor를 낮추지 않고, 저장 cursor를 따라잡기 전 새 영구 행동은 `CLOCK_ROLLBACK`으로 거절한다.
+- 보상은 최근 24시간 ledger만 보며 자정에 초기화하지 않는다.
+- **[후속]** 실행 중 monotonic clock 비교와 5분 wall-clock 이상 감지는 현재 구현에 없다. 중앙 시간 권위 없이 미래 시계 조작을 완전히 막을 수 없다.
+
+### 8.5 단일 소유자와 충돌
+
+`ownerInstallationId`에는 생성 시 현재 `peerId`를 기록하고, 내 펫 상태는 내 DB의 `stateRevision`으로만 증가한다. 상대 payload가 이를 덮어쓰는 API는 없다.
+
+**[후속]** 복제 DB를 다른 설치에서 실행했을 때 독립 installation identity로 `ownerConflict`를 자동 감지하는 기능은 구현되지 않았다. 병합·가져오기·소유권 이전도 출시 범위가 아니다.
+
+### 8.6 프로토콜 envelope
+
+raw WebSocket과 `sendPeerMessage` 자체는 자동 암호화 채널이 아니다. **[구현]** 외부 wrapper type은 `lanpet`이고, 매 재전송마다 outer `id`를 새로 만든다.
+
+```json
+{
+  "type": "lanpet",
+  "id": "attempt_...",
+  "fromId": "peer_...",
+  "to": "peer_...",
+  "encryptedPayload": "base64:..."
+}
+```
+
+내부 envelope는 AES-256-GCM으로 암호화되며 다음 필드를 가진다.
+
+```json
+{
+  "protocol": "lan-chat.lanpet.v1",
+  "version": 1,
+  "messageType": "input",
+  "requestId": "req_...",
+  "eventId": "evt_...",
+  "sessionId": "ses_...",
+  "senderPeerId": "peer_...",
+  "recipientPeerId": "peer_...",
+  "senderFingerprint": "sha256:...",
+  "recipientFingerprint": "sha256:...",
+  "senderGeneration": "generation_...",
+  "recipientGeneration": "generation_...",
+  "createdAt": 1788796800000,
+  "expiresAt": 1788796920000,
+  "payload": { "turn": 1, "choice": "focus" }
+}
+```
+
+- 내부 평문은 최대 16KB이며 실제 message type allowlist는 `summary`, `revoked`, `invite`, `respond`, `started`, `input`, `round`, `result`, `abort`, `cancel`, `status`, `ack`다.
+- ECDH shared secret을 `lan-chat.lanpet.v1` HKDF context로 분리하고 12-byte IV와 16-byte auth tag를 사용한다. AAD는 domain과 송수신 fingerprint 순서를 묶는다.
+- TOFU pinned key, pending key change, sender·recipient peer/fingerprint, 양쪽 generation, 생성·만료 시간을 검증한 뒤에만 payload를 처리한다.
+- `eventId`, `requestId`, `sessionId`는 UUID로 만들고 재전송에서도 내부 값을 보존한다. canonical sequence는 session과 certificate에 저장된다.
+
+### 8.7 capability 협상
+
+기존 hello에는 공유가 켜진 동안 문자열 `lanpet-v1`만 추가한다. 별도 상세 capability 객체는 없다. 양쪽 hello 교집합에 `lanpet-v1`이 있고 TOFU key가 승인된 뒤에만 암호화 summary를 교환한다. summary에는 `petName`, `stage`, `appearanceId`, `activities`, `visibilityVersion`만 있고 90초 뒤 만료된다. 공통 capability가 없으면 채팅은 유지하고 Lanpet 교류만 숨긴다.
+
+### 8.8 멱등성, 만료, 복구
+
+- 수신은 decrypt·schema/fingerprint/generation 검사 뒤 `fingerprint:requestId` inbox를 조회한다. 같은 hash면 기존 ACK를 재전송하고 다른 hash면 `REQUEST_ID_CONFLICT`다.
+- protocol command도 `generation:requestId`와 input hash를 저장한다. reward는 `(pet_id, event_id, reward_type)` unique이며 선물은 `gift_event_id` PK다.
+- outbox는 전송 후 즉시 성공으로 보지 않고 ACK까지 유지한다. retry 간격은 지수 증가하되 최대 30초이며, result/abort/status tombstone은 최대 90일 계약을 가진다.
+- 초대와 일반 envelope 기본 만료는 2분, 선물 초대는 24시간, 시작된 session은 10분, 공개 summary는 90초다.
+- 초대자만 canonical result 또는 abort를 영속한다. 완료 입력 뒤 결과를 모르는 guest는 `resultUnknown`, 7일 뒤 `reconciliationNeeded`로 남기며 일방적으로 예약 energy를 돌려받지 않는다.
+- recover는 2초 간격으로 만료·battle timeout·상태 조회·outbox를 처리하고, retention cleanup은 최대 60초 간격으로 실행한다.
+- 정산 완료 session/outbox 상세는 30일 뒤 compact tombstone으로 바꾸고 정산 확정일 90일 뒤 삭제한다. `resultUnknown`, `reconciliationNeeded`, 미확인 canonical ACK, 예약 energy, key 분쟁은 시간만으로 삭제하지 않는다.
+- 펫 삭제 시 이전 generation session은 상세 없는 `deleted` tombstone으로 압축하고 미확정 outbound는 terminal 취소/철회만 남긴다. 늦은 ACK는 보존 outbox와 일치할 때만 정리한다.
+
+### 8.9 오류 코드 예시
+
+| 코드 | 의미 | 재시도 |
+|---|---|---|
+| `FEATURE_DISABLED` | 로컬 기능 또는 공유 꺼짐 | 설정 변경 후 |
+| `PET_SHARING_DISABLED` | 상대 공개 꺼짐 | 자동 재시도 없음 |
+| `OUTSIDE_WORK_HOURS` | 평일 09–18 밖에서 새 활동 시도 | 다음 업무시간 |
+| `CLOCK_ROLLBACK` | 현재 시각이 저장 cursor보다 과거 | 시계가 따라잡은 뒤 |
+| `REST_ALREADY_ACTIVE` | 수동 휴식 진행 중 | 완료 뒤 |
+| `PEER_OFFLINE` | 상대 연결 없음 | 사용자 재시도 |
+| `PEER_BLOCKED` | 펫 교류 차단 목록 | 차단 해제 후 |
+| `PEER_KEY_CHANGED` | TOFU key 변경 승인 대기 | 승인 후 |
+| `ACTIVITY_DISABLED` | 해당 활동 수신 꺼짐 | 다른 활동 선택 |
+| `INVITE_EXPIRED` | 수락 시간 만료 | 새 초대 |
+| `SESSION_CONFLICT` | 동시 세션 충돌 | 확정 세션으로 이동 |
+| `INVALID_STATE_TRANSITION` | 현재 상태에서 허용되지 않는 이벤트 | 상태 조회 후 중단 |
+| `EVENT_SEQUENCE_GAP` | 이벤트 누락 | 상태 조회·중단 |
+| `REQUEST_ID_CONFLICT` | 같은 요청 ID에 다른 payload | 재시도 금지, 새 요청 ID |
+| `REQUEST_EXPIRED` | 처리 전 만료 | 새 요청 생성 |
+| `RESULT_DISPUTED` | result certificate 검증 불일치 | 보상 없이 종료 |
+| `INSUFFICIENT_ENERGY` | 예약분을 빼면 행동 비용 부족 | 회복 뒤 |
+
+### 8.10 도메인 이벤트와 허용 전이
+
+로컬 history와 P2P wire는 이름 공간이 다르다. 로컬 `lanpet_events.event_type`은 아래 값만 기록하며 생활 상태 전환 자체는 별도 이벤트가 아니라 pet row 평가 결과다.
+
+| 로컬 event type | 생성 조건 | 영구 효과 |
+|---|---|---|
+| `pet.created` | `create` 성공 | 새 generation과 `seed` 펫 생성 |
+| `care.care`, `care.tidy`, `care.play` | 해당 로컬 행동 성공 | 비용·회복·rolling 보상을 한 transaction으로 적용 |
+| `care.rest` | 수동 휴식 시작 | `napEndsAt` 예약; 완료 보상은 evaluator가 1회 적용 |
+| `care.welcomeBack` | `restingAway`에서 복귀 | 최소 회복값과 cursor 갱신 |
+| `pet.grown` | 유효한 `choiceId` 선택 | 단계·외형·revision 갱신 |
+| `social.visit`, `social.cooperativePlay`, `social.battle`, `social.gift` | 검증된 result certificate 정산 | 소유자별 비용·보상·기념품을 `eventId`당 한 번 적용 |
+
+P2P session은 `lanpet_protocol_records`의 `sessions` namespace에서 다음 상태를 사용한다.
+
+| 입력/wire type | 필요한 현재 상태 | 다음 상태·처리 |
+|---|---|---|
+| `invite` | 양쪽 공유·활동 허용, trusted·online, 활성 session 없음 | host `outgoingPending`, guest `incomingPending` |
+| `respond: accept` | guest `incomingPending`, 미만료 | guest `preparing`, 필요하면 energy 6 예약; host 수신 뒤 `inProgress`와 `started` |
+| `respond: decline` | guest `incomingPending` | 양쪽 `declined` terminal |
+| `started` | guest `preparing` | `inProgress` |
+| `input` | `inProgress`, 해당 turn, 미제출 | guest 선택을 host에 제안; host가 canonical round 계산 |
+| `round` | guest `inProgress`, 직전 입력과 순서 일치 | 검증된 round 저장 후 다음 turn |
+| `result` | guest가 accept했고 certificate 검증 성공 | `completed`; 예약 비용·보상 또는 기념품을 1회 정산 |
+| `abort` | host의 canonical terminal 결정 | `canceled`, `expired`, `declined` 중 certificate 사유로 종료 |
+| `cancel` | guest가 확정 전 종료 요청 | host가 기존 certificate 재전송 또는 canonical abort 확정 |
+| `status` | guest가 결과 조회 | host가 보존한 result/abort 재전송 |
+| `ack` | 같은 수신 event와 request | outbox를 acknowledged로 바꾸고 확정 시각 기록 |
+| `revoked` | 상대 공유 철회 | 공개 summary 제거, 미확정 session cancel/abort 복구 시작 |
+
+terminal status는 `completed`, `declined`, `canceled`, `expired`, `keyChanged`, `resultDisputed`, `deleted`다. guest가 canonical 결정을 받지 못한 `resultUnknown`과 7일 뒤의 `reconciliationNeeded`는 terminal이 아니며 예약을 시간만으로 해제하지 않는다. 허용 전이에 없는 입력은 `INVALID_STATE_TRANSITION`으로 거절하고, 새 generation은 이전 generation의 활성 명령과 보상을 수용하지 않는다.
+
+## 9. 보안, 프라이버시, 동의, 오남용
+
+### 9.1 데이터 최소화
+
+| 데이터 | 저장 위치 | 상대 공개 | 보존 |
+|---|---|---|---|
+| 펫 영구 상태 | 암호화 DB | 공개 안 함 | 펫 삭제까지 |
+| 펫 공개 요약 | 암호화 protocol record와 상대 메모리 | opt-in 시만 | 재광고 없으면 90초 후 만료 |
+| 완료 초대·세션·outbox | 암호화 DB | 해당 상대와 ID 공유 | 상세 30일, compact tombstone 90일 |
+| 미확정 정산 | 암호화 DB | 해당 상대와 ID 공유 | 결과가 수렴할 때까지 기간 삭제 안 함 |
+| 선물·요청 멱등 원장 | 암호화 DB | 해당 상대와 식별자 공유 | rolling 제한·재전송 방어용 최대 90일 |
+| 채팅 메시지 | 기존 채팅 저장 흐름 | 펫 기능에 전달 안 함 | 기존 정책 |
+| IP/네트워크 주소 | 기존 연결 계층 | 펫 DB에 저장 안 함 | 기존 정책 |
+
+### 9.2 동의
+
+- 기능 생성, 펫 공개, 활동별 초대 수신은 각각 별도 선택이다. OS 알림은 최초 출시에서 제공하지 않는다.
+- 방문 수락이 선물·훈련·배틀 수락을 의미하지 않는다.
+- 배틀 초대마다 순위 없음, 약탈 없음, 확정 전 종료 가능을 표시하고 별도 수락을 받는다.
+- 설정 해제 즉시 새 광고·초대·세션 생성을 중단한다.
+- 동의 철회 전에 한쪽에서 이미 commit된 결과에는 상태 조회와 terminal ACK만 허용하며 새 활동이나 추가 보상은 만들지 않는다.
+- 데이터 삭제는 이전 generation의 진행 세션을 먼저 canonical cancel/abort 대상으로 만들고, 로컬 펫·이벤트·보상·인벤토리를 transaction에서 제거하며 generation을 `deleted` tombstone으로 바꾼다. 이전 session은 중복·재전송 방지에 필요한 최소 메타데이터만 남기고 새 펫의 활성 session이나 예약으로 계산하지 않는다.
+- 삭제 사실을 상대 전체에 방송하지 않는다. 현재 연결된 진행 세션 상대에게는 cancel만 보내며, 오프라인 상대가 가진 과거 공개 summary를 즉시 원격 삭제할 수 없다는 한계를 설정 화면에 설명한다.
+
+### 9.3 위협과 완화
+
+| 위협 | 완화 | 남는 한계 |
+|---|---|---|
+| 초대 스팸 | peer별 10분 가시 알림 한도, 차단, 활동별 허용 설정 | 같은 LAN의 새 ID 반복은 기존 피어 신뢰 모델에 의존 |
+| payload 폭탄 | 16KB 제한, schema/array/string 길이 검증, timeout | 기존 transport 수준 DoS는 별도 검토 필요 |
+| 중복 보상 | unique 원장, idempotency 응답, rolling 24시간 상한 | DB 자체 변조는 로컬 신뢰 경계 밖 |
+| 상대 상태 위조 | 내 보상은 내 main 규칙으로만 계산 | 상대의 외형·기록 진위는 중앙 권한 없이 증명 불가 |
+| 프로필 추적 | 기본 비공개, 연결 중 최소 요약, 설정 해제 시 제거 | mDNS/기존 peer 발견 자체의 노출은 기존 앱 보장에 따름 |
+| renderer 침해 | 좁은 preload API, main 검증, raw socket/DB 미노출 | 기존 Electron 보안 설정을 실제 구현 시 재검증해야 함 |
+| 파일 평문 노출 | 기존 암호화 DB·첨부 정책 사용 | 메모리와 화면 캡처는 OS 위협 모델에 따름 |
+
+### 9.4 구현된 보안 범위
+
+2026-09-08 사용자 결정에 따라 다음 변경을 출시 후보에 구현했다. `nodeIntegration`, `contextIsolation`, 기존 비밀번호·암호화 키 정책은 변경하지 않았다.
+
+- 기존 P2P wire protocol에 새 message type과 payload를 추가하는 변경
+- 프로필 광고에 펫 capability/summary를 추가하는 변경
+- 암호화 DB schema와 migration을 추가하는 변경
+- preload IPC allowlist를 추가하는 변경
+- TOFU 고정 키·key-change pending 상태와 별도 펫 차단 목록을 적용하는 변경
+
+실제 두 기기의 키 승인·변경, 서명된 패키지, 공증, 업데이트 파일 검증 결과는 [`Docs/lanpet-release-validation.md`](./lanpet-release-validation.md)에 기록하며 자동 단위 테스트와 구분한다.
+
+## 10. 단계별 범위와 구현 작업 단위
+
+### 10.1 최초 출시 후보 구현
+
+1. 기능 플래그, 3단계 로컬 온보딩, 단일 펫과 독자 SVG/CSS 자산.
+2. `care`, `joy`, `energy`, `bond`, growth points, 부재 동결, 30분 업무시간 휴식.
+3. `seed → young → grown` 선택형 성장과 실제 업무 누적 9시간·63시간 조건.
+4. SQLCipher migration, 소수 업무시간 평가, 이벤트·보상·선물·멱등 원장.
+5. 독립 공개 opt-in, 활동별 허용, 피어 차단, `lanpet-v1` capability.
+6. 초대·수락·거절·만료·취소와 canonical result/abort 복구.
+7. 1턴 방문, 3턴 협동 놀이, 제한 기념품, 5턴 친선 배틀.
+8. encrypted envelope, 재전송, 중복·key-change·재시작 복구, 구버전 fallback UI.
+
+위 항목은 `feature/lanpet` 코드에 반영됐다. 자동 회귀와 Vite build는 2026-09-08 기준 111 suites / 944 tests로 통과했다. 이후 renderer 7 suites / 66 tests와 한 Mac의 실제 Electron 두 피어 19개 검사는 별도로 통과했으며 전체 945-test 재실행으로 합산하지 않는다. 실행 명령과 개별 증거는 [`Docs/lanpet-release-validation.md`](./lanpet-release-validation.md)에 둔다. 서로 다른 두 PC LAN, 서명·공증·공개 배포는 별도 gate이며 이 문서에서 완료로 주장하지 않는다.
+
+### 10.2 P1
+
+- 승패 없는 친선 훈련과 추가 미니게임.
+- 성장 기록과 로컬 추억 앨범.
+- 데이터 내보내기/가져오기 설계. 가져오기는 소유자 충돌 해결을 포함할 때만 제공.
+- OS 알림은 후속 제품 판단 전까지 비활성 유지.
+- 자산 팩 추가와 저사양 렌더링 프로파일.
+
+### 10.3 P2 실험
+
+- 공동 성장 기념 외형과 추가 협력 콘텐츠 검토.
+- 오프라인 초대 보관은 기존 P2P에서 신뢰 가능한 로컬 전달 큐가 있을 때만 검토.
+- 여러 기기 소유/이전은 암호화 키, 충돌 해소, 삭제 증명 설계가 먼저 완료된 경우에만 검토.
+
+교배, 거래 시장, 유료화, 인터넷 서비스, 글로벌 이벤트는 현재 로드맵 밖이다.
+
+### 10.4 구현 작업 단위와 현재 상태
+
+| 순서 | 작업 단위 | 현재 상태 | 판정 근거 |
+|---:|---|---|---|
+| 1 | 도메인 규칙과 clock evaluator | **[구현]** | pure engine과 시간·행동 회귀 테스트 |
+| 2 | DB schema/migration/ledger | **[구현]** | forward migration과 encrypted file restart 테스트 |
+| 3 | main service와 lifecycle 복구 | **[구현]** | snapshot, command, pause/resume, stale DB 차단 |
+| 4 | preload IPC 계약 | **[구현]** | 세 API allowlist와 IPC 입력 검증 |
+| 5 | 로컬 renderer UI | **[구현]** | 온보딩·홈·친구·기록·설정 화면과 Vite build |
+| 6 | capability/protocol envelope | **[구현]** | v1 협상, 암호화, TOFU, 구버전 fallback 테스트 |
+| 7 | 초대/세션 상태 머신 | **[구현]** | 방문·협동·선물·배틀과 복구 테스트 |
+| 8 | renderer·실제 Electron loopback QA | **[확인]** | renderer 66 tests, 실제 Electron 두 피어 19개 검사와 PNG 14개 |
+| 9 | 서로 다른 두 PC LAN QA | **[후속]** | mDNS/UDP 발견과 실제 네트워크 품질 확인 필요 |
+| 10 | 패키징·서명·공증·공개 릴리즈 | 진행 중 | 패키징·`codesign --strict` 통과; 공증 ticket 없음으로 Gatekeeper·stapler·공개 배포 대기 |
+
+## 11. 수용 기준
+
+아래 체크박스는 기능 계약 전체를 유지하기 위한 release gate다. 이번 후보에서 자동화되거나 실제 실행된 항목의 통과 증거는 체크 표시를 임의로 섞지 않고 [`Docs/lanpet-release-validation.md`](./lanpet-release-validation.md)에 명령·환경과 함께 기록한다.
+
+### 11.1 로컬 육성
+
+- [ ] 새 설치에서는 펫 기능과 공유가 모두 꺼져 있고 펫 row가 없다.
+- [ ] 사용자가 로컬 시작을 완료하면 암호화 DB에 펫이 한 개 생성된다.
+- [ ] 동일 `requestId`로 `care` 행동을 두 번 보내도 비용과 효과가 한 번만 적용된다.
+- [ ] 23시간 부재는 최대 규칙 안에서 감소하고, 72시간 부재는 첫 24시간 이후 감소하지 않는다.
+- [ ] 앱을 켜 둔 72시간 무상호작용과 앱을 종료한 72시간 부재가 같은 업무시간 설정에서 같은 필요치 결과와 `restingAway` 상태를 만든다.
+- [ ] 채팅 송수신, 앱 focus, 자동 30초 snapshot 평가가 `lastPetInteractionAt`을 갱신하지 않는다.
+- [ ] 30초씩 120회 평가한 상태와 60분을 한 번 평가한 상태의 수치·성장 시간이 같다.
+- [ ] 30 업무분 `rest`가 야간·주말·기능 중지 구간에서는 진행되지 않고, 재시작·재개 뒤 남은 업무분만 이어서 `energy +12`를 한 번 적용한다.
+- [ ] 기능을 7일간 껐다 켜도 중지 기간의 감소·회복·성장을 소급하지 않는다.
+- [ ] 72시간 부재 후 `welcomeBack`으로 `care >= 60`, `joy >= 60`, `energy >= 70`이 된다.
+- [ ] OS 시간을 뒤로 돌려도 수치나 rolling 보상이 증가하지 않는다.
+- [ ] 평일 09–18 밖과 주말에는 필요치·에너지·성장이 동결되고 새 활동·초대가 시작되지 않는다.
+- [ ] 금요일 18:00 → 월요일 09:00은 유효 업무시간 0분이며, 18:00 경계를 넘는 진행 세션은 확정 여부에 따라 종료 또는 복구한다.
+- [ ] 성장 조건 충족 뒤에도 사용자 선택 전 외형이 바뀌지 않는다.
+- [ ] 낮은 상태가 사망, 삭제, 퇴화, 누적 빚을 만들지 않는다.
+
+### 11.2 공개와 프라이버시
+
+- [ ] 기본값 `sharingEnabled=false`에서는 `lanpet-v1` capability·summary가 전송되지 않는다.
+- [ ] `sharingEnabled`를 끄면 연결된 피어에서 펫 광고가 제거되고 새 초대가 거절된다.
+- [ ] 향후 전역 visibility가 존재하면 deny일 때 펫 광고를 막고, 다시 allow가 되어도 펫 공유를 자동으로 켜지 않는다.
+- [ ] 펫 기능은 채팅 메시지 본문, 작성 이벤트, 메시지 수를 읽거나 저장하지 않는다.
+- [ ] 암호화 summary는 이름·단계·외형·허용 활동·visibility version만 포함하고 전체 인벤토리·수치·채팅 정보를 포함하지 않는다.
+- [ ] 펫 삭제 후 로컬 펫·이벤트·보상·인벤토리는 제거되고 이전 generation은 compact tombstone만 남으며 채팅 데이터는 유지된다.
+
+### 11.3 P2P 호환성과 복구
+
+- [ ] 펫 미지원 구버전 피어와 채팅은 정상 동작하고 펫 UI만 숨겨진다.
+- [ ] 공통 프로토콜이 없을 때 `PROTOCOL_UNSUPPORTED`를 보여 주며 채팅 연결은 유지한다.
+- [ ] 같은 초대 패킷을 10회 수신해도 초대 카드와 DB row는 하나다.
+- [ ] 거절 후 10분 안의 같은 활동 재초대는 상대에게 가시 알림을 만들지 않는다.
+- [ ] 준비 중 연결이 끊기면 host의 canonical abort 또는 재연결 상태 조회로 수렴하며 보상을 임의 적용하지 않는다.
+- [ ] 결과 ACK가 유실되어 재전송돼도 각 펫 보상은 한 번만 적용된다.
+- [ ] 커밋 직전 앱을 강제 종료하고 재시작해도 각 로컬 DB는 원장을 기준으로 완료, 예약 해제, 또는 명시적 `reconciliationNeeded` 중 하나로 수렴하며 중복 보상하지 않는다.
+- [ ] 초대자가 canonical result/abort 영속 직전과 직후에 강제 종료되어도 하나의 terminal 결정만 유지하고, 완료 입력 제출자는 초대자 abort 없이 예약을 환불하지 않는다.
+- [ ] 16KB 초과 payload와 잘못된 schema는 상태 변경 없이 거절된다.
+
+### 11.4 선물과 exploit
+
+- [ ] 발신자는 최근 24시간 상대별 1개, 전체 3개를 초과해 선물할 수 없다.
+- [ ] 수신자는 최근 24시간 3개를 넘겨도 수치·인벤토리 이득을 얻지 않는다.
+- [ ] 수신 ACK 전 앱이 종료돼도 발신자 인벤토리 차감이나 이전 자산 복제가 발생하지 않으며, 수신 기념품은 `giftEventId`당 최대 하나다.
+- [ ] 만료된 미수락 제안은 기념품을 발급하지 않고 terminal `expired`가 되며, 같은 제안 재전송에 기존 결과를 반환한다.
+- [ ] 자정이나 로컬 날짜 변경만으로 rolling 한도가 초기화되지 않는다.
+
+### 11.5 UI, 접근성, 성능
+
+- [ ] 실제 Electron renderer에서 모든 화면 상태와 오류 상태를 확인한다.
+- [ ] 키보드만으로 기능 시작, 돌봄, 초대 수락·거절, 세션 종료가 가능하다.
+- [ ] 스크린 리더가 펫 수치, 상태, 버튼 결과를 순서대로 읽는다.
+- [ ] 감소 모션에서 반복 애니메이션이 정지 프레임으로 대체된다.
+- [ ] 200% 확대와 좁은 창에서 가로 기능 손실이나 잘린 핵심 버튼이 없다.
+- [ ] 펫 화면이 숨겨지면 애니메이션 loop와 1초 주기 DB write가 없다.
+- [ ] 100개 교류 기록에서 스크롤과 화면 전환이 목표 기기에서 끊기지 않는다.
+- [ ] 600개 이상 채팅에서 prepend, 검색 이동, 새 메시지 toast, unread, virtualized scroll anchor가 펫 이벤트 전후 동일하게 동작한다.
+- [ ] 2-node harness에서 초대·수락·중복·ACK 유실·버전 불일치를 검증하고 기존 peer/message/read status/reaction/history/user IPC 테스트가 회귀하지 않는다.
+- [ ] file-backed 임시 encrypted DB에서 migration, 강제 종료, 재시작 복구를 검증한다. in-memory harness 통과만으로 디스크 암호화·복구 완료를 주장하지 않는다.
+- [ ] 실제 두 PC LAN에서 discovery, 키 승인, 방문, 놀이, 연결 해제·재연결을 확인한 뒤 교류 기능 출시 가능으로 판정한다.
+
+## 12. 위험, 관측, 롤백
+
+| 위험 | 초기 신호 | 대응/롤백 기준 |
+|---|---|---|
+| 초대가 업무 방해가 됨 | 거절률·즉시 공유 해제 증가 | 알림 기본 off 강화, 활동별 수신 끄기 전면 배치 |
+| 수치가 의무감 생성 | 부재 후 기능 삭제, 반복 행동 급증 | 감소폭 축소, 동결 시점 단축, 성장 조건 완화 |
+| 프로토콜 불안정 | `sessionAborted`, sequence gap 증가 | 교류 capability 원격 비활성화 없이 로컬 설정으로 차단 가능한 kill switch 제공 |
+| 중복 보상 | ledger unique 충돌 증가 | 해당 활동 수치 보상 중단, 애니메이션만 유지, 원장 감사 |
+| DB migration 실패 | `migrationFailed` | 펫만 비활성화하고 기존 채팅 유지, 재시도 가능한 migration 제공 |
+| 자산 유사성 | 사용자 혼동·법무 지적 | 후보 폐기, 독자 실루엣·명칭 검토 게이트 강화 |
+| 저사양 성능 저하 | renderer frame drop, 메모리 증가 | 애니메이션 프레임·동시 효과 축소, 정지 모드 제공 |
+
+제품 분석을 위해 성공/실패 카운터를 로컬에서만 집계할 수 있다. 외부 전송은 하지 않는다. 진단 내보내기는 사용자가 직접 실행하고 미리 내용을 확인할 수 있을 때만 P1로 검토한다.
+
+## 13. 사용자 확정 사항
+
+2026-09-08 사용자의 번호별 응답과 추천 적용 판단을 반영했다.
+
+1. **[확정] 이름:** Lanpet. 원작과 구별되는 독자 캐릭터를 번들한다.
+2. **[확정] 사용 시간:** 회사 사용을 기본으로 로컬 시간 평일 09:00–18:00. 업무시간 밖과 주말은 무벌점 자동 휴식이다. 공휴일은 외부 캘린더를 조회하지 않는다.
+3. **[확정] 하루 한도:** 최근 24시간 rolling window를 사용한다. 자정·날짜 변경만으로 보상 한도가 초기화되지 않는다.
+4. **[확정] 신뢰:** 기존 TOFU 고정 키와 키 변경 승인 상태를 재사용한다. 승인 대기 피어는 펫 조회·초대·배틀을 차단한다. 채팅 음소거를 보안 차단으로 오해하지 않으며, 펫 초대 차단은 별도 설정으로 관리한다.
+5. **[확정] 통신:** 원시 WebSocket의 기밀성을 가정하지 않는다. pet 전용 ECDH/HKDF/AES-GCM envelope에 송수신자·generation·fingerprint를 결합하고 크기·기한·멱등 원장을 검증한다. 기존 채팅 wire v2를 유지하며 capability로 호환성을 판정한다.
+6. **[확정] 기록:** 완료한 교류의 상세 기록은 30일, compact 멱등 tombstone은 90일 보존한다. 미확정 결과·예약은 단순 기간 만료로 삭제하거나 환불하지 않는다. 사용자의 펫 삭제는 별도 generation 갱신과 함께 처리한다.
+7. **[확정] 배틀:** 최초 출시 포함. 양측 수락, 동등한 조건, 5턴 선택, 순위·약탈·연승 보상 없음. 채팅량이나 접속시간을 능력치로 사용하지 않는다.
+8. **[확정] 알림:** OS 알림·소리·dock badge는 사용하지 않는다. 초대·결과는 펫 화면 내부에서만 표시한다.
+
+출시 지시는 위 범위의 구현·검증·커밋·공개 배포를 포함한다. 로컬 빌드, 서명, 공증, GitHub 게시, 업데이트 파일 무결성은 각각 실제 실행 결과로 기록하며 통과하지 않은 단계를 완료로 표기하지 않는다.
+
+## 14. 출처와 검증 경계
+
+### 14.1 외부 공식 자료
+
+- [S1. Bandai Digital Monster Ver.20th 발표와 원형 소개](https://p-bandai.jp/press/2017/01/1000005357/)
+- [S2. Toei Digital Monster Ver.1 재현 설명](https://www.toei-anim.co.jp/tv/digimon/news/20200402.php)
+- [S3. Bandai Pendulum 20th 발표와 1998 원형 소개](https://p-bandai.jp/press/2018/01/1000006857/)
+- [S4. Bandai Digital Monster COLOR/Ver.2 자료](https://p-bandai.jp/press/2023/08/1000014098/)
+- [S5. Bandai Pendulum COLOR 8/9 2026 공식 발표](https://p-bandai.jp/press/2026/06/1000017073/)
+- [S6. Tamagotchi Connection 2024 미국 공식 발표](https://tamagotchi-official.com/us/series/connection/news/01_430/)
+- [S7. Tamagotchi Uni 공식 사용법](https://tamagotchi-official.com/us/series/uni/howtoplay/)
+- [S8. Tamagotchi Uni 공식 FAQ](https://tamagotchi-official.com/us/series/uni/faq/)
+- [S9. Tamagotchi Paradise 첫 모델 공식 발표](https://tamagotchi-official.com/jp/series/paradise/news/01_1010/)
+- [S10. Tamagotchi Paradise Orange Tropics / White Glacier 공식 발표](https://tamagotchi-official.com/jp/news/01_1447/)
+
+공식 웹 자료를 2026-09-08에 직접 조회했다. 상품 재고와 실기 동작은 검증하지 않았다. 초기 가이드 PDF 하나는 404, Pendulum 영문 매뉴얼 하나는 502였으나 위 공식 웹 자료로 비교의 핵심 사실을 교차 확인했다.
+
+### 14.2 현재 확인 경계
+
+- **[확인]** 프로젝트 지침상 Electron + React, LAN P2P, mDNS 발견, encrypted SQLite, preload IPC, 완전 단절과 공개 opt-in이 핵심 제품 정책이다.
+- **[구현]** `feature/lanpet`에는 로컬 engine/service, SQLCipher schema·원장, `lanpet-v1` 협상, `lan-chat.lanpet.v1` 암호화 envelope, 영속 protocol, 좁은 preload IPC, renderer 화면과 독자 bundled 자산이 있다.
+- **[확인]** 2026-09-08 `npm run release:check` 결과 111 suites / 944 tests와 Vite build가 통과했다. 시간 소수 누적, 기능 중지·재개, 휴식, 삭제 generation, 보존기간, 닫힌 DB timer 회귀가 포함된다. 자세한 실행 명령과 범위는 [`Docs/lanpet-release-validation.md`](./lanpet-release-validation.md)를 따른다.
+- **[확인]** 이후 renderer 7 suites / 66 tests와 한 Mac의 실제 Electron 두 피어 19개 검사가 별도로 통과했고 PNG 14개를 남겼다. 이는 서로 다른 두 PC의 mDNS/UDP 발견 품질 검증을 대신하지 않는다.
+- **[확인]** macOS 패키징과 `codesign --strict` 검사는 통과했다. 공증 ticket이 없어 Gatekeeper는 unnotarized 앱을 거절했고 stapler는 exit 65를 반환했으므로 공증 완료나 배포 완료로 보지 않는다.
+- **[확인]** 현재 앱 전체에는 update check와 URL fetch 등 외부 요청 경로가 있다. Lanpet은 외부 요청을 추가하지 않았지만, 이 사실만으로 기존 앱 전체의 완전 단절 준수를 증명하지는 않는다.
+- **[후속]** 실행 중 monotonic clock 비교, 복제 DB의 자동 `ownerConflict` 감지, 서로 다른 두 PC의 mDNS/LAN 품질은 현재 자동 검증 범위 밖이다.
+- **[후속]** 서로 다른 두 PC LAN, Apple 공증·Gatekeeper 승인, 업데이트 파일 무결성, GitHub 공개 배포는 각 실행 결과가 기록된 뒤에만 완료로 판정한다.

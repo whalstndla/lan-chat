@@ -7,6 +7,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 실행 중 값이 바뀌지 않는 정적 문자열이라 함수가 아닌 값 그대로 노출한다.
   platform: process.platform,
 
+  // 펫 전용 채널은 채팅의 전역 구독 정리와 분리하고 리스너별 해제만 허용한다.
+  lanpet: {
+    getSnapshot: () => ipcRenderer.invoke('lanpet:get-snapshot'),
+    command: (command) => ipcRenderer.invoke('lanpet:command', command),
+    onChanged: (callback) => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = (_, snapshot) => callback(snapshot)
+      ipcRenderer.on('lanpet:changed', listener)
+      return () => ipcRenderer.removeListener('lanpet:changed', listener)
+    },
+  },
+
   // 인증
   checkProfileExists: () => ipcRenderer.invoke('check-profile-exists'),
   register: (data) => ipcRenderer.invoke('register', data),

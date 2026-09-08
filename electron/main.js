@@ -11,6 +11,7 @@ const { collectLocalIpv4Addresses, selectPrimaryLocalIpv4 } = require('./peer/ne
 // 장기 신원키(myPrivateKey/myPublicKeyBase64)는 부팅이 아니라 로그인 이후(masterKey 확보 시점)에
 // auth.js 가 loadOrCreateEncryptedKeyPair 로 로드한다(#61). 부팅 경로에서는 개인키를 다루지 않는다.
 const { closeDatabase } = require('./storage/database')
+const { disposeLanpetService } = require('./lanpet/service')
 const { writePeerDebugLog, resetPeerDebugLog, isPeerDebugEnabled, getPeerDebugLogPath, flushPeerDebugLogNow } = require('./utils/peerDebugLogger')
 const { startMemoryMonitor, stopMemoryMonitor, perfEnabled } = require('./utils/perf')
 const { startPresenceMonitor, stopPresenceMonitor } = require('./utils/presence')
@@ -424,6 +425,7 @@ let hasCleanedUp = false
 async function performCleanup() {
   if (hasCleanedUp) return
   hasCleanedUp = true
+  disposeLanpetService(ctx)
   stopMemoryMonitor()
   stopPresenceMonitor()
   // mDNS goodbye 패킷 전파를 위해 await (500ms 대기 포함)

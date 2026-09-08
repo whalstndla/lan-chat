@@ -1,9 +1,12 @@
 {
   "name": "lan-chat",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "LAN 환경 전용 P2P 암호화 채팅 앱",
   "main": "electron/main.js",
   "scripts": {
+    "release:check": "npm test -- --runInBand --no-watchman --forceExit && vite build",
+    "release:package": "npm run release:check && npm run prerelease && electron-builder --mac --publish never",
+    "release:verify": "bash scripts/verify-mac-release.sh",
     "dev": "concurrently \"vite --strictPort\" \"wait-on http://localhost:5173 && electron .\"",
     "dev:peer-debug": "sh -c 'mkdir -p logs && : > logs/dev.log && : > logs/peer-debug.log && npm run prerelease && LAN_CHAT_DEBUG_PEER=1 npm run dev 2>&1 | tee logs/dev.log'",
     "prerelease": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
@@ -98,6 +101,11 @@
       "logo.png"
     ],
     "mac": {
+      "artifactName": "LAN-Chat-${version}-${arch}.${ext}",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true,
       "target": [
         {
           "target": "dmg",

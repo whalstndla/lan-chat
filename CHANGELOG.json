@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.13.0",
+    "date": "2026-09-08",
+    "changes": [
+      { "type": "feat", "text": "Lanpet: adopt an original pocket companion, care for it, and choose its growth. Activities run Monday through Friday, 09:00–18:00; nights and weekends carry no care penalty." },
+      { "type": "feat", "text": "Lanpet friends: opt in to local sharing, exchange visits and keepsakes, play together, and join five-round friendly battles. Both players keep their pets and items." },
+      { "type": "feat", "text": "Private by default: activity permissions and invitation blocking, no chat-content or message-count rewards, no pet OS notifications, and encrypted local pet records." },
+      { "type": "improve", "text": "Peer recovery: encrypted Lanpet messages, trusted-key and generation checks, persistent duplicate protection, and explicit confirmation of interrupted results." },
+      { "type": "improve", "text": "Compatibility: both peers need v0.13.0 or later for Lanpet activities. Existing chat remains compatible with wire-v2 versions when the other peer has no Lanpet support." }
+    ]
+  },
+  {
     "version": "0.12.0",
     "date": "2026-07-16",
     "changes": [

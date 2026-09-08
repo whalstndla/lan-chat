@@ -12,6 +12,7 @@ const { registerReactionHandlers } = require('./reaction')
 const { registerSettingsHandlers } = require('./settings')
 const { registerDataHandlers } = require('./data')
 const { registerAppHandlers } = require('./app')
+const { registerLanpetHandlers } = require('./lanpet')
 
 function registerAllIpcHandlers(ctx) {
   registerAuthHandlers(ctx)
@@ -25,6 +26,7 @@ function registerAllIpcHandlers(ctx) {
   registerSettingsHandlers(ctx)
   registerDataHandlers(ctx)
   registerAppHandlers(ctx)
+  registerLanpetHandlers(ctx)
 }
 
 module.exports = { registerAllIpcHandlers }

@@ -32,7 +32,11 @@ function buildHello({
   addresses,
   profileImageUrl,
   capabilities = LOCAL_CAPABILITIES,
+  lanpetSharingEnabled = false,
 }) {
+  // 펫 지원 여부도 명시적 공개 동의 뒤에만 hello에 추가한다.
+  const advertisedCapabilities = Array.isArray(capabilities) ? capabilities.filter(value => value !== 'lanpet-v1') : []
+  if (lanpetSharingEnabled) advertisedCapabilities.push('lanpet-v1')
   return {
     type: 'hello',
     v: WIRE_VERSION,
@@ -44,7 +48,7 @@ function buildHello({
     filePort,
     addresses: Array.isArray(addresses) ? [...addresses] : [],
     profileImageUrl: profileImageUrl ?? null,
-    capabilities: Array.isArray(capabilities) ? [...capabilities] : [],
+    capabilities: advertisedCapabilities,
   }
 }
 
