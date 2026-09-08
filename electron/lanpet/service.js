@@ -47,7 +47,11 @@ const ERROR_MESSAGES = Object.freeze({
   PEER_UNAVAILABLE: '친구의 랜펫이 지금은 함께 놀 수 없는 상태예요.',
   PEER_OFFLINE: '친구가 접속하지 않았어요.',
   SESSION_CONFLICT: '이미 다른 랜펫 활동이 진행 중이에요.',
-  INVITE_RATE_LIMITED: '잠시 기다린 뒤 다시 초대해 주세요.',
+  INVITE_RATE_LIMITED: '같은 친구에게 초대를 너무 자주 보내지 않도록 대기시간이 적용됐어요.',
+  RACE_UPDATE_REQUIRED: '주사위 경주는 양쪽 모두 v0.15.0 이상이 필요해요. 친구도 랜챗을 업데이트한 뒤 다시 초대해 주세요.',
+  INVALID_DICE_ROLL: '주사위 결과가 1~6 범위를 벗어나 적용하지 않았어요. 활동을 종료한 뒤 다시 초대해 주세요.',
+  PET_RESTING: '펫이 낮잠을 자고 있어요. 표시된 낮잠 종료 시각부터 다시 활동할 수 있어요.',
+  INVITE_EXPIRED: '초대 수락 시간 2분이 지났어요. 새 초대를 보내 주세요.',
   PEER_KEY_CHANGED: '랜챗에서 친구의 변경된 신원 정보를 확인한 뒤 다시 시도해 주세요.',
   NOT_ENOUGH_ENERGY: '이 활동을 하려면 에너지가 더 필요해요.',
   SESSION_NOT_FOUND: '해당 랜펫 활동을 찾을 수 없어요.',
@@ -72,7 +76,10 @@ function normalizeError(error) {
   const code = error && ERROR_MESSAGES[error.code || error.message]
     ? (error.code || error.message)
     : 'INVALID_COMMAND'
-  return { ok: false, code, message: ERROR_MESSAGES[code] }
+  const result = { ok: false, code, message: ERROR_MESSAGES[code] }
+  if (Number.isFinite(error?.retryAt)) result.retryAt = error.retryAt
+  if (typeof error?.explanation === 'string') result.explanation = error.explanation
+  return result
 }
 
 function validateName(name) {
@@ -212,6 +219,13 @@ class LanpetService {
       allowBattle: settings.allowBattle,
       blockedPeerIds: settings.blockedPeerIds,
       workHours: settings.workHours,
+      serverNow: now,
+      hasActiveSession: !!protocolSnapshot.hasActiveSession,
+      reservedEnergy: protocolSnapshot.reservedEnergy || 0,
+      careRepeatReadyAt: Object.fromEntries(['care', 'tidy', 'play'].map(action => {
+        const latest = pet && this.store.getLatestEvent(`care.${action}`, pet.petId)
+        return [action, latest ? latest.createdAt + 1800000 : 0]
+      })),
       isWorkingTime: isWorkingHours(now, settings.workHours),
       pet: decoratedPet,
       peers: Array.isArray(protocolSnapshot.peers) ? protocolSnapshot.peers : [],

@@ -80,32 +80,79 @@ function createPair() {
 describe('Lanpet durable two-owner protocol', () => {
   let pair
   beforeEach(() => { pair = createPair() })
-  afterEach(() => pair.close())
+  afterEach(() => { pair.close(); jest.restoreAllMocks() })
 
-  test('gates racing on both peers capability and validates the three-round result', () => {
-    expect(() => pair.invite('race')).toThrow('PEER_UNAVAILABLE')
-    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY, 'lanpet-world-v1'])
-    pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY, 'lanpet-world-v1'])
+  test('gates dice rules on both peers and validates five rolls without accepting chosen values', () => {
+    expect(() => pair.invite('race')).toThrow('RACE_UPDATE_REQUIRED')
+    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY, 'lanpet-dice-v1'])
+    pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY, 'lanpet-dice-v1'])
     pair.deliver()
+    let rolls = 0
+    const random = jest.spyOn(crypto, 'randomInt').mockImplementation(() => rolls++ % 2 === 0 ? 6 : 1)
     const sessionId = pair.invite('race')
-    for (let round = 0; round < 3; round++) {
-      pair.command('first', { type: 'action', sessionId, choice: 'focus' })
-      pair.command('second', { type: 'action', sessionId, choice: 'spark' })
+    expect(() => pair.command('first', { type: 'action', sessionId, choice: 6 })).toThrow('INVALID_STATE_TRANSITION')
+    for (let round = 0; round < 5; round++) {
+      const request = { type: 'action', sessionId, choice: 'roll', requestId: crypto.randomUUID() }
+      pair.nodes.first.protocol.command(request)
+      pair.nodes.first.protocol.command(request)
+      expect(() => pair.command('first', { type: 'action', sessionId, choice: 'roll' })).toThrow('INPUT_ALREADY_SUBMITTED')
+      pair.command('second', { type: 'action', sessionId, choice: 'roll' })
     }
-    expect(pair.nodes.first.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'win', ownScore: 15, peerScore: 9 })
-    expect(pair.nodes.second.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'loss', ownScore: 9, peerScore: 15 })
+    expect(random).toHaveBeenCalledTimes(10)
+    expect(pair.nodes.first.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'win', ownScore: 30, peerScore: 5 })
+    expect(pair.nodes.second.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'loss', ownScore: 5, peerScore: 30 })
     expect(pair.rewards('first')).toHaveLength(1)
     expect(pair.rewards('second')).toHaveLength(1)
   })
 
-  test('race timeout records rest and settles without fabricated moves', () => {
-    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY, 'lanpet-world-v1'])
-    pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY, 'lanpet-world-v1'])
+  test('race timeout automatically rolls once per player and records automatic inputs', () => {
+    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY, 'lanpet-dice-v1'])
+    pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY, 'lanpet-dice-v1'])
     pair.deliver()
+    jest.spyOn(crypto, 'randomInt').mockReturnValue(3)
     pair.invite('race')
-    for (let round = 0; round < 3; round++) { pair.advance(16000); pair.nodes.first.protocol.recover(); pair.deliver() }
-    expect(pair.nodes.first.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'draw', ownScore: 0, peerScore: 0 })
+    for (let round = 0; round < 5; round++) { pair.advance(16000); pair.nodes.first.protocol.recover(); pair.deliver() }
+    expect(pair.nodes.first.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'draw', ownScore: 15, peerScore: 15 })
+    expect(pair.nodes.second.protocol.getSnapshot().sessions[0].lastRound.automatic).toBe(true)
     expect(pair.rewards('second')).toHaveLength(1)
+  })
+
+  test('completed modern activities can repeat immediately but canceled invitations wait 30 seconds', () => {
+    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY, 'lanpet-dice-v1'])
+    pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY, 'lanpet-dice-v1'])
+    pair.deliver()
+    for (const activity of ['cooperativePlay', 'race', 'cooperativePlay']) {
+      const sessionId = pair.invite(activity)
+      for (let round = 0; round < (activity === 'race' ? 5 : 3); round++) {
+        for (const node of ['first', 'second']) pair.command(node, { type: 'action', sessionId, choice: activity === 'race' ? 'roll' : 'focus' })
+      }
+      expect(pair.nodes.first.protocol.getSnapshot().sessions.find(session => session.sessionId === sessionId).status).toBe('completed')
+    }
+    const { sessionId } = pair.command('first', { type: 'invite', peerId: 'second', activity: 'race' })
+    pair.command('first', { type: 'end', sessionId })
+    try { pair.invite('race'); throw new Error('Expected cooldown') } catch (error) { expect(error.message).toBe('INVITE_RATE_LIMITED'); expect(error.retryAt).toBe(pair.now() + 30000) }
+    pair.advance(29999)
+    expect(() => pair.invite('race')).toThrow('INVITE_RATE_LIMITED')
+    pair.advance(1)
+    expect(pair.invite('race')).toBeTruthy()
+  })
+
+  test('legacy peers expose the exact 10-minute boundary even after completion', () => {
+    const sessionId = pair.invite('visit')
+    for (const node of ['first', 'second']) pair.command(node, { type: 'action', sessionId, choice: 'focus' })
+    const peer = pair.nodes.first.protocol.getSnapshot().peers[0]
+    expect(peer.inviteCooldownSeconds).toBe(600)
+    expect(peer.inviteReadyAt).toBe(pair.now() + 600000)
+    expect(() => pair.invite('cooperativePlay')).toThrow('INVITE_RATE_LIMITED')
+    pair.advance(600000)
+    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY]); pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY]); pair.deliver()
+    expect(pair.invite('cooperativePlay')).toBeTruthy()
+  })
+
+  test('rejects invalid dice values and mismatched dice scores in a received round', () => {
+    const { sessionRoundScore } = require('../../electron/lanpet/protocolValidation')
+    const session = { activity: 'race', ruleVersion: 2, participants: ['first', 'second'] }
+    for (const value of [0, 7, 1.5, '6', null]) expect(() => sessionRoundScore(session, { inputs: { first: 'roll', second: 'roll' }, dice: { first: value, second: 1 } })).toThrow('INVALID_DICE_ROLL')
   })
 
   test('keeps wire v2 and hides capability until sharing consent', () => {

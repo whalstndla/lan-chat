@@ -11,14 +11,14 @@ const { setTimeout: delay } = require('node:timers/promises')
 
 const projectDirectory = path.resolve(__dirname, '..')
 const harnessPath = path.join(projectDirectory, 'tests/lanpet/electronHarness.cjs')
-const outputDirectory = path.join(projectDirectory, 'Docs/lanpet-qa')
+const outputDirectory = path.join(projectDirectory, 'docs/lanpet-three-qa')
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'lanpet-electron-qa-'))
 const report = {
   executedAt: new Date().toISOString(),
   environment: 'Two real Electron processes on one Mac, with isolated temporary profiles and loopback WebSocket communication.',
   limits: [
     'mDNS and UDP discovery advertisements are disabled only in the harness; actual discovery on two physical PCs is not covered.',
-    'The process-local clock begins at Tuesday 10:00, advances 11 minutes between social sessions to honor the invite rate limit, and advances 31 minutes to inspect a completed nap. The OS clock is unchanged.',
+    'The process-local clock begins at Tuesday 10:00. Completed social sessions repeat without advancing the clock; the clock advances 31 minutes only to inspect a completed nap. The OS clock is unchanged.',
     'Care and onboarding use rendered UI; protocol assertions call the actual renderer preload API and traverse the real main process, encrypted database, and peer sockets.',
   ],
   checks: [], screenshots: [],
@@ -122,6 +122,7 @@ class ElectronApplication {
   }
   async screenshot(filename) {
     const screenshotPath = path.join(outputDirectory, filename)
+    await waitFor(() => this.evaluate("[...document.querySelectorAll('.lanpet-three-scene')].every(scene => scene.dataset.renderer === 'ready')"), 'Three.js scene rendered', 20000)
     // 확대와 크기 변경 뒤 compositor가 새 프레임을 그린 다음 증거를 저장한다.
     await this.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))')
     await this.request('capture', { path: screenshotPath })
@@ -131,7 +132,7 @@ class ElectronApplication {
       const dialog = document.querySelector('.lanpet-dialog');
       if (!dialog) return [];
       const labels = [...dialog.querySelectorAll('[aria-label], [title]')].map(element => (element.getAttribute('aria-label') || '') + (element.getAttribute('title') || ''));
-      return [dialog.innerText, ...labels].join(' ').match(/[A-Za-z]+/g) || [];
+      return [dialog.innerText, ...labels].join(' ').replace(/3D|v0\\.15\\.0/g, '').match(/[A-Za-z]+/g) || [];
     })()`)
     assert.deepEqual(untranslated, [], `${filename}: untranslated UI labels`)
     return screenshotPath
@@ -215,7 +216,7 @@ async function socialActivity(first, second, activity, peerId) {
   assert.equal(accepted.ok, true, `${activity} accept: ${accepted.code}`)
   if (activity !== 'gift') {
     await Promise.all([waitForSession(first, sessionId, 'inProgress'), waitForSession(second, sessionId, 'inProgress')])
-    const rounds = { visit: 1, cooperativePlay: 3, battle: 5, race: 3 }[activity]
+    const rounds = { visit: 1, cooperativePlay: 3, battle: 5, race: 5 }[activity]
     for (let round = 1; round <= rounds; round += 1) {
       await waitFor(async () => {
         const snapshots = await Promise.all([first.snapshot(), second.snapshot()])
@@ -226,8 +227,8 @@ async function socialActivity(first, second, activity, peerId) {
       }
       if (activity === 'race' && round === 2) await first.screenshot('14-friend-race.png')
       const [firstMove, secondMove] = await Promise.all([
-        first.command({ type: 'action', sessionId, choice: 'focus' }),
-        second.command({ type: 'action', sessionId, choice: activity === 'battle' ? 'spark' : 'focus' }),
+        first.command({ type: 'action', sessionId, choice: activity === 'race' ? 'roll' : 'focus' }),
+        second.command({ type: 'action', sessionId, choice: { battle: 'spark', race: 'roll' }[activity] || 'focus' }),
       ])
       assert.equal(firstMove.ok, true, `${activity} first input: ${firstMove.code}`)
       assert.equal(secondMove.ok, true, `${activity} second input: ${secondMove.code}`)
@@ -246,9 +247,9 @@ async function socialActivity(first, second, activity, peerId) {
     assert.equal(received?.quantity, 1)
   }
   if (activity === 'race') {
-    assert.equal(firstResult.result.ownScore, 9)
-    assert.equal(secondResult.result.ownScore, 9)
-    assert.equal(firstResult.result.outcome, 'draw')
+    assert(firstResult.result.ownScore >= 5 && firstResult.result.ownScore <= 30)
+    assert.equal(secondResult.result.peerScore, firstResult.result.ownScore)
+    assert.equal(secondResult.result.ownScore, firstResult.result.peerScore)
   }
   record(`${activity}: actual two-peer exchange completed`, { sessionId, firstOutcome: firstResult.result?.outcome, secondOutcome: secondResult.result?.outcome })
   return sessionId
@@ -336,9 +337,8 @@ async function run() {
   await waitFor(async () => (await first.snapshot()).peers.some(peer => peer.available && peer.activities.includes('battle')), 'peer available after preference changes')
   record('Rendered activity preference and invitation block/unblock persist through the actual API')
 
-  const activities = ['visit', 'cooperativePlay', 'battle', 'gift', 'race']
+  const activities = ['visit', 'cooperativePlay', 'battle', 'gift', 'race', 'cooperativePlay', 'race']
   for (let index = 0; index < activities.length; index += 1) {
-    if (index > 0) await advancePair(first, second)
     await socialActivity(first, second, activities[index], secondPeer.peerId)
   }
   await second.click('추억')
@@ -353,7 +353,7 @@ async function run() {
   const boughtWall = await first.command({ type: 'buy', itemId: 'rose' })
   assert.equal(boughtWall.ok, true)
   assert.equal((await first.command({ type: 'equip', itemId: 'rose' })).ok, true)
-  await waitFor(() => first.evaluate("!!document.querySelector('.wall-rose')"), 'equipped room renders')
+  await waitFor(() => first.evaluate("!!document.querySelector('.pet-room-three[data-wall=rose] .lanpet-three-scene[data-renderer=ready]')"), 'equipped room renders')
   await inspectLayout(first, '12-world-shop.png')
   record('Rendered food purchase and feeding persist; purchased decoration changes the actual room')
   await first.click('놀이터')
@@ -365,13 +365,14 @@ async function run() {
     for (let round = 0; round < 5; round++) {
       await waitFor(async () => (await first.snapshot()).world.game?.round === round, 'game round')
       const game = (await first.snapshot()).world.game
-      const button = kind === 'race' ? ['왼쪽', '가운데', '오른쪽'][game.target] : ['🍓', '🍙', '🧁'][game.target]
+      const button = kind === 'race' ? '주사위 굴리기' : ['🍓반짝 열매', '🍙동글 주먹밥', '🧁우정 컵케이크'][game.target]
       if (round === 1) await first.screenshot(`13-world-${kind}.png`)
       await first.click(button)
     }
     await waitFor(async () => (await first.snapshot()).world.game?.status === 'completed', 'game reward')
-    assert.equal((await first.snapshot()).world.game.reward, 20)
-    record(`${kind}: five rendered choices settle one 20-coin reward`)
+    const result = (await first.snapshot()).world.game
+    assert.equal(result.reward, kind === 'race' ? 10 + Math.floor(result.distance / 3) : 20)
+    record(`${kind}: five rendered turns settle one persisted reward`, { reward: result.reward })
   }
 
   await first.evaluate("document.querySelector('[aria-label=\"랜펫 닫기\"]').click()")
@@ -379,10 +380,15 @@ async function run() {
   await first.request('resize', { width: 1200, height: 650, x: display.x + 20, y: display.y + 20 })
   const beforeDrawer = await first.request('bounds')
   await first.evaluate("document.querySelector('.pet-drawer-toggle').click()")
-  await waitFor(() => first.evaluate("document.querySelectorAll('.pet-room-resident').length === 2"), 'current room pet companions render')
+  await waitFor(() => first.evaluate("document.querySelectorAll('.pet-resident-tags > span').length === 2"), 'current room pet companions render')
   const expanded = await first.request('bounds')
   assert(expanded.height >= beforeDrawer.height)
   assert(expanded.y + expanded.height <= expanded.workArea.y + expanded.workArea.height + 1)
+  assert.equal(await first.evaluate(`(() => {
+    const body = document.querySelector('.pet-drawer-body').getBoundingClientRect()
+    const room = document.querySelector('.pet-drawer-scene .lanpet-room').getBoundingClientRect()
+    return room.top >= body.top && room.bottom <= body.bottom && room.bottom <= innerHeight
+  })()`), true, 'The whole 3D room must fit inside the expanded drawer without clipping.')
   await first.screenshot('15-chat-drawer.png')
   await first.evaluate("document.querySelector('.pet-drawer-toggle').click()")
   await waitFor(async () => (await first.request('bounds')).height === beforeDrawer.height, 'drawer collapses to prior window height')
@@ -436,7 +442,8 @@ run().catch(async error => {
     report[`${application.name}Logs`] = application.logs.slice(-30)
     if (!application.exited) {
       report[`${application.name}Snapshot`] = await application.snapshot().catch(() => null)
-      await application.screenshot(`failure-${application.name}.png`).catch(() => {})
+      report[`${application.name}Scenes`] = await application.evaluate("[...document.querySelectorAll('.lanpet-three-scene')].map(scene => ({state: scene.dataset.renderer, failure: scene.dataset.failure, className: scene.className}))").catch(() => null)
+      await application.request('capture', { path: path.join(outputDirectory, `failure-${application.name}.png`) }).catch(() => {})
     }
   }
   process.stderr.write(`[Lanpet Electron QA] FAILED: ${error.stack}\n`)

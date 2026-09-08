@@ -113,7 +113,7 @@ describe('Lanpet panel', () => {
       sessions: [{ sessionId: 'battle-1', activity: 'battle', status: 'inProgress', turn: 1, turnEndsAt: Date.now() + 15000 }],
     })
     await openPanel()
-    expect(screen.getByRole('status')).toHaveTextContent('업무시간 기준 30분')
+    expect(screen.getByText(/업무시간 기준 30분 동안 낮잠/)).toHaveAttribute('role', 'status')
     expect(screen.getByRole('button', { name: '돌보기' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: /친구/ }))
     expect(screen.getByRole('button', { name: '방문하기' })).toBeDisabled()
