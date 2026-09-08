@@ -54,7 +54,7 @@ describe('Lanpet IPC security boundary', () => {
     context.state.database = {}
     context.state.peerId = 'next-account'
     complete({ ok: true, snapshot: { pet: { name: 'Private pet' } } })
-    expect(await pending).toEqual({ ok: false, code: 'SESSION_CLOSED', message: 'Please sign in again.' })
+    expect(await pending).toEqual({ ok: false, code: 'SESSION_CLOSED', message: '다시 로그인해 주세요.' })
   })
 
   it('contains migration failure without returning internal paths or crashing chat', () => {

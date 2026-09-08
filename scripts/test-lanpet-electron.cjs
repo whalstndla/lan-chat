@@ -126,6 +126,14 @@ class ElectronApplication {
     await this.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))')
     await this.request('capture', { path: screenshotPath })
     report.screenshots.push(screenshotPath)
+    // 한글 테스트 이름으로 화면의 고정 문구와 접근성 안내에 남은 영문을 확인한다.
+    const untranslated = await this.evaluate(`(() => {
+      const dialog = document.querySelector('.lanpet-dialog');
+      if (!dialog) return [];
+      const labels = [...dialog.querySelectorAll('[aria-label], [title]')].map(element => (element.getAttribute('aria-label') || '') + (element.getAttribute('title') || ''));
+      return [dialog.innerText, ...labels].join(' ').match(/[A-Za-z]+/g) || [];
+    })()`)
+    assert.deepEqual(untranslated, [], `${filename}: untranslated UI labels`)
     return screenshotPath
   }
   async close() {
@@ -167,14 +175,14 @@ async function setup(application, nickname, petName) {
   await waitFor(() => application.evaluate("!!document.querySelector('.lanpet-launcher')"), 'authenticated Lanpet launcher', 30000)
   // 앱 시작 패치 노트가 있으면 먼저 닫아 실제 사용자 진입 경로를 유지한다.
   await application.request('key', { key: 'Escape' })
-  await application.click('Lanpet', 'button', 'body')
+  await application.click('랜펫', 'button', 'body')
   await waitFor(() => application.evaluate("!!document.querySelector('.lanpet-onboarding')"), 'Lanpet onboarding')
   if (application.name === 'alpha') await application.screenshot('01-onboarding.png')
-  await application.click('Continue')
+  await application.click('다음')
   await application.fill('.lanpet-field input', petName)
-  await application.click('Continue')
+  await application.click('다음')
   assert.equal(await application.evaluate("document.querySelector('.lanpet-checkbox input').checked"), false)
-  await application.click('Welcome home')
+  await application.click('친구 맞이하기')
   await waitFor(async () => (await application.snapshot()).pet?.name === petName, 'created pet persisted')
   const snapshot = await application.snapshot()
   assert.equal(snapshot.sharingEnabled, false)
@@ -257,10 +265,10 @@ async function run() {
   await prepareVite()
   const first = new ElectronApplication('alpha')
   const second = new ElectronApplication('beta')
-  await Promise.all([setup(first, 'QA Alex', 'Moss'), setup(second, 'QA Robin', 'Fern')])
+  await Promise.all([setup(first, '테스트 가람', '이끼'), setup(second, '테스트 나래', '고사리')])
 
   const beforeCare = await first.snapshot()
-  await first.click('Care')
+  await first.click('돌보기')
   await waitFor(async () => (await first.snapshot()).pet.care > beforeCare.pet.care, 'UI care reaches main process')
   const afterCare = await first.snapshot()
   assert.equal(afterCare.pet.care, beforeCare.pet.care + 12)
@@ -277,13 +285,15 @@ async function run() {
   const forbidden = await first.command({ type: 'exec', source: 'never-run' })
   assert.equal(forbidden.ok, false)
   assert.equal(forbidden.code, 'INVALID_COMMAND')
+  assert.match(forbidden.message, /랜펫/)
+  assert.doesNotMatch(forbidden.message, /[A-Za-z]/)
   record('Duplicate request id does not repeat care; unsupported command is rejected')
 
   await first.evaluate("(() => { window.__lanpetQaChanges = 0; window.__lanpetQaUnsubscribe = window.electronAPI.lanpet.onChanged(() => { window.__lanpetQaChanges += 1 }); return true; })()")
-  await first.evaluate("document.querySelector('[aria-label=\"Close Lanpet\"]').click()")
+  await first.evaluate("document.querySelector('[aria-label=\"랜펫 닫기\"]').click()")
   assert.equal((await first.command({ type: 'settings', allowGift: false })).ok, true)
   assert((await first.evaluate('window.__lanpetQaChanges')) > 0, 'Closing the panel must not remove another subscriber.')
-  await first.click('Lanpet', 'button', 'body')
+  await first.click('랜펫', 'button', 'body')
   await waitFor(() => first.evaluate("!!document.querySelector('.lanpet-pocket')"), 'reopened panel')
   await first.evaluate('(() => { window.__lanpetQaUnsubscribe(); return true; })()')
   const eventsBefore = await first.evaluate('window.__lanpetQaChanges')
@@ -300,19 +310,19 @@ async function run() {
     const snapshots = await Promise.all([first.snapshot(), second.snapshot()])
     return snapshots.every(snapshot => snapshot.peers.some(peer => peer.online && peer.available && peer.supported))
   }, 'trusted Lanpet peer capabilities and summaries', 30000)
-  await Promise.all([first.click('Friends'), second.click('Friends')])
+  await Promise.all([first.click('친구'), second.click('친구')])
   await first.screenshot('03-neighborhood.png')
   record('Manual loopback connection discovers a supported, trusted, available Lanpet peer')
 
-  await first.click('Settings')
-  await first.evaluate("[...document.querySelectorAll('.lanpet-activity-settings label')].find(label => label.querySelector('strong').textContent === 'Friendly battle').querySelector('input').click()")
+  await first.click('설정')
+  await first.evaluate("[...document.querySelectorAll('.lanpet-activity-settings label')].find(label => label.querySelector('strong').textContent === '친선 배틀').querySelector('input').click()")
   await waitFor(async () => (await first.snapshot()).allowBattle === false, 'activity preference saved from UI')
   await first.command({ type: 'settings', allowBattle: true })
-  await first.click('Friends')
-  await first.click('Block invitations')
+  await first.click('친구')
+  await first.click('초대 차단')
   await waitFor(async () => (await first.snapshot()).blockedPeerIds.includes(secondPeer.peerId), 'peer invitation block saved from UI')
   assert.equal(await first.evaluate("[...document.querySelectorAll('.lanpet-peer-actions button')].every(button => button.disabled)"), true)
-  await first.click('Unblock invitations')
+  await first.click('초대 차단 해제')
   await waitFor(async () => !(await first.snapshot()).blockedPeerIds.includes(secondPeer.peerId), 'peer invitation unblock saved from UI')
   await waitFor(async () => (await first.snapshot()).peers.some(peer => peer.available && peer.activities.includes('battle')), 'peer available after preference changes')
   record('Rendered activity preference and invitation block/unblock persist through the actual API')
@@ -322,12 +332,12 @@ async function run() {
     if (index > 0) await advancePair(first, second)
     await socialActivity(first, second, activities[index], secondPeer.peerId)
   }
-  await second.click('Journal')
+  await second.click('추억')
   await second.screenshot('06-keepsake-journal.png')
 
-  await first.click('My pet')
+  await first.click('내 펫')
   const beforeNap = await first.snapshot()
-  await first.click('Rest')
+  await first.click('쉬기')
   const napping = await waitFor(async () => {
     const snapshot = await first.snapshot()
     return snapshot.pet.napEndsAt && snapshot
@@ -335,12 +345,12 @@ async function run() {
   assert.equal(napping.pet.energy, beforeNap.pet.energy, 'Starting a nap must not grant energy immediately.')
   assert.equal(await first.evaluate("[...document.querySelectorAll('.lanpet-care-actions button')].every(button => button.disabled)"), true)
   await first.screenshot('11-scheduled-nap.png')
-  await first.click('Friends')
+  await first.click('친구')
   assert.equal(await first.evaluate("[...document.querySelectorAll('.lanpet-peer-actions button')].every(button => button.disabled)"), true)
   await Promise.all([first, second].map(application => application.request('clock', { advanceMs: 31 * 60000 })))
-  await first.click('Refresh neighborhood')
+  await first.click('주변 친구 새로고침')
   await waitFor(async () => !(await first.snapshot()).pet.napEndsAt, 'nap completes after 30 minutes of office time')
-  await first.click('My pet')
+  await first.click('내 펫')
   await waitFor(() => first.evaluate("!document.querySelector('.lanpet-care-actions button').disabled"), 'care returns after the scheduled nap')
   assert((await first.snapshot()).pet.energy > napping.pet.energy, 'Completing the nap must restore energy.')
   record('Rendered Rest schedules a nap, pauses invitations, and restores energy only after 30 work minutes')
@@ -349,11 +359,11 @@ async function run() {
   await inspectLayout(first, '08-narrow.png')
   await first.request('zoom', { factor: 2 })
   await inspectLayout(first, '09-narrow-200-percent.png')
-  for (const tab of ['Friends', 'Journal', 'Settings']) {
+  for (const [tab, filename] of [['친구', 'friends'], ['추억', 'journal'], ['설정', 'settings']]) {
     await first.click(tab)
-    await inspectLayout(first, `10-zoom-${tab.toLowerCase()}.png`)
+    await inspectLayout(first, `10-zoom-${filename}.png`)
   }
-  await first.evaluate("document.querySelector('[aria-label=\"Close Lanpet\"]').focus()")
+  await first.evaluate("document.querySelector('[aria-label=\"랜펫 닫기\"]').focus()")
   for (let index = 0; index < 12; index += 1) {
     await first.request('key', { key: 'Tab' })
     assert.equal(await first.evaluate("!!document.activeElement?.closest('dialog')"), true, 'Keyboard focus must remain inside the dialog.')

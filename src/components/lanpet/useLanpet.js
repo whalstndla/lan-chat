@@ -13,7 +13,7 @@ export default function useLanpet() {
 
   const refresh = useCallback(async ({ silent = false } = {}) => {
     if (!api?.getSnapshot) {
-      setError({ code: 'unavailable', message: 'Lanpet is unavailable in this app version. Update LAN Chat and reopen this panel.' })
+      setError({ code: 'unavailable', message: '이 앱 버전에서는 랜펫을 사용할 수 없어요. 랜챗을 업데이트한 뒤 다시 열어 주세요.' })
       setLoading(false)
       return
     }
@@ -22,11 +22,11 @@ export default function useLanpet() {
     try {
       const nextSnapshot = await api.getSnapshot()
       if (!active.current) return
-      if (nextSnapshot?.ok === false) throw new Error(nextSnapshot.message || 'Unable to load Lanpet.')
+      if (nextSnapshot?.ok === false) throw new Error('LANPET_LOAD_FAILED')
       if (sequence === snapshotSequence.current) setSnapshot(nextSnapshot)
       setError(null)
-    } catch (failure) {
-      if (active.current) setError({ code: 'loadFailed', message: failure.message || 'Unable to load Lanpet. Please try again.' })
+    } catch {
+      if (active.current) setError({ code: 'loadFailed', message: '랜펫을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.' })
     } finally {
       if (active.current && !silent) setLoading(false)
     }
@@ -67,7 +67,7 @@ export default function useLanpet() {
       const result = await api.command(request)
       if (!active.current) return false
       if (!result?.ok) {
-        setError({ code: result?.code || 'commandFailed', message: result?.message || 'This action could not be completed.' })
+        setError({ code: result?.code || 'commandFailed', message: result?.message || '이 활동을 마치지 못했어요. 다시 시도해 주세요.' })
         return false
       }
       if (result.snapshot) {
@@ -75,11 +75,11 @@ export default function useLanpet() {
         setSnapshot(result.snapshot)
       }
       return true
-    } catch (failure) {
+    } catch {
       if (active.current) {
         // 응답이 유실된 재시도는 같은 식별자로 보내 중복 보상을 막는다.
         failedCommand.current = request
-        setError({ code: 'connectionLost', message: failure.message || 'The result could not be confirmed. Retry safely with the same request.' })
+        setError({ code: 'connectionLost', message: '결과를 확인하지 못했어요. 다시 시도를 누르면 같은 요청으로 안전하게 확인해요.' })
       }
       return false
     } finally {

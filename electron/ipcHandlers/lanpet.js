@@ -65,7 +65,7 @@ function unavailableSnapshot(code) {
     sessions: [],
     history: [],
     inventory: [],
-    error: { code, message: 'Lanpet is unavailable. Please sign in or try again.' },
+    error: { code, message: '랜펫을 사용할 수 없어요. 로그인하거나 잠시 후 다시 시도해 주세요.' },
   }
 }
 
@@ -82,20 +82,20 @@ function registerLanpetHandlers(ctx) {
   })
 
   ipcMain.handle('lanpet:command', async (event, command) => {
-    if (!isTrustedSender(ctx, event)) return { ok: false, code: 'UNTRUSTED_SENDER', message: 'This window cannot access Lanpet.' }
-    if (!hasOpenSession(ctx)) return { ok: false, code: 'SESSION_CLOSED', message: 'Please sign in again.' }
-    if (!commandIsValid(command)) return { ok: false, code: 'INVALID_COMMAND', message: 'This Lanpet command is invalid.' }
+    if (!isTrustedSender(ctx, event)) return { ok: false, code: 'UNTRUSTED_SENDER', message: '이 창에서는 랜펫을 사용할 수 없어요.' }
+    if (!hasOpenSession(ctx)) return { ok: false, code: 'SESSION_CLOSED', message: '다시 로그인해 주세요.' }
+    if (!commandIsValid(command)) return { ok: false, code: 'INVALID_COMMAND', message: '랜펫 요청이 올바르지 않아요.' }
     const sessionDatabase = ctx.state.database
     const sessionPeerId = ctx.state.peerId
     try {
       const result = await connectedService(ctx).command(command)
       // 비동기 명령 도중 로그아웃했다면 이전 계정의 스냅샷을 반환하지 않는다.
       if (!hasOpenSession(ctx) || ctx.state.database !== sessionDatabase || ctx.state.peerId !== sessionPeerId) {
-        return { ok: false, code: 'SESSION_CLOSED', message: 'Please sign in again.' }
+        return { ok: false, code: 'SESSION_CLOSED', message: '다시 로그인해 주세요.' }
       }
       return result
     } catch {
-      return { ok: false, code: 'LANPET_UNAVAILABLE', message: 'Lanpet could not finish this action. Please try again.' }
+      return { ok: false, code: 'LANPET_UNAVAILABLE', message: '랜펫 활동을 마치지 못했어요. 다시 시도해 주세요.' }
     }
   })
 }
