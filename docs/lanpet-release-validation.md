@@ -15,6 +15,7 @@
 
 | 검사 | 관찰한 결과 | 증거·범위 |
 | --- | --- | --- |
+| GitHub CI 최종 기능 코드 | 통과: 111 suites / 945 tests 및 Vite build | [PR #83 CI](https://github.com/whalstndla/lan-chat/actions/runs/34187522663), `357d762` 기준. Journal 최종 수정 포함. Ubuntu / Node 22, 기본 `npm test` 정상 종료 |
 | 전체 테스트 및 렌더러 빌드 | 통과: 111 suites / 944 tests, Vite build 성공 | `npm run release:check`; 시간 누적·삭제 세대·보관기간·일시 중지·낮잠·종료된 DB 타이머 회귀 포함 |
 | 마지막 Journal 표시 수정 | 통과: renderer 7 suites / 66 tests 및 Vite build | 내부 이벤트명과 동일 교류의 중복 표시를 정리한 뒤 해당 renderer 전체와 실제 Electron 검사를 재실행. 앞 행의 전체 실행과 중복되는 검사 수를 합산하지 않음 |
 | 새 도메인의 종료 처리 | Lanpet 대상 검사에서 `--detectOpenHandles` 포함 정상 종료 확인 | 전체 회귀 실행은 기존 미종료 핸들 경고 때문에 `--forceExit` 사용 |
