@@ -5,6 +5,7 @@ import useChatStore, { getRoomKey } from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import Message from './Message'
 import MessageInput from './MessageInput'
+import LanpetDrawer from './lanpet/LanpetDrawer'
 import ChatSearchBar from './chat/ChatSearchBar'
 import { getUnreadMessages } from '../utils/unreadDivider'
 import { buildMessageRenderItems } from '../utils/buildMessageRenderItems'
@@ -962,6 +963,7 @@ export default function ChatWindow() {
       </div>
 
       <MessageInput ref={messageInputRef} />
+      <LanpetDrawer currentRoom={currentRoom} />
     </div>
   )
 }

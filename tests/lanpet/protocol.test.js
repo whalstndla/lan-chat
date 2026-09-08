@@ -82,6 +82,32 @@ describe('Lanpet durable two-owner protocol', () => {
   beforeEach(() => { pair = createPair() })
   afterEach(() => pair.close())
 
+  test('gates racing on both peers capability and validates the three-round result', () => {
+    expect(() => pair.invite('race')).toThrow('PEER_UNAVAILABLE')
+    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY, 'lanpet-world-v1'])
+    pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY, 'lanpet-world-v1'])
+    pair.deliver()
+    const sessionId = pair.invite('race')
+    for (let round = 0; round < 3; round++) {
+      pair.command('first', { type: 'action', sessionId, choice: 'focus' })
+      pair.command('second', { type: 'action', sessionId, choice: 'spark' })
+    }
+    expect(pair.nodes.first.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'win', ownScore: 15, peerScore: 9 })
+    expect(pair.nodes.second.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'loss', ownScore: 9, peerScore: 15 })
+    expect(pair.rewards('first')).toHaveLength(1)
+    expect(pair.rewards('second')).toHaveLength(1)
+  })
+
+  test('race timeout records rest and settles without fabricated moves', () => {
+    pair.nodes.first.protocol.onPeerHello('second', [CAPABILITY, 'lanpet-world-v1'])
+    pair.nodes.second.protocol.onPeerHello('first', [CAPABILITY, 'lanpet-world-v1'])
+    pair.deliver()
+    pair.invite('race')
+    for (let round = 0; round < 3; round++) { pair.advance(16000); pair.nodes.first.protocol.recover(); pair.deliver() }
+    expect(pair.nodes.first.protocol.getSnapshot().sessions[0].result).toEqual({ outcome: 'draw', ownScore: 0, peerScore: 0 })
+    expect(pair.rewards('second')).toHaveLength(1)
+  })
+
   test('keeps wire v2 and hides capability until sharing consent', () => {
     const input = { peerId: 'first', sessionId: 'session', publicKey: 'key', nickname: 'Name', wsPort: 1 }
     expect(WIRE_VERSION).toBe(2)

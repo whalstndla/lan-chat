@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 펫 전용 채널은 채팅의 전역 구독 정리와 분리하고 리스너별 해제만 허용한다.
   lanpet: {
+    setDrawerExpanded: (expanded) => ipcRenderer.invoke('lanpet:drawer', expanded),
     getSnapshot: () => ipcRenderer.invoke('lanpet:get-snapshot'),
     command: (command) => ipcRenderer.invoke('lanpet:command', command),
     onChanged: (callback) => {

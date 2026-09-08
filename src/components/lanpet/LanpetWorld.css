@@ -1,0 +1,103 @@
+/* 참고 화면의 밝은 장난감 방 분위기를 랜펫 전용 영역에만 적용한다. */
+.lanpet-dialog.lanpet-dialog, .lanpet-drawer {
+  --vsc-text: 71 57 82; --vsc-panel: 255 252 246; --vsc-sidebar: 255 250 242; --vsc-border: 228 207 219; --vsc-hover: 255 235 242;
+  --pet-green: #447f75; --pet-amber: #ffd878; --pet-ink: #42344c; --pet-muted: #79677d; --pet-soft: #fbebf3;
+  color: #473952; font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+}
+.lanpet-dialog.lanpet-dialog { width: min(980px, calc(100vw - 32px)); background: #fffaf2; border: 3px solid #e5afc7; border-radius: 28px; box-shadow: 0 22px 90px #402a635c, inset 0 0 0 5px #fff; }
+.lanpet-dialog::backdrop { background: #35294680; backdrop-filter: blur(5px); }
+.lanpet-dialog .lanpet-header { background: linear-gradient(110deg, #ffdfeb, #fff0c9 65%, #d8f2ef); padding: 20px 25px; border-bottom: 3px solid #efc8d6; }
+.lanpet-dialog .lanpet-brand-icon { border: 2px solid #fff; border-radius: 18px; background: #fffbef; color: #cb6b95; box-shadow: 0 3px 0 #ddb19f; }
+.lanpet-dialog .lanpet-wordmark h1 { font-size: 24px; color: #a54a7a; text-shadow: 0 2px #fff; }
+.lanpet-dialog .lanpet-wordmark h1 span { font-family: inherit; letter-spacing: .03em; font-size: 10px; line-height: 1.8; }
+.lanpet-dialog .lanpet-tabs { flex-wrap: wrap; padding: 10px 22px; gap: 6px; border-bottom: 1px solid #eddae3; background: #fffdf7; }
+.lanpet-dialog .lanpet-tabs > button { padding: 8px 13px; border: 1px solid transparent; border-radius: 14px; color: #80627d; font-size: 12px; }
+.lanpet-dialog .lanpet-tabs > button.is-active { background: #f9d6e6; border: 1px solid #df9fbe; color: #803b66; box-shadow: 0 2px 0 #edbad3; }
+.lanpet-dialog .lanpet-content { background: radial-gradient(#d7b7c126 .8px, transparent .8px) 0 0 / 12px 12px, #fffaf2; }
+.lanpet-dialog .lanpet-eyebrow { font-family: inherit; letter-spacing: .04em; font-size: 11px; font-weight: 650; color: #9e5b7f; }
+.lanpet-dialog .lanpet-home-layout { grid-template-columns: minmax(260px, 1.12fr) minmax(0, 1fr); gap: 24px; }
+.lanpet-dialog .lanpet-pocket { background: #fff6ed; border: 2px solid #e3b0c7; border-radius: 22px; box-shadow: 0 5px 0 #e6c7d3; padding: 8px; }
+.lanpet-dialog .lanpet-pocket-label { padding: 5px 10px 10px; color: #85617b; font-family: inherit; font-size: 10px; }
+.lanpet-dialog .lanpet-pocket-caption { padding: 12px; }
+.lanpet-dialog .lanpet-pocket-caption h2 { color: #874f76; }
+.lanpet-dialog .lanpet-pocket-caption span { color: #79677d; }
+.lanpet-dialog .lanpet-generation { border-color: #dcadc8; background: #ffe6ee; }
+.lanpet-dialog .lanpet-button, .lanpet-drawer .lanpet-button { color: #6b4a6a; background: #fffdf8; border: 1.5px solid #dcb8ca; border-radius: 13px; box-shadow: 0 2px 0 #e3c5d1; min-height: 35px; }
+.lanpet-dialog .lanpet-button.is-primary, .lanpet-drawer .lanpet-button.is-primary { background: #f7cae0; color: #6c375c; border-color: #d895b9; }
+.lanpet-dialog .lanpet-button:hover:not(:disabled), .lanpet-drawer .lanpet-button:hover:not(:disabled) { background: #ffe7b9; border-color: #d3a26c; }
+.lanpet-dialog .lanpet-button.is-danger { color: #9c3a51; }
+.lanpet-dialog .lanpet-care-button { background: #fff5df; border: 1px solid #e5c89e; border-radius: 14px; color: #745641; box-shadow: 0 3px 0 #eddbbf; }
+.lanpet-dialog .lanpet-care-button:hover:not(:disabled) { background: #ffedc2; }
+.lanpet-dialog .lanpet-growth, .lanpet-dialog .lanpet-settings-note { background: #fff4e0; border-color: #e6d1ae; border-radius: 17px; }
+.lanpet-dialog .lanpet-growth-choice { background: #fff; border-color: #d5c0da; border-radius: 15px; }
+.lanpet-dialog .lanpet-onboarding-art { background: radial-gradient(ellipse, #ffe5ad, #ffe1f0 55%, transparent 72%); }
+.lanpet-dialog .lanpet-peer, .lanpet-dialog .lanpet-session, .lanpet-dialog .lanpet-invitation { background: #fffdf9; border-color: #e2c5d5; border-radius: 18px; }
+.lanpet-dialog .lanpet-notice, .lanpet-dialog .lanpet-error { color: #784967; background: #ffe8f0; border-color: #e0afc7; }
+.lanpet-dialog .lanpet-footer { background: #fff0e5; font-size: 10px; }
+.lanpet-dialog .lanpet-move { background: #fff3d6; border-color: #e2bf96; border-radius: 16px; color: #745342; }
+.lanpet-dialog .lanpet-move.is-selected { background: #f8d7e7; color: #793d64; }
+.lanpet-room { position: relative; height: 270px; overflow: hidden; isolation: isolate; border-radius: 15px; background: repeating-linear-gradient(90deg, #fff4d9 0 30px, #f5e7c6 31px 33px); border: 2px solid #d5b29d; box-shadow: inset 0 4px 16px #b27e4930; }
+.lanpet-room.wall-rose { background: repeating-linear-gradient(90deg, #ffe6f0 0 30px, #f1cddd 31px 33px); }
+.lanpet-room.wall-sky { background: repeating-linear-gradient(90deg, #ddf2f5 0 30px, #bddfe8 31px 33px); }
+.pet-room-molding { position: absolute; top: 13px; width: 100%; height: 6px; background: #fffdf0; border-block: 1px solid #c4a58d; box-shadow: 0 5px #ead0ad; }
+.pet-room-window { position: absolute; top: 41px; width: 63px; height: 107px; border: 6px solid #fffbee; border-radius: 30px 30px 3px 3px; background: linear-gradient(155deg, #a5d9f0 50%, #f1fbff 51% 58%, #bce8f1 59%); box-shadow: 0 0 0 2px #c3a8a6; }
+.pet-room-window.is-left { left: 8%; }.pet-room-window.is-right { right: 8%; }
+.pet-room-window::before { content: ''; position: absolute; height: 100%; width: 4px; background: #fffdf1; left: 50%; }
+.pet-room-window::after { content: ''; position: absolute; top: 50%; height: 4px; width: 100%; background: #fffdf1; }
+.pet-room-window i, .pet-room-window b { position: absolute; z-index: 1; top: -8px; width: 24px; height: 87px; background: linear-gradient(90deg, #f3b2d0, #d487b1 70%, #e7a8c7); border-radius: 2px 3px 18px 4px; box-shadow: 2px 2px 3px #92537020; }
+.pet-room-window i { left: -17px; }.pet-room-window b { right: -17px; transform: scaleX(-1); }
+.pet-room-picture { position: absolute; left: 50%; top: 42px; transform: translateX(-50%); border: 4px ridge #d9b872; background: #b4e1c4; border-radius: 2px; width: 67px; height: 43px; text-align: center; font-size: 23px; box-shadow: 0 3px 4px #76533725; }
+.pet-room-floor { position: absolute; inset: 55% -20% -12%; background: repeating-conic-gradient(#e1bc99 0 25%, #f3d7b9 0 50%) 0 / 65px 42px; border-top: 9px ridge #e5c9aa; transform: perspective(250px) rotateX(25deg); }
+.floor-check .pet-room-floor { background: repeating-conic-gradient(#e7b7cd 0 25%, #ffedf5 0 50%) 0 / 60px 45px; }
+.floor-candy .pet-room-floor { background: repeating-conic-gradient(#c7b9e2 0 25%, #e7ddf6 0 50%) 0 / 60px 45px; }
+.pet-room-rug { position: absolute; width: 74%; height: 30%; border: 6px double #e5b760; background: radial-gradient(ellipse at center, #ffe8c280 0 4px, transparent 5px) 0 / 25px 15px, #efa9c8; bottom: 8px; left: 13%; border-radius: 50%; box-shadow: 0 3px 3px #79503224; }
+.pet-room-furniture { position: absolute; bottom: 56px; right: 12px; font-size: 57px; filter: drop-shadow(0 6px 2px #754a4133); }
+.pet-room-residents { position: absolute; inset: 75px 12px 12px; display: flex; justify-content: center; align-items: end; }
+.pet-room-resident { position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: 190px; }
+.pet-room-resident .lanpet-avatar { width: clamp(90px, 14vw, 174px); height: auto; max-width: 100%; filter: drop-shadow(0 5px 2px #77484819); }
+.pet-room-resident > span { background: #fffdf3ed; color: #72516d; border: 1px solid #d8b4c7; border-radius: 12px; padding: 2px 10px; font-size: 11px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pet-room-bubble { position: absolute; right: 12px; top: 14px; padding: 7px 13px; border: 2px solid #9bbcc4; border-radius: 15px 15px 2px 15px; color: #446d7e; background: #fffef8; font-size: 11px; }
+.is-roaming .resident-0 { animation: pet-stroll 14s ease-in-out infinite; }.is-roaming .resident-1 { animation: pet-stroll 18s ease-in-out -6s infinite reverse; }.is-roaming .resident-2 { animation: pet-stroll 16s ease-in-out -8s infinite; }.is-roaming .resident-3 { animation: pet-stroll 20s ease-in-out -3s infinite reverse; }
+@keyframes pet-stroll { 0%, 100% { transform: translate(-13px, 0) rotate(-2deg); } 25% { transform: translate(16px, -8px) rotate(2deg); } 50% { transform: translate(26px, 0) rotate(0); } 75% { transform: translate(-4px, -5px) rotate(-2deg); } }
+.pet-tree { margin-top: 24px; padding: 20px; background: #faf0fa; border: 1px solid #dac4e3; border-radius: 20px; }
+.pet-tree > p { color: #79677d; font-size: 12px; margin: 8px 0 16px; }
+.pet-tree-branches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.pet-tree-branches article { display: flex; flex-direction: column; align-items: center; background: #ffffff90; border: 2px solid #ecdfea; border-radius: 15px; padding: 10px 6px; gap: 4px; text-align: center; }
+.pet-tree-branches article.is-leading { border-color: #c58ab7; background: #ffeaf3; }
+.pet-tree-branches strong { font-size: 13px; }.pet-tree-branches small { font-size: 10px; color: #7c627b; }.pet-tree-branches span { font-size: 11px; color: #a1527d; }
+.pet-species-book summary, .pet-games summary { cursor: pointer; font-size: 12px; padding: 12px 0; }
+.pet-species-book > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }.pet-species-book article { display: flex; flex-direction: column; align-items: center; font-size: 11px; }
+.pet-shop-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+.pet-shop-heading p { font-size: 12px; color: #79677d; margin-top: 5px; }
+.pet-wallet { display: inline-block; padding: 10px 17px; border: 2px solid #e5c16b; background: #fff0bb; border-radius: 20px; white-space: nowrap; color: #845b2c !important; font-size: 14px; }
+.pet-world-shop > h3 { margin: 25px 0 12px; }.pet-world-shop > .lanpet-room { height: 225px; }
+.pet-shop-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pet-shop-grid article, .pet-game-cards article { display: flex; flex-direction: column; gap: 9px; align-items: center; padding: 18px 12px; background: #fffdfa; border: 1px solid #e5c7d8; border-radius: 20px; text-align: center; box-shadow: 0 3px 0 #efdfdf; }
+.pet-shop-grid strong { font-size: 13px; }.pet-shop-grid small { font-size: 10px; color: #79677d; }.pet-shop-grid .lanpet-button { width: 100%; }
+.pet-item-icon { display: block; font-size: 40px; line-height: 1.3; filter: drop-shadow(0 4px 0 #98575b12); }
+.pet-game-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }.pet-game-cards p { font-size: 12px; color: #79677d; }
+.pet-games > p { margin: 16px 0; }.pet-active-game { padding: 20px; border: 2px solid #c2dace; border-radius: 20px; background: #edfaf0; margin: 18px 0; }
+.pet-active-game p { font-size: 12px; margin-top: 7px; }.pet-game-cue { min-height: 55px; display: grid; place-items: center; font-size: 22px; color: #7d537a; padding: 8px; }
+.pet-race-track { position: relative; height: 90px; margin: 14px 0; border-radius: 14px; background: repeating-linear-gradient(0deg, #fff8e4 0 26px, #f1cfab 26px 29px); border: 2px solid #d9bda0; overflow: hidden; }
+.pet-race-track > div { position: absolute; bottom: 2px; transform: translateX(-50%); transition: left .5s; }.pet-race-track > span { position: absolute; right: 10px; top: 20px; font-size: 30px; }
+.pet-prize { padding: 12px 16px; border-radius: 14px; background: #fff1c9; color: #84602d; font-size: 13px; }
+.pet-race-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; font-size: 11px; }
+.pet-race-lanes .pet-race-track { height: 65px; margin: 6px 0; }
+.pet-race-lanes .lanpet-avatar.is-small { width: 57px; height: 55px; }
+.lanpet-dialog .lanpet-game-progress > span:first-child { color: #936027; }
+.pet-lottery { display: flex; gap: 20px; padding: 22px; margin: 20px 0; border: 2px dashed #d4a3c3; background: #fff0f8; border-radius: 23px; }.pet-lottery p { margin: 7px 0; font-size: 12px; }.pet-lottery small { font-size: 11px; }
+.pet-ledger { list-style: none; padding: 0; }.pet-ledger li { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px solid #ebdfe7; padding: 9px; font-size: 12px; }
+.lanpet-drawer { flex-shrink: 0; background: #fff8ef; border-top: 1px solid #d3a8c4; line-height: 1.5; font-size: 12px; -webkit-app-region: no-drag; }
+.pet-drawer-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 16px; background: linear-gradient(100deg, #ffe4ee, #fff1d3); color: #865578; font-weight: 650; text-align: left; min-height: 38px; }
+.pet-drawer-toggle small { margin-left: 12px; font-size: 10px; font-weight: 400; color: #96768b; }
+.pet-drawer-body { display: grid; grid-template-columns: minmax(210px, 1.3fr) minmax(210px, 1fr); height: 260px; max-height: 40vh; overflow: auto; gap: 12px; padding: 10px; }
+.pet-drawer-scene { min-width: 0; min-height: 210px; }.pet-drawer-scene .lanpet-room { height: 100%; }.pet-drawer-scene .lanpet-avatar { width: 115px; }
+.pet-drawer-controls { min-width: 0; overflow-y: auto; padding: 3px 8px 10px 0; }.pet-drawer-controls p { font-size: 11px; color: #81677e; margin: 8px 0; }
+.pet-drawer-heading { display: flex; justify-content: space-between; gap: 10px; }.pet-drawer-heading > span { color: #946426; }.pet-drawer-controls .lanpet-button { min-height: 30px; padding: 5px 9px; font-size: 11px !important; }
+.pet-drawer-peer { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }.pet-drawer-peer > span { flex: 1; font-size: 11px; }
+.pet-drawer-note { padding: 22px; text-align: center; }.pet-drawer-note p { margin-bottom: 12px; }
+.lanpet-drawer button:disabled { opacity: .45; cursor: not-allowed; }.lanpet-drawer button:focus-visible { outline: 3px solid #b46daa; outline-offset: 2px; }
+.pet-drawer-controls .lanpet-session, .pet-drawer-controls .lanpet-invitation { margin-top: 12px; padding: 12px; background: #fff; border: 1px solid #e1c8d6; border-radius: 12px; }.pet-drawer-controls .lanpet-move { font-size: 11px; padding: 7px; }
+@media (max-width: 740px) { .lanpet-dialog .lanpet-home-layout { grid-template-columns: 1fr; }.lanpet-dialog .lanpet-header { padding: 15px; }.lanpet-dialog .lanpet-tabs { padding: 8px 10px; gap: 2px; }.lanpet-dialog .lanpet-tabs > button { padding: 7px 9px; font-size: 11px; }.pet-shop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.pet-drawer-body { grid-template-columns: 1fr; }.pet-drawer-scene { min-height: 210px; }.pet-drawer-controls { overflow: visible; }.pet-drawer-toggle small { display: none; } }
+@media (max-width: 440px) { .lanpet-dialog.lanpet-dialog { width: calc(100vw - 12px); max-height: calc(100dvh - 20px); border-radius: 19px; }.lanpet-dialog .lanpet-content { padding: 14px; }.lanpet-dialog .lanpet-tabs { flex-direction: row; }.pet-tree { padding: 12px; }.pet-tree-branches { gap: 5px; }.pet-tree-branches strong { font-size: 11px; }.pet-tree-branches small { font-size: 9px; }.pet-shop-grid, .pet-game-cards { grid-template-columns: 1fr; }.pet-lottery { padding: 14px; gap: 10px; }.pet-lottery > .pet-item-icon { font-size: 28px; }.lanpet-dialog .lanpet-local-label { display: none; } }
+@media (prefers-reduced-motion: reduce) { .is-roaming .pet-room-resident, .lanpet-creature, .lanpet-eyes { animation: none !important; }.pet-race-track > div { transition: none; } }

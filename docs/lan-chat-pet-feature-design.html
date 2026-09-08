@@ -17,7 +17,7 @@
 <body>
   <nav class="sticky-toc" aria-label="문서 목차"><strong>Contents</strong><a href="#summary"><span>00</span>읽는 법과 결정 요약</a><a href="#research"><span>01</span>참고 제품 조사와 적용 판단</a><a href="#goals"><span>02</span>목표, 비목표, 대상 사용자</a><a href="#original-ip"><span>03</span>독자 IP와 콘텐츠 규칙</a><a href="#care-system"><span>04</span>육성 규칙과 상태 전이</a><a href="#peer-interaction"><span>05</span>친구 교류 상세 명세</a><a href="#experience"><span>06</span>UI와 사용자 경험</a><a href="#repository"><span>07</span>현재 저장소 연결점과 프로세스 책임</a><a href="#data-protocol"><span>08</span>데이터, 프로토콜, 일관성</a><a href="#security"><span>09</span>보안, 프라이버시, 동의, 오남용</a><a href="#roadmap"><span>10</span>단계별 범위와 구현 작업 단위</a><a href="#acceptance"><span>11</span>수용 기준</a><a href="#risk"><span>12</span>위험, 관측, 롤백</a><a href="#decisions"><span>13</span>사용자 확정 사항</a><a href="#sources"><span>14</span>출처와 검증 경계</a></nav>
   <header class="hero page">
-    <span class="meta-pill">IMPLEMENTED DESIGN · 2026-09-08 · v0.13.0</span>
+    <span class="meta-pill">기능 상세 설계 · 2026-09-08 · v0.14.0 확장 포함</span>
     <h1>LAN Chat Lanpet<br>기능 상세 설계</h1>
     <p>평일 업무시간에 부담 없이 돌보고, 명시적 동의로 LAN 친구와 교류하는 독자 가상 펫의 구현 계약과 출시 검증 경계를 정리했습니다.</p>
     <div class="hero-grid grid-4">
@@ -30,9 +30,30 @@
   <div class="page"><div class="intro"><aside class="callout">
 <p>문서 상태: 사용자 결정 반영 · Lanpet 출시 설계</p>
 <p>조사 기준일: 2026-09-08 (Asia/Seoul)</p>
-<p>구현 상태: v0.13.0 구현·검증 진행 중. 아래 수용 기준의 통과 여부와 실제 배포 완료 여부는 출시 검증 기록으로 구분한다.</p>
+<p>v0.14.0 확장 내용은 첫 절과 확장 상세 설계를 따른다. 이후 절은 v0.13.0 초기 설계 기록이다. 실제 배포 결과는 버전별 출시 검증 기록에서 확인한다.</p>
 </aside></div></div>
   <main class="page">
+<section id="world-update">
+  <div class="sec-head"><span>NEW</span><h2>랜펫 놀이방 · v0.14.0 확장</h2></div>
+  <div class="section-body">
+    <p>사용자가 제공한 원더샵 화면의 밝은 방과 둥근 장난감 캐릭터를 참고해 기존 모달과 새 놀이방을 함께 개편한다. 이 절과 <a href="lanpet-world-design.md">확장 상세 설계</a>가 아래 초기 설계의 성장·경제·화면 항목보다 우선한다.</p>
+    <div class="table-scroll"><table><thead><tr><th>기본 종</th><th>정성 진화</th><th>모험 진화</th><th>우정 진화</th></tr></thead><tbody>
+      <tr><td>살구여우</td><td>꽃잎여우</td><td>번개여우</td><td>리본여우</td></tr>
+      <tr><td>솜토끼</td><td>정원토끼</td><td>달빛토끼</td><td>축제토끼</td></tr>
+      <tr><td>방울수달</td><td>산호수달</td><td>파도수달</td><td>진주수달</td></tr>
+      <tr><td>별고양이</td><td>찻잎고양이</td><td>혜성고양이</td><td>왕관고양이</td></tr>
+      <tr><td>구름새</td><td>꽃구름새</td><td>무지개새</td><td>노래구름새</td></tr>
+      <tr><td>젤리곰</td><td>꿀단지곰</td><td>모험곰</td><td>하트곰</td></tr>
+    </tbody></table></div>
+    <p>생성 시 시드를 고정한다. 먹이·돌봄·놀이·교류로 성향을 쌓고 최종 진화 때 가장 높은 경로로 확정한다. 새싹은 성장 40·유대 15·업무 9시간, 동반자는 성장 140·유대 50·업무 63시간이 필요하다.</p>
+    <p><strong>채팅방 놀이방:</strong> 입력창 아래 화살표를 누르면 화면 여유만큼 실제 창이 아래로 늘어난다. 개인 채팅은 현재 상대만, 전체 채팅은 공개된 주변 펫 최대 3마리와 함께 논다. 접으면 창 높이를 복원한다.</p>
+    <p><strong>반짝 코인:</strong> 최초 100코인과 주먹밥 3개. 혼자 하는 장애물 경주·간식 짝맞추기는 24시간 합계 5회, 완주 5코인+정답당 3코인. 친구 놀이 최초 3회는 각 12코인. 무료 복권은 24시간마다 1장으로 10코인 60%·20코인 30%·50코인 9%·100코인 1%다. 현금 구매·환전·베팅은 없다.</p>
+    <p><strong>상점:</strong> 주먹밥 8·열매 12·컵케이크 16코인. 벽지 60·바닥 75·가구 100–180코인. 소유 아이템만 배치하고, 먹이는 5분마다 준다. 무료 간식은 1시간마다 제공한다. 코인·가방·꾸미기·보상 한도는 펫을 삭제해도 계정에 남는다.</p>
+    <p><strong>친구 경주:</strong> 15초씩 세 구간, 달리기·점프·지름길을 선택한다. 양측 수락과 확정된 결과로 한 번만 정산하며 양쪽 v0.14.0 이상이 필요하다. 기존 채팅·랜펫 활동은 이전 버전과 유지한다.</p>
+    <p>평일 09–18시, 암호화 저장, 명시적 펫 공개 정책을 유지한다. 실제 Electron 검증 결과는 <a href="lanpet-qa/electron-report.json">실행 기록</a>을 따른다.</p>
+    <img src="lanpet-qa/15-chat-drawer.png" alt="현재 채팅방 친구의 펫과 함께 노는 랜펫 놀이방" style="display:block;width:100%;height:auto;border-radius:16px;margin:20px 0">
+  </div>
+</section>
 <section id="summary">
   <div class="sec-head"><span>00</span><h2>읽는 법과 결정 요약</h2></div>
   <div class="section-body"><h3>0.1 표기</h3>

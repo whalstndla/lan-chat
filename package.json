@@ -1,6 +1,6 @@
 {
   "name": "lan-chat",
-  "version": "0.13.1",
+  "version": "0.14.0",
   "description": "LAN 환경 전용 P2P 암호화 채팅 앱",
   "main": "electron/main.js",
   "scripts": {
@@ -37,6 +37,9 @@
       },
       {
         "displayName": "jsdom",
+        "moduleNameMapper": {
+          "\\.css$": "<rootDir>/tests/renderer/styleMock.js"
+        },
         "testEnvironment": "jsdom",
         "testTimeout": 10000,
         "testMatch": [

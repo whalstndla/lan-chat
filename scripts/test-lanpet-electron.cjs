@@ -125,7 +125,7 @@ class ElectronApplication {
     // 확대와 크기 변경 뒤 compositor가 새 프레임을 그린 다음 증거를 저장한다.
     await this.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))')
     await this.request('capture', { path: screenshotPath })
-    report.screenshots.push(screenshotPath)
+    report.screenshots.push(path.relative(projectDirectory, screenshotPath))
     // 한글 테스트 이름으로 화면의 고정 문구와 접근성 안내에 남은 영문을 확인한다.
     const untranslated = await this.evaluate(`(() => {
       const dialog = document.querySelector('.lanpet-dialog');
@@ -158,7 +158,7 @@ async function prepareVite() {
   const page = await (await fetch(url)).text()
   assert(page.includes('/src/main.jsx'), 'Port 5173 must serve the LAN Chat Vite entry.')
   const component = await (await fetch(`${url}/src/components/lanpet/LanpetPanel.jsx`)).text()
-  assert(component.includes('LanpetPanel'), 'Port 5173 must serve the current Lanpet checkout.')
+  assert(component.includes('WorldShop') && component.includes('EvolutionTree'), 'Port 5173 must serve the current Lanpet world checkout.')
 }
 
 async function setup(application, nickname, petName) {
@@ -215,7 +215,7 @@ async function socialActivity(first, second, activity, peerId) {
   assert.equal(accepted.ok, true, `${activity} accept: ${accepted.code}`)
   if (activity !== 'gift') {
     await Promise.all([waitForSession(first, sessionId, 'inProgress'), waitForSession(second, sessionId, 'inProgress')])
-    const rounds = { visit: 1, cooperativePlay: 3, battle: 5 }[activity]
+    const rounds = { visit: 1, cooperativePlay: 3, battle: 5, race: 3 }[activity]
     for (let round = 1; round <= rounds; round += 1) {
       await waitFor(async () => {
         const snapshots = await Promise.all([first.snapshot(), second.snapshot()])
@@ -224,6 +224,7 @@ async function socialActivity(first, second, activity, peerId) {
       if (activity === 'battle' && round === 1) {
         await first.screenshot('04-battle-live.png')
       }
+      if (activity === 'race' && round === 2) await first.screenshot('14-friend-race.png')
       const [firstMove, secondMove] = await Promise.all([
         first.command({ type: 'action', sessionId, choice: 'focus' }),
         second.command({ type: 'action', sessionId, choice: activity === 'battle' ? 'spark' : 'focus' }),
@@ -243,6 +244,11 @@ async function socialActivity(first, second, activity, peerId) {
   if (activity === 'gift') {
     const received = (await second.snapshot()).inventory.find(item => item.itemType === 'friendshipStar')
     assert.equal(received?.quantity, 1)
+  }
+  if (activity === 'race') {
+    assert.equal(firstResult.result.ownScore, 9)
+    assert.equal(secondResult.result.ownScore, 9)
+    assert.equal(firstResult.result.outcome, 'draw')
   }
   record(`${activity}: actual two-peer exchange completed`, { sessionId, firstOutcome: firstResult.result?.outcome, secondOutcome: secondResult.result?.outcome })
   return sessionId
@@ -273,6 +279,9 @@ async function run() {
   const afterCare = await first.snapshot()
   assert.equal(afterCare.pet.care, beforeCare.pet.care + 12)
   await first.screenshot('02-pet-home.png')
+  await first.evaluate("document.querySelector('.pet-species-book').open = true; document.querySelector('.pet-tree').scrollIntoView({block:'start'}); true")
+  await first.screenshot('16-species-tree.png')
+  await first.evaluate("document.querySelector('.lanpet-content').scrollTop = 0; true")
   record('Rendered Care action updates the actual encrypted pet state')
 
   const request = { type: 'care', action: 'tidy', requestId: crypto.randomUUID() }
@@ -327,13 +336,59 @@ async function run() {
   await waitFor(async () => (await first.snapshot()).peers.some(peer => peer.available && peer.activities.includes('battle')), 'peer available after preference changes')
   record('Rendered activity preference and invitation block/unblock persist through the actual API')
 
-  const activities = ['visit', 'cooperativePlay', 'battle', 'gift']
+  const activities = ['visit', 'cooperativePlay', 'battle', 'gift', 'race']
   for (let index = 0; index < activities.length; index += 1) {
     if (index > 0) await advancePair(first, second)
     await socialActivity(first, second, activities[index], secondPeer.peerId)
   }
   await second.click('추억')
   await second.screenshot('06-keepsake-journal.png')
+
+  await first.click('상점·꾸미기')
+  const worldBefore = (await first.snapshot()).world
+  await first.click('8 코인 · 구매')
+  await waitFor(async () => (await first.snapshot()).world.balance === worldBefore.balance - 8, 'shop purchase persists')
+  await first.click('먹이 주기')
+  await waitFor(async () => (await first.snapshot()).world.bag.rice === worldBefore.bag.rice, 'feeding consumes purchased food')
+  const boughtWall = await first.command({ type: 'buy', itemId: 'rose' })
+  assert.equal(boughtWall.ok, true)
+  assert.equal((await first.command({ type: 'equip', itemId: 'rose' })).ok, true)
+  await waitFor(() => first.evaluate("!!document.querySelector('.wall-rose')"), 'equipped room renders')
+  await inspectLayout(first, '12-world-shop.png')
+  record('Rendered food purchase and feeding persist; purchased decoration changes the actual room')
+  await first.click('놀이터')
+  const beforeLottery = (await first.snapshot()).world.balance
+  await first.click('무료 복권 열기')
+  await waitFor(async () => (await first.snapshot()).world.balance > beforeLottery, 'lottery pays persisted reward')
+  for (const [kind, label] of [['race', '혼자 경주 시작'], ['memory', '짝맞추기 시작']]) {
+    await first.click(label)
+    for (let round = 0; round < 5; round++) {
+      await waitFor(async () => (await first.snapshot()).world.game?.round === round, 'game round')
+      const game = (await first.snapshot()).world.game
+      const button = kind === 'race' ? ['왼쪽', '가운데', '오른쪽'][game.target] : ['🍓', '🍙', '🧁'][game.target]
+      if (round === 1) await first.screenshot(`13-world-${kind}.png`)
+      await first.click(button)
+    }
+    await waitFor(async () => (await first.snapshot()).world.game?.status === 'completed', 'game reward')
+    assert.equal((await first.snapshot()).world.game.reward, 20)
+    record(`${kind}: five rendered choices settle one 20-coin reward`)
+  }
+
+  await first.evaluate("document.querySelector('[aria-label=\"랜펫 닫기\"]').click()")
+  const display = (await first.request('bounds')).workArea
+  await first.request('resize', { width: 1200, height: 650, x: display.x + 20, y: display.y + 20 })
+  const beforeDrawer = await first.request('bounds')
+  await first.evaluate("document.querySelector('.pet-drawer-toggle').click()")
+  await waitFor(() => first.evaluate("document.querySelectorAll('.pet-room-resident').length === 2"), 'current room pet companions render')
+  const expanded = await first.request('bounds')
+  assert(expanded.height >= beforeDrawer.height)
+  assert(expanded.y + expanded.height <= expanded.workArea.y + expanded.workArea.height + 1)
+  await first.screenshot('15-chat-drawer.png')
+  await first.evaluate("document.querySelector('.pet-drawer-toggle').click()")
+  await waitFor(async () => (await first.request('bounds')).height === beforeDrawer.height, 'drawer collapses to prior window height')
+  record('Chat drawer shows both real peers and expands/collapses the actual native window within the display')
+  await first.request('resize', { width: 1200, height: 800 })
+  await first.click('랜펫', 'button', 'body')
 
   await first.click('내 펫')
   const beforeNap = await first.snapshot()
@@ -359,7 +414,7 @@ async function run() {
   await inspectLayout(first, '08-narrow.png')
   await first.request('zoom', { factor: 2 })
   await inspectLayout(first, '09-narrow-200-percent.png')
-  for (const [tab, filename] of [['친구', 'friends'], ['추억', 'journal'], ['설정', 'settings']]) {
+  for (const [tab, filename] of [['친구', 'friends'], ['상점·꾸미기', 'shop'], ['놀이터', 'games'], ['추억', 'journal'], ['설정', 'settings']]) {
     await first.click(tab)
     await inspectLayout(first, `10-zoom-${filename}.png`)
   }

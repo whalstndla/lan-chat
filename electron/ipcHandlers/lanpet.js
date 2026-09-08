@@ -1,7 +1,8 @@
-const { ipcMain } = require('electron')
+const { ipcMain, screen } = require('electron')
+const { setDrawerExpanded } = require('../lanpet/drawerWindow')
 const { getLanpetService } = require('../lanpet/service')
 
-const COMMAND_TYPES = new Set(['create', 'care', 'grow', 'settings', 'delete', 'invite', 'respond', 'action', 'end'])
+const COMMAND_TYPES = new Set(['create', 'care', 'grow', 'settings', 'delete', 'invite', 'respond', 'action', 'end', 'buy', 'feed', 'equip', 'lottery', 'gameStart', 'gameAction'])
 const MAX_COMMAND_BYTES = 16 * 1024
 const bridgedServices = new WeakSet()
 
@@ -70,6 +71,13 @@ function unavailableSnapshot(code) {
 }
 
 function registerLanpetHandlers(ctx) {
+  ipcMain.handle('lanpet:drawer', (event, expanded) => {
+    if (!isTrustedSender(ctx, event) || typeof expanded !== 'boolean' || (expanded && !hasOpenSession(ctx))) return false
+    const mainWindow = ctx.state.mainWindow
+    const workArea = expanded ? screen.getDisplayMatching(mainWindow.getBounds()).workArea : null
+    setDrawerExpanded(mainWindow, expanded, workArea)
+    return true
+  })
   ipcMain.handle('lanpet:get-snapshot', (event) => {
     if (!isTrustedSender(ctx, event)) return unavailableSnapshot('UNTRUSTED_SENDER')
     if (!hasOpenSession(ctx)) return unavailableSnapshot('SESSION_CLOSED')
