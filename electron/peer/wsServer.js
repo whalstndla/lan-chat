@@ -14,6 +14,7 @@ const ALLOWED_MESSAGE_TYPES = [
   // 청크 스트리밍 전송 (#44/#45/#49) — additive. 구버전은 이 목록에 없어 drop = 레거시 폴백.
   'file-chunk-start', 'file-chunk', 'file-chunk-end', 'file-cancel',
   'history-sync-request', 'history-sync-response',
+  'lanpet',
 ]
 
 // 청크 스트림은 유한(전송당 totalChunks 개)하고 프레임당 maxPayload 로 이미 제한되며,
@@ -126,6 +127,8 @@ function startWsServer({ onMessage, heartbeatInterval = DEFAULT_HEARTBEAT_INTERV
             }
             // 알 수 없는 메시지 타입은 무시 (fallthrough 방지)
             if (!ALLOWED_MESSAGE_TYPES.includes(message.type)) return
+            // 암호문 base64 오버헤드를 포함한 펫 메시지 상한을 복호화 전에 제한한다.
+            if (message.type === 'lanpet' && data.length > 23000) return
 
             // 메시지 빈도 체크 — 청크 스트림 타입은 캡에서 제외(유한 + maxPayload/버퍼 상한으로 방어).
             // 그 외 타입만 초당 카운트해 초과 시 드롭한다.

@@ -52,6 +52,7 @@ function buildMyHelloPayload(ctx, currentPeerId, nickname) {
     filePort: getFilePort(),
     addresses: getMyAdvertisedAddresses(ctx),
     profileImageUrl: buildMyProfileImageUrl(ctx),
+    lanpetSharingEnabled: require('../lanpet/protocol').isLanpetSharingEnabled(ctx),
   })
 }
 
