@@ -3,6 +3,81 @@ import ChatWindow from '../../src/components/ChatWindow'
 import useChatStore from '../../src/store/useChatStore'
 import useUserStore from '../../src/store/useUserStore'
 
+// ChatWindow 단위 테스트는 스크롤 정책에 집중하고, 실제 DOM 가상화 범위는
+// VirtualizedMessageList 전용 테스트에서 react-virtuoso 측정 컨텍스트로 검증한다.
+jest.mock('../../src/components/chat/VirtualizedMessageList', () => {
+  const React = require('react')
+
+  return {
+    __esModule: true,
+    default: React.forwardRef(function MockVirtualizedMessageList({
+      items,
+      components,
+      context,
+      itemContent,
+      roomKey: _roomKey,
+      scrollerRef,
+      followOutput: _followOutput,
+      atBottomStateChange,
+      atBottomThreshold = 4,
+      onScroll,
+      ...scrollProps
+    }, forwardedRef) {
+      const containerRef = React.useRef(null)
+      const visibleItems = items.length > 100
+        ? [...items.slice(0, 50), ...items.slice(-50)]
+        : items
+
+      React.useImperativeHandle(forwardedRef, () => ({
+        hasMessage(messageId) {
+          return items.some(item => (
+            item.message.id === messageId ||
+            item.extraImages.some(image => image.id === messageId)
+          ))
+        },
+        scrollToMessage(messageId, { behavior, align } = {}) {
+          const element = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`)
+          element?.scrollIntoView({ behavior, block: align })
+          return !!element
+        },
+        scrollToBottom({ behavior } = {}) {
+          containerRef.current?.lastElementChild?.scrollIntoView({ behavior })
+        },
+      }), [items])
+
+      const Header = components?.Header
+      const Footer = components?.Footer
+      const EmptyPlaceholder = components?.EmptyPlaceholder
+
+      return (
+        <div
+          {...scrollProps}
+          onScroll={(event) => {
+            onScroll?.(event)
+            const scroller = event.currentTarget
+            const bottomDistance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+            atBottomStateChange?.(bottomDistance <= atBottomThreshold)
+          }}
+          ref={(element) => {
+            containerRef.current = element
+            scrollerRef?.(element)
+          }}
+        >
+          {Header && <Header context={context} />}
+          {items.length === 0 && EmptyPlaceholder
+            ? <EmptyPlaceholder context={context} />
+            : visibleItems.map((item, index) => (
+              <React.Fragment key={item.message.id}>
+                {itemContent(index, item, context)}
+              </React.Fragment>
+            ))}
+          {Footer && <Footer context={context} />}
+        </div>
+      )
+    }),
+  }
+})
+
 // 이 테스트는 ChatWindow 의 스크롤/메시지 판정만 검증하므로 무거운 자식 컴포넌트는 최소 UI로 대체한다.
 jest.mock('../../src/components/Message', () => ({
   __esModule: true,
@@ -103,6 +178,45 @@ describe('ChatWindow', () => {
     })
     fireEvent.scroll(messageLog)
   }
+
+  it('releases resize observation when virtualized rows leave the DOM', async () => {
+    const originalResizeObserver = window.ResizeObserver
+    const observer = {
+      observe: jest.fn(),
+      unobserve: jest.fn(),
+      disconnect: jest.fn(),
+    }
+    window.ResizeObserver = jest.fn(() => observer)
+
+    try {
+      const { unmount } = render(<ChatWindow />)
+      const messageLog = screen.getByRole('log')
+      const row = document.createElement('div')
+      row.dataset.itemIndex = '1'
+      const wrapper = document.createElement('div')
+      const nestedRow = document.createElement('div')
+      nestedRow.dataset.itemIndex = '2'
+      wrapper.append(nestedRow)
+
+      await act(async () => {
+        messageLog.append(row, wrapper)
+      })
+      expect(observer.observe).toHaveBeenCalledWith(row)
+      expect(observer.observe).toHaveBeenCalledWith(nestedRow)
+
+      await act(async () => {
+        row.remove()
+        wrapper.remove()
+      })
+      expect(observer.unobserve).toHaveBeenCalledWith(row)
+      expect(observer.unobserve).toHaveBeenCalledWith(nestedRow)
+
+      unmount()
+      expect(observer.disconnect).toHaveBeenCalled()
+    } finally {
+      window.ResizeObserver = originalResizeObserver
+    }
+  })
 
   it('하단에서 벗어난 상태에서 과거 메시지를 prepend해도 새 메시지 토스트를 표시하지 않는다', () => {
     render(<ChatWindow />)
@@ -275,6 +389,25 @@ describe('ChatWindow', () => {
     expect(screen.getByText('상대방: 배치 메시지 501')).toBeInTheDocument()
     expect(useChatStore.getState().globalMessages).toHaveLength(500)
     expect(useChatStore.getState().liveMessageEvents.global).toBeUndefined()
+  })
+
+  it('긴 대화에서도 화면 주변 메시지만 DOM에 유지한다', () => {
+    useChatStore.getState().setGlobalHistory(
+      Array.from({ length: 600 }, (_, messageIndex) => ({
+        id: `long-history-${messageIndex}`,
+        content: `긴 대화 ${messageIndex}`,
+        timestamp: messageIndex,
+        fromId: 'other-peer',
+        from: '상대방',
+        type: 'global',
+      }))
+    )
+
+    render(<ChatWindow />)
+
+    const mountedMessages = screen.getByRole('log').querySelectorAll('[data-message-id]')
+    expect(mountedMessages.length).toBeGreaterThan(0)
+    expect(mountedMessages.length).toBeLessThanOrEqual(100)
   })
 
   it('안읽음 점프 안내를 확인한 뒤 다시 위로 스크롤해도 같은 안내를 반복 표시하지 않는다', () => {
