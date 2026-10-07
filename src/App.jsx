@@ -10,12 +10,13 @@ import Sidebar from './components/Sidebar'
 import ChatWindow from './components/ChatWindow'
 import PatchNotes from './components/PatchNotes'
 import KeyChangeWarningModal from './components/KeyChangeWarningModal'
+import LanpetLauncher from './components/lanpet/LanpetLauncher'
 
 // macOS hiddenInset 타이틀바: 트래픽 라이트(80×38px) 안전 영역 + 드래그 핸들
 // win/linux 는 네이티브 프레임을 그대로 쓰므로(main.js #72 분기) 신호등 여백이 필요 없다.
 const isMac = window.electronAPI.platform === 'darwin'
 
-function TitleBar({ nickname, updateState, onCheckUpdate }) {
+function TitleBar({ nickname, updateState, onCheckUpdate, showLanpet = false }) {
   const handleRightButtonClick = () => {
     if (updateState === 'downloaded') {
       window.electronAPI.installUpdate()
@@ -56,6 +57,7 @@ function TitleBar({ nickname, updateState, onCheckUpdate }) {
 
       {/* 우측: 업데이트 버튼 */}
       <div style={{ WebkitAppRegion: 'no-drag' }}>
+        {showLanpet && <LanpetLauncher />}
         <button
           onClick={handleRightButtonClick}
           disabled={isDisabled}
@@ -207,7 +209,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-vsc-bg text-vsc-text overflow-hidden">
       {/* macOS 타이틀 바 (트래픽 라이트 안전 영역) */}
-      <TitleBar nickname={authenticatedNickname} updateState={updateState} onCheckUpdate={handleCheckUpdate} />
+      <TitleBar nickname={authenticatedNickname} updateState={updateState} onCheckUpdate={handleCheckUpdate} showLanpet />
       {/* 사이드바 + 채팅창 */}
       <div className="flex flex-1 overflow-hidden">
         <Sidebar onShowPatchNotes={() => setShowPatchNotes(true)} />

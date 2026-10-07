@@ -34,6 +34,7 @@ const { closeAllServerClients } = require('../peer/wsServer')
 const { clearAllPeerConnectRetryState, clearAllPendingFileRequests, sweepOrphanedFileCache } = require('../utils/appUtils')
 const { clearAllFileChunkTransfers } = require('../peer/fileChunkTransfer')
 const { writePeerDebugLog } = require('../utils/peerDebugLogger')
+const { disposeLanpetService } = require('../lanpet/service')
 
 // 마스터키가 unlock 된 상태에서 DB 를 열고 마이그레이션 / 만료정리 수행.
 function openSessionDatabase(ctx, dbPath, appDataPath) {
@@ -94,6 +95,7 @@ function ensurePeerId(ctx) {
 // 세션 종료 — 마스터키 / DB 메모리에서 폐기.
 function teardownSession(ctx) {
   ctx.state.isSessionClosing = true
+  disposeLanpetService(ctx)
   if (ctx.state.database) {
     try { closeDatabase(ctx.state.database) } catch {}
     ctx.state.database = null
@@ -216,6 +218,7 @@ function registerAuthHandlers(ctx) {
   ipcMain.handle('logout', async () => {
     // 진행 중인 start-peer-discovery가 stop 대기에서 깨어나도 이전 세션 요청으로 판정하게 한다.
     ctx.state.isSessionClosing = true
+    disposeLanpetService(ctx)
     ctx.state.discoveryEpoch++
     stopBroadcastDiscovery()
     try { await stopPeerDiscovery() } catch {}

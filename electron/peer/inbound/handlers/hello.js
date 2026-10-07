@@ -100,6 +100,13 @@ module.exports = function handleHelloV2({ message, ctx, reply }) {
     const currentNicknameForReply = getProfile(ctx.state.database)?.nickname || ''
     reply(buildMyKeyExchangePayload(ctx, ctx.state.peerId, currentNicknameForReply))
 
+    // hello 공개키 응답이 먼저 전달되어야 상대가 뒤따르는 펫 암호문을 검증할 수 있다.
+    if (ctx.state.database && ctx.state.myPrivateKey) {
+      try {
+        require('../../../lanpet/protocol').getLanpetProtocol(ctx).onPeerHello(hello.peerId, hello.capabilities)
+      } catch { /* 펫 초기화 실패가 기존 채팅 핸드셰이크를 중단하지 않는다. */ }
+    }
+
     // #31 전체채팅 히스토리 동기화 — hello 핸드셰이크 완료(=피어 ready) 직후 1회 요청 송신.
     // 이 시점엔 공개키 저장 + (인바운드) 소켓 태깅이 끝나 sendPeerMessage 로 도달 가능하다.
     // 요청은 여기서만 발생하며 응답 수신은 새 요청을 만들지 않아 무한루프가 없다.

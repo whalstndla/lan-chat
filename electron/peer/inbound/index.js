@@ -27,6 +27,7 @@ const dm = require('./handlers/dm')
 const globalMessage = require('./handlers/message')
 const historySyncRequest = require('./handlers/historySyncRequest')
 const historySyncResponse = require('./handlers/historySyncResponse')
+const lanpet = require('./handlers/lanpet')
 
 // type → handler 매핑. 알려지지 않은 type 은 무시됨.
 const HANDLERS = {
@@ -54,6 +55,7 @@ const HANDLERS = {
   // #31 전체채팅 히스토리 동기화 (additive — 구버전은 화이트리스트에서 drop = graceful degradation)
   'history-sync-request': historySyncRequest,
   'history-sync-response': historySyncResponse,
+  'lanpet': lanpet,
 }
 
 const { perfEnabled } = require('../../utils/perf')

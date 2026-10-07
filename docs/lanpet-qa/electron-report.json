@@ -1,0 +1,204 @@
+{
+  "executedAt": "2026-09-08T06:06:39.523Z",
+  "environment": "Two real Electron processes on one Mac, with isolated temporary profiles and loopback WebSocket communication.",
+  "limits": [
+    "mDNS and UDP discovery advertisements are disabled only in the harness; actual discovery on two physical PCs is not covered.",
+    "The process-local clock begins at Tuesday 10:00, advances 11 minutes between social sessions to honor the invite rate limit, and advances 31 minutes to inspect a completed nap. The OS clock is unchanged.",
+    "Care and onboarding use rendered UI; protocol assertions call the actual renderer preload API and traverse the real main process, encrypted database, and peer sockets."
+  ],
+  "checks": [
+    {
+      "name": "beta: registration and private-by-default onboarding",
+      "passed": true
+    },
+    {
+      "name": "alpha: registration and private-by-default onboarding",
+      "passed": true
+    },
+    {
+      "name": "Rendered Care action updates the actual encrypted pet state",
+      "passed": true
+    },
+    {
+      "name": "Duplicate request id does not repeat care; unsupported command is rejected",
+      "passed": true
+    },
+    {
+      "name": "Close/reopen preserves independent subscriptions and unsubscribe removes only its listener",
+      "passed": true
+    },
+    {
+      "name": "Manual loopback connection discovers a supported, trusted, available Lanpet peer",
+      "passed": true
+    },
+    {
+      "name": "Rendered activity preference and invitation block/unblock persist through the actual API",
+      "passed": true
+    },
+    {
+      "name": "visit: actual two-peer exchange completed",
+      "passed": true,
+      "sessionId": "52a5e578-b399-48ea-b176-92833377e264",
+      "firstOutcome": "completed",
+      "secondOutcome": "completed"
+    },
+    {
+      "name": "cooperativePlay: actual two-peer exchange completed",
+      "passed": true,
+      "sessionId": "3c82a345-17fb-4928-b4cb-1ff4a57f07ea",
+      "firstOutcome": "completed",
+      "secondOutcome": "completed"
+    },
+    {
+      "name": "battle: actual two-peer exchange completed",
+      "passed": true,
+      "sessionId": "c48e1374-4dcb-4079-a007-b7b60cf1cca5",
+      "firstOutcome": "win",
+      "secondOutcome": "loss"
+    },
+    {
+      "name": "gift: actual two-peer exchange completed",
+      "passed": true,
+      "sessionId": "8dbea9b5-8f39-4324-8f7c-e726a701f9bb",
+      "firstOutcome": "completed",
+      "secondOutcome": "completed"
+    },
+    {
+      "name": "race: actual two-peer exchange completed",
+      "passed": true,
+      "sessionId": "e5d39cb3-9d70-4543-bd51-5267fa8441b3",
+      "firstOutcome": "draw",
+      "secondOutcome": "draw"
+    },
+    {
+      "name": "Renderer layout: 12-world-shop.png",
+      "passed": true,
+      "viewportWidth": 1200,
+      "viewportHeight": 800,
+      "dialogWidth": 980,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Rendered food purchase and feeding persist; purchased decoration changes the actual room",
+      "passed": true
+    },
+    {
+      "name": "race: five rendered choices settle one 20-coin reward",
+      "passed": true
+    },
+    {
+      "name": "memory: five rendered choices settle one 20-coin reward",
+      "passed": true
+    },
+    {
+      "name": "Chat drawer shows both real peers and expands/collapses the actual native window within the display",
+      "passed": true
+    },
+    {
+      "name": "Rendered Rest schedules a nap, pauses invitations, and restores energy only after 30 work minutes",
+      "passed": true
+    },
+    {
+      "name": "Renderer layout: 07-desktop.png",
+      "passed": true,
+      "viewportWidth": 1200,
+      "viewportHeight": 800,
+      "dialogWidth": 980,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Renderer layout: 08-narrow.png",
+      "passed": true,
+      "viewportWidth": 700,
+      "viewportHeight": 800,
+      "dialogWidth": 666,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Renderer layout: 09-narrow-200-percent.png",
+      "passed": true,
+      "viewportWidth": 350,
+      "viewportHeight": 400,
+      "dialogWidth": 316,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Renderer layout: 10-zoom-friends.png",
+      "passed": true,
+      "viewportWidth": 350,
+      "viewportHeight": 400,
+      "dialogWidth": 316,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Renderer layout: 10-zoom-shop.png",
+      "passed": true,
+      "viewportWidth": 350,
+      "viewportHeight": 400,
+      "dialogWidth": 316,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Renderer layout: 10-zoom-games.png",
+      "passed": true,
+      "viewportWidth": 350,
+      "viewportHeight": 400,
+      "dialogWidth": 316,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Renderer layout: 10-zoom-journal.png",
+      "passed": true,
+      "viewportWidth": 350,
+      "viewportHeight": 400,
+      "dialogWidth": 316,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Renderer layout: 10-zoom-settings.png",
+      "passed": true,
+      "viewportWidth": 350,
+      "viewportHeight": 400,
+      "dialogWidth": 316,
+      "horizontalOverflow": false,
+      "withinViewport": true
+    },
+    {
+      "name": "Native dialog traps Tab focus and closes with Escape",
+      "passed": true
+    }
+  ],
+  "screenshots": [
+    "Docs/lanpet-qa/00-registration.png",
+    "Docs/lanpet-qa/01-onboarding.png",
+    "Docs/lanpet-qa/02-pet-home.png",
+    "Docs/lanpet-qa/16-species-tree.png",
+    "Docs/lanpet-qa/03-neighborhood.png",
+    "Docs/lanpet-qa/04-battle-live.png",
+    "Docs/lanpet-qa/05-battle-result.png",
+    "Docs/lanpet-qa/14-friend-race.png",
+    "Docs/lanpet-qa/06-keepsake-journal.png",
+    "Docs/lanpet-qa/12-world-shop.png",
+    "Docs/lanpet-qa/13-world-race.png",
+    "Docs/lanpet-qa/13-world-memory.png",
+    "Docs/lanpet-qa/15-chat-drawer.png",
+    "Docs/lanpet-qa/11-scheduled-nap.png",
+    "Docs/lanpet-qa/07-desktop.png",
+    "Docs/lanpet-qa/08-narrow.png",
+    "Docs/lanpet-qa/09-narrow-200-percent.png",
+    "Docs/lanpet-qa/10-zoom-friends.png",
+    "Docs/lanpet-qa/10-zoom-shop.png",
+    "Docs/lanpet-qa/10-zoom-games.png",
+    "Docs/lanpet-qa/10-zoom-journal.png",
+    "Docs/lanpet-qa/10-zoom-settings.png"
+  ],
+  "passed": true
+}
