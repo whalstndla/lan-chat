@@ -120,8 +120,7 @@ xcrun notarytool store-credentials "lan-chat-notary" \
   --apple-id "<APPLE_ID_EMAIL>" \
   --team-id "<APPLE_TEAM_ID>"
 
-# 공증 빌드 셸에서 사용할 키체인 프로필 지정
-export APPLE_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+# 저장할 때와 같은 기본 키체인에서 공증 프로필 조회
 export APPLE_KEYCHAIN_PROFILE="lan-chat-notary"
 export APPLE_TEAM_ID="<APPLE_TEAM_ID>"
 ```
