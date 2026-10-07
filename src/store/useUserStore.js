@@ -84,12 +84,14 @@ const useUserStore = create((set) => ({
   notificationHideBody: false, // OS 알림 본문에 실제 메시지 대신 "새 메시지"만 표시
 
   // scope/hideBody 는 sound/volume 을 바꾸는 기존 호출부가 넘기지 않아도 기존 값을
-  // 유지하도록 병합한다(sound/volume/customSoundBuffer 는 기존 동작 그대로 유지).
+  // 유지하도록 병합한다. 업로드한 음원도 명시적으로 교체하거나 제거할 때까지 유지한다.
   setNotificationSettings: ({ sound, volume, customSoundBuffer, scope, hideBody }) =>
     set((state) => ({
       notificationSound: sound,
       notificationVolume: volume,
-      notificationCustomSoundBuffer: customSoundBuffer ?? null,
+      notificationCustomSoundBuffer: customSoundBuffer !== undefined
+        ? customSoundBuffer
+        : state.notificationCustomSoundBuffer,
       notificationScope: scope ?? state.notificationScope,
       notificationHideBody: hideBody !== undefined ? hideBody : state.notificationHideBody,
     })),

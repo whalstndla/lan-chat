@@ -11,6 +11,7 @@
 const { saveMessage } = require('../../../storage/queries')
 const { sendToRenderer } = require('../../../utils/appUtils')
 const { writePeerDebugLog } = require('../../../utils/peerDebugLogger')
+const { withMessageOrder } = require('../../../utils/messageOrder')
 
 module.exports = function handleHistorySyncResponse({ message, ctx }) {
   if (!ctx.state.database) return
@@ -21,6 +22,7 @@ module.exports = function handleHistorySyncResponse({ message, ctx }) {
   for (const wireMessage of incoming) {
     // 방어: 전체채팅(type='message')만 수용 — DM/기타 타입은 이 동기화 대상이 아니다.
     if (!wireMessage || wireMessage.type !== 'message' || !wireMessage.id) continue
+    const orderedMessage = withMessageOrder(ctx, wireMessage, { historical: true })
     try {
       saveMessage(ctx.state.database, {
         id: wireMessage.id,
@@ -35,6 +37,7 @@ module.exports = function handleHistorySyncResponse({ message, ctx }) {
         file_url: wireMessage.fileUrl || null,
         file_name: wireMessage.fileName || null,
         timestamp: wireMessage.timestamp,
+        sort_timestamp: orderedMessage.sortTimestamp,
         // 답장(#28) — 와이어는 객체, DB 는 JSON 문자열로 저장.
         reply_to_id: wireMessage.replyToId || null,
         reply_preview: wireMessage.replyPreview ? JSON.stringify(wireMessage.replyPreview) : null,
@@ -44,7 +47,7 @@ module.exports = function handleHistorySyncResponse({ message, ctx }) {
       writePeerDebugLog('inbound.historySync.saveError', { id: wireMessage.id, error: err.message })
       continue
     }
-    savedMessages.push(wireMessage)
+    savedMessages.push(orderedMessage)
   }
 
   if (savedMessages.length === 0) return

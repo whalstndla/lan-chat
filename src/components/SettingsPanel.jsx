@@ -91,6 +91,20 @@ export default function SettingsPanel({ onClose }) {
   const fileInputRef = useRef(null)
   const soundFileInputRef = useRef(null)
 
+  // 확인 시작 전에 등록하고, 설정을 닫으면 이 화면의 구독만 해제한다.
+  useEffect(() => {
+    const unsubscribeListeners = [
+      window.electronAPI.onUpdateAvailable?.(() => setUpdateState('available')),
+      window.electronAPI.onUpdateNotAvailable?.(() => setUpdateState('not-available')),
+      window.electronAPI.onUpdateError?.((message) => {
+        setUpdateState('error')
+        setUpdateErrorMessage(message || 'Update check failed')
+      }),
+      window.electronAPI.onUpdateDownloaded?.(() => setUpdateState('downloaded')),
+    ]
+    return () => unsubscribeListeners.forEach(unsubscribe => unsubscribe?.())
+  }, [])
+
   // 링크 미리보기(외부 서버 OG 요청) 사용 여부 — 기본 on, 마운트 시 main 에서 로드(#66)
   const [linkPreviewEnabled, setLinkPreviewEnabled] = useState(true)
   useEffect(() => {
@@ -309,19 +323,15 @@ export default function SettingsPanel({ onClose }) {
     setAuthStatus('login')
   }
 
-  function handleCheckUpdate() {
+  async function handleCheckUpdate() {
     setUpdateState('checking')
-    window.electronAPI.checkForUpdates()
-
-    // 업데이트 이벤트 리스너 등록
     setUpdateErrorMessage(null)
-    window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
-    window.electronAPI.onUpdateNotAvailable(() => setUpdateState('not-available'))
-    window.electronAPI.onUpdateError((message) => {
+    try {
+      await window.electronAPI.checkForUpdates()
+    } catch (error) {
       setUpdateState('error')
-      setUpdateErrorMessage(message || '업데이트 확인 실패')
-    })
-    window.electronAPI.onUpdateDownloaded?.(() => setUpdateState('downloaded'))
+      setUpdateErrorMessage(error.message || 'Update check failed')
+    }
   }
 
   // ─── 서브 페이지 헤더 ───
@@ -353,10 +363,12 @@ export default function SettingsPanel({ onClose }) {
   const updateLabel = {
     idle: '업데이트 확인',
     checking: '확인 중...',
+    available: 'Downloading...',
+    downloaded: 'Install update',
     'not-available': '최신 버전입니다',
     error: '확인 실패 — 재시도',
   }[updateState] ?? '업데이트 확인'
-  const isUpdateDisabled = updateState === 'checking'
+  const isUpdateDisabled = updateState === 'checking' || updateState === 'available'
 
   // ─── 렌더링 ───
   return (
@@ -477,7 +489,7 @@ export default function SettingsPanel({ onClose }) {
                       <button onClick={() => soundFileInputRef.current?.click()}
                         className="cursor-pointer px-2 py-1 rounded text-xs bg-vsc-panel border border-vsc-border text-vsc-muted hover:text-vsc-text transition-colors">파일 선택</button>
                     ) : (
-                      <button onClick={() => { handleSoundChange(option.value); setTimeout(playNotification, 50) }} title="미리듣기"
+                      <button onClick={() => { handleSoundChange(option.value); playNotification() }} title="미리듣기"
                         className="cursor-pointer p-1 rounded text-vsc-muted hover:text-vsc-text hover:bg-vsc-hover transition-colors"><Play size={11} /></button>
                     )}
                   </div>
@@ -752,7 +764,7 @@ export default function SettingsPanel({ onClose }) {
             <div>
               <label className="text-vsc-muted text-xs block mb-2">업데이트</label>
               <button
-                onClick={handleCheckUpdate}
+                onClick={() => updateState === 'downloaded' ? window.electronAPI.installUpdate() : handleCheckUpdate()}
                 disabled={isUpdateDisabled}
                 className="cursor-pointer w-full flex items-center gap-2 px-3 py-2 rounded text-xs bg-vsc-panel border border-vsc-border text-vsc-text hover:bg-vsc-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >

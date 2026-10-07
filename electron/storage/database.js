@@ -53,6 +53,7 @@ function initDatabase(dbPath, masterKey) {
       file_url          TEXT,
       file_name         TEXT,
       timestamp         INTEGER NOT NULL,
+      sort_timestamp    INTEGER,
       format            TEXT,
       reply_to_id       TEXT,
       reply_preview     TEXT,
@@ -99,6 +100,7 @@ function migrateDatabase(db) {
 
   // messages 테이블 신규 컬럼 추가
   const messagesMigrations = [
+    'ALTER TABLE messages ADD COLUMN sort_timestamp INTEGER',
     'ALTER TABLE messages ADD COLUMN read INTEGER DEFAULT 0',
     'ALTER TABLE messages ADD COLUMN format TEXT',
     'ALTER TABLE messages ADD COLUMN edited_at INTEGER',
@@ -114,6 +116,12 @@ function migrateDatabase(db) {
   for (const sql of messagesMigrations) {
     try { db.prepare(sql).run() } catch { /* 이미 존재하면 무시 */ }
   }
+
+  // 기존 기록은 원래 시각으로 시작하고, 새 라이브 메시지부터 대화 순서를 별도로 보존한다.
+  db.transaction(() => {
+    db.prepare('UPDATE messages SET sort_timestamp = timestamp WHERE sort_timestamp IS NULL').run()
+    db.exec('CREATE INDEX IF NOT EXISTS idx_messages_sort_timestamp ON messages(COALESCE(sort_timestamp, timestamp))')
+  })()
 
   // 오프라인 메시지 큐 테이블
   db.exec(`

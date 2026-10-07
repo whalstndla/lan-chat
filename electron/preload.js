@@ -2,6 +2,13 @@
 // sandbox: false 환경에서만 동작 (main.js webPreferences에 sandbox: false 필수)
 const { contextBridge, ipcRenderer } = require('electron')
 
+// 상단과 설정 화면이 같은 이벤트를 받아도 서로의 구독을 제거하지 않는다.
+function subscribeToUpdate(channel, callback) {
+  const listener = (_, value) => callback(value)
+  ipcRenderer.on(channel, listener)
+  return () => ipcRenderer.removeListener(channel, listener)
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   // 플랫폼 정보(#72) — win/linux 타이틀바 분기(App.jsx TitleBar 신호등 여백 제거)용.
   // 실행 중 값이 바뀌지 않는 정적 문자열이라 함수가 아닌 값 그대로 노출한다.
@@ -288,25 +295,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 자동 업데이트
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
-  onUpdateAvailable: (callback) => {
-    ipcRenderer.removeAllListeners('update-available')
-    ipcRenderer.on('update-available', () => callback())
-  },
-  onDownloadProgress: (callback) => {
-    ipcRenderer.removeAllListeners('update-download-progress')
-    ipcRenderer.on('update-download-progress', (_, percent) => callback(percent))
-  },
-  onUpdateNotAvailable: (callback) => {
-    ipcRenderer.removeAllListeners('update-not-available')
-    ipcRenderer.on('update-not-available', () => callback())
-  },
-  onUpdateDownloaded: (callback) => {
-    ipcRenderer.removeAllListeners('update-downloaded')
-    ipcRenderer.on('update-downloaded', () => callback())
-  },
-  onUpdateError: (callback) => {
-    ipcRenderer.removeAllListeners('update-error')
-    ipcRenderer.on('update-error', (_, message) => callback(message))
-  },
+  onUpdateAvailable: (callback) => subscribeToUpdate('update-available', callback),
+  onDownloadProgress: (callback) => subscribeToUpdate('update-download-progress', callback),
+  onUpdateNotAvailable: (callback) => subscribeToUpdate('update-not-available', callback),
+  onUpdateDownloaded: (callback) => subscribeToUpdate('update-downloaded', callback),
+  onUpdateError: (callback) => subscribeToUpdate('update-error', callback),
   installUpdate: () => ipcRenderer.invoke('install-update'),
 })

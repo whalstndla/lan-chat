@@ -7,6 +7,7 @@ const { saveMessage, editMessage } = require('../storage/queries')
 const { savePendingMessage, deletePendingMessage } = require('../storage/pendingMessages')
 const { deriveSharedSecret, encryptDM } = require('../crypto/encryption')
 const { sendPeerMessage, broadcastPeerMessage, getCurrentNicknameSafely, cacheOwnFile, deleteMessageAndCachedFile } = require('../utils/appUtils')
+const { withMessageOrder } = require('../utils/messageOrder')
 
 // 허용 contentType/format 화이트리스트
 const ALLOWED_CONTENT_TYPES = ['text', 'image', 'video', 'file']
@@ -86,6 +87,7 @@ function registerMessageHandlers(ctx) {
       replyPreview: normalizedReply.replyPreview,
       mentions: normalizedMentions.mentions,
     }
+    const orderedMessage = withMessageOrder(ctx, message)
     broadcastPeerMessage(ctx, message)
     // 메시지 전송 완료 시점에 typing-stop 을 브로드캐스트 — 수신측에 최대 3초간
     // 남아있던 "입력 중" 유령 표시를 즉시 지운다.
@@ -100,6 +102,7 @@ function registerMessageHandlers(ctx) {
         encrypted_payload: null,
         file_url: message.fileUrl, file_name: message.fileName,
         timestamp: message.timestamp,
+        sort_timestamp: orderedMessage.sortTimestamp,
         reply_to_id: normalizedReply.replyToId,
         reply_preview: normalizedReply.replyPreviewJson,
         mentions: normalizedMentions.mentionsJson,
@@ -110,7 +113,7 @@ function registerMessageHandlers(ctx) {
       const ownFileName = message.fileUrl.split('/files/')[1]
       if (ownFileName) cacheOwnFile(ctx, message.id, ownFileName)
     }
-    return message
+    return orderedMessage
   })
 
   // DM 전송 (E2E 암호화, 오프라인이면 pending 큐에 저장)
@@ -128,6 +131,9 @@ function registerMessageHandlers(ctx) {
     const currentNickname = getCurrentNicknameSafely(ctx)
     const messageId = uuidv4()
     const timestamp = Date.now()
+    const { sortTimestamp } = withMessageOrder(ctx, {
+      id: messageId, type: 'dm', fromId: ctx.state.peerId, to: recipientPeerId, timestamp,
+    })
 
     // 메시지 전송 시점에 즉시 typing-stop 신호 전송 — 상대가 연결되어 있지 않으면
     // sendPeerMessage 가 조용히 false 를 반환할 뿐이라 오프라인/pending 분기에서도 안전.
@@ -157,7 +163,7 @@ function registerMessageHandlers(ctx) {
         to_id: recipientPeerId, content: content || null,
         content_type: contentType, format: format || null, encrypted_payload: null,
         file_url: fileUrl || null, file_name: fileName || null,
-        timestamp,
+        timestamp, sort_timestamp: sortTimestamp,
         reply_to_id: normalizedReply.replyToId, reply_preview: normalizedReply.replyPreviewJson,
         mentions: normalizedMentions.mentionsJson,
       })
@@ -165,7 +171,7 @@ function registerMessageHandlers(ctx) {
       return {
         id: messageId, type: 'dm', from: currentNickname, fromId: ctx.state.peerId,
         to: recipientPeerId, content: content || null, contentType, format: format || null,
-        fileUrl: fileUrl || null, fileName: fileName || null, timestamp, pending: true,
+        fileUrl: fileUrl || null, fileName: fileName || null, timestamp, sortTimestamp, pending: true,
         replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview,
         mentions: normalizedMentions.mentions,
       }
@@ -196,7 +202,7 @@ function registerMessageHandlers(ctx) {
         to_id: recipientPeerId, content: content || null,
         content_type: contentType, format: format || null, encrypted_payload: null,
         file_url: fileUrl || null, file_name: fileName || null,
-        timestamp,
+        timestamp, sort_timestamp: sortTimestamp,
         reply_to_id: normalizedReply.replyToId, reply_preview: normalizedReply.replyPreviewJson,
         mentions: normalizedMentions.mentionsJson,
       })
@@ -204,7 +210,7 @@ function registerMessageHandlers(ctx) {
       return {
         id: messageId, type: 'dm', from: currentNickname, fromId: ctx.state.peerId,
         to: recipientPeerId, content: content || null, contentType, format: format || null,
-        fileUrl: fileUrl || null, fileName: fileName || null, timestamp, pending: true,
+        fileUrl: fileUrl || null, fileName: fileName || null, timestamp, sortTimestamp, pending: true,
         replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview,
         mentions: normalizedMentions.mentions,
       }
@@ -238,6 +244,7 @@ function registerMessageHandlers(ctx) {
         content_type: contentType, format: format || null, encrypted_payload: encryptedPayload,
         file_url: fileUrl || null, file_name: fileName || null,
         timestamp: message.timestamp,
+        sort_timestamp: sortTimestamp,
         reply_to_id: normalizedReply.replyToId, reply_preview: normalizedReply.replyPreviewJson,
         mentions: normalizedMentions.mentionsJson,
       })
@@ -247,7 +254,7 @@ function registerMessageHandlers(ctx) {
 
     // 렌더러에는 복호화된 내용으로 반환 (답장 메타/mentions 는 평문 값으로 함께 반환해 즉시 렌더)
     return {
-      ...message, content: content || null, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null,
+      ...message, sortTimestamp, content: content || null, format: format || null, fileUrl: fileUrl || null, fileName: fileName || null,
       replyToId: normalizedReply.replyToId, replyPreview: normalizedReply.replyPreview,
       mentions: normalizedMentions.mentions,
       ...(sent ? {} : { pending: true }),

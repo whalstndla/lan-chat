@@ -1,5 +1,6 @@
 // src/store/useChatStore.js
 import { create } from 'zustand'
+import { getMessageSortTimestamp } from '../utils/messageOrder'
 
 // 라이브 append(새 메시지 도착) 시 유지할 최근 메시지 상한 — 과거를 로드하지 않은 일반 상태에서
 // 메모리 무한 증가를 막는다. 단, 사용자가 위로 스크롤해 과거를 로드했거나 검색 점프로 이 값을
@@ -84,11 +85,13 @@ export function getRoomKey(room) {
   return room.type === 'global' ? 'global' : room.peerId
 }
 
-// message 가 other 보다 timestamp 기준으로 과거인지 판정. 둘 중 하나라도 timestamp 가 없으면
+// 로컬에서 보정한 표시 순서를 우선한다. 둘 중 하나라도 시각이 없으면
 // 비교가 불가능하므로 과거로 취급하지 않는다(false) — 기존 append-only 동작을 그대로 보존한다.
 function isOlderMessage(message, other) {
-  if (message?.timestamp == null || other?.timestamp == null) return false
-  return message.timestamp < other.timestamp
+  const messageTimestamp = getMessageSortTimestamp(message)
+  const otherTimestamp = getMessageSortTimestamp(other)
+  if (messageTimestamp == null || otherTimestamp == null) return false
+  return messageTimestamp < otherTimestamp
 }
 
 // 오프라인 상대가 재접속하며 flush 한 지각 메시지는 원래(과거) timestamp 를 유지한 채 도착한다(#20).
@@ -283,7 +286,7 @@ const useChatStore = create((set, get) => ({
       const existingIds = new Set(state.globalMessages.map((m) => m.id))
       const fresh = incoming.filter((m) => m?.id && !existingIds.has(m.id))
       if (fresh.length === 0) return state
-      const merged = [...state.globalMessages, ...fresh].sort((a, b) => a.timestamp - b.timestamp)
+      const merged = [...state.globalMessages, ...fresh].sort((a, b) => getMessageSortTimestamp(a) - getMessageSortTimestamp(b))
       // 과거를 로드해 확장된 방(#10)에서는 트림하지 않는다. 그 외엔 최근 LIVE_TAIL_CAP 개만 유지.
       if (state.globalHistoryExpanded) return { globalMessages: merged }
       return { globalMessages: merged.length > LIVE_TAIL_CAP ? merged.slice(-LIVE_TAIL_CAP) : merged }
