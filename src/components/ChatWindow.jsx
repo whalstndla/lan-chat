@@ -1,5 +1,5 @@
 // src/components/ChatWindow.jsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, BellOff, ChevronDown, Search } from 'lucide-react'
 import useChatStore, { getRoomKey } from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
@@ -7,11 +7,13 @@ import Message from './Message'
 import MessageInput from './MessageInput'
 import LanpetDrawer from './lanpet/LanpetDrawer'
 import ChatSearchBar from './chat/ChatSearchBar'
+import VirtualizedMessageList from './chat/VirtualizedMessageList'
 import { getUnreadMessages } from '../utils/unreadDivider'
 import { buildMessageRenderItems } from '../utils/buildMessageRenderItems'
 
 const MAX_MESSAGE_PREVIEW_LENGTH = 120
 const EMPTY_LIVE_MESSAGE_EVENTS = []
+const EMPTY_MESSAGES = []
 
 function getScrollBehavior() {
   if (typeof window.matchMedia !== 'function') return 'smooth'
@@ -65,18 +67,142 @@ function normalizeSearchHistoryResult(result) {
   }
 }
 
+function ChatHistoryHeader({ context }) {
+  const {
+    historyLoadError,
+    loadOlderMessages,
+    loadingMore,
+  } = context
+
+  return (
+    <>
+      {historyLoadError && (
+        <div role="alert" className="flex items-center justify-center gap-2 px-4 py-2 text-xs text-vsc-muted">
+          <span>이전 메시지를 불러오지 못했습니다.</span>
+          <button
+            onClick={loadOlderMessages}
+            className="rounded px-2 py-1 font-semibold text-vsc-text underline decoration-vsc-accent hover:bg-vsc-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vsc-accent"
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+      {loadingMore && (
+        <div className="flex justify-center py-2">
+          <span className="text-xs text-vsc-muted">메시지를 불러오는 중...</span>
+        </div>
+      )}
+    </>
+  )
+}
+
+function ChatMessageListEmpty() {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>
+    </div>
+  )
+}
+
+function ChatMessageListFooter({ context }) {
+  const { scrollEndRef, typingUserList } = context
+
+  return (
+    <>
+      {typingUserList.length > 0 && (
+        <div className="px-4 py-1 flex items-center gap-1.5 text-vsc-muted text-xs">
+          <span className="flex gap-0.5 items-end">
+            <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '0ms' }} />
+            <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '150ms' }} />
+            <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '300ms' }} />
+          </span>
+          <span>
+            {typingUserList.map(user => user.nickname).join(', ')}
+            {typingUserList.length === 1 ? '님이 입력 중...' : '님들이 입력 중...'}
+          </span>
+        </div>
+      )}
+      <div ref={scrollEndRef} />
+    </>
+  )
+}
+
+function renderVirtualizedMessage(_index, item, context) {
+  return (
+    <>
+      {item.showDateDivider && (
+        <div className="flex items-center gap-2 px-4 py-3">
+          <div className="flex-1 border-t border-vsc-border" />
+          <span className="text-xs text-vsc-muted shrink-0">{item.dateLabel}</span>
+          <div className="flex-1 border-t border-vsc-border" />
+        </div>
+      )}
+      {item.showUnreadDivider && (
+        <div className="flex items-center gap-2 px-4 py-2">
+          <div className="flex-1 border-t border-red-400/50" />
+          <span className="text-xs text-red-400 font-semibold shrink-0">여기서부터 새 메시지</span>
+          <div className="flex-1 border-t border-red-400/50" />
+        </div>
+      )}
+      <Message
+        message={item.message}
+        onStartEdit={context.handleStartEdit}
+        onReply={context.handleStartReply}
+        onQuoteClick={context.scrollToMessage}
+        isHighlighted={
+          context.highlightedMessageId === item.message.id ||
+          item.extraImages.some(image => image.id === context.highlightedMessageId)
+        }
+        isGrouped={item.isGrouped}
+        extraImages={item.extraImages}
+        searchQuery={context.showSearch ? context.searchQuery : ''}
+      />
+      {(item.message.id === context.searchHistoryGapAfterId ||
+        item.extraImages.some(image => image.id === context.searchHistoryGapAfterId)) && (
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-center gap-3 rounded border border-vsc-border bg-vsc-panel px-3 py-2 text-xs text-vsc-muted">
+            <span>성능을 위해 중간 메시지는 생략했습니다.</span>
+            <button
+              onClick={context.scrollToBottom}
+              className="rounded px-2 py-1 font-semibold text-vsc-text hover:bg-vsc-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vsc-accent"
+            >
+              최근 메시지로 이동
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+const VIRTUALIZED_MESSAGE_COMPONENTS = {
+  EmptyPlaceholder: ChatMessageListEmpty,
+  Footer: ChatMessageListFooter,
+  Header: ChatHistoryHeader,
+}
+
 export default function ChatWindow() {
   const currentRoom = useChatStore(state => state.currentRoom)
   const roomKey = getRoomKey(currentRoom)
-  const globalMessages = useChatStore(state => state.globalMessages)
-  const dmMessages = useChatStore(state => state.dmMessages)
+  // 현재 방의 목록만 구독해 다른 DM 방의 메시지 변경이 큰 채팅 목록을 다시 렌더하지 않게 한다.
+  const currentMessages = useChatStore(state => (
+    currentRoom.type === 'global'
+      ? state.globalMessages
+      : (state.dmMessages[currentRoom.peerId] || EMPTY_MESSAGES)
+  ))
   const currentLiveMessageEvents = useChatStore(
     state => state.liveMessageEvents[roomKey] || EMPTY_LIVE_MESSAGE_EVENTS
   )
   const chatSessionEpoch = useChatStore(state => state.chatSessionEpoch)
-  const typingUsers = useChatStore(state => state.typingUsers)
+  // DM에서는 현재 상대의 입력 상태만 구독한다. 전체 채팅은 모든 피어의 상태가 실제 표시 대상이다.
+  const typingState = useChatStore(state => (
+    currentRoom.type === 'global'
+      ? state.typingUsers
+      : state.typingUsers[currentRoom.peerId]
+  ))
   const myPeerId = useUserStore(state => state.myPeerId)
   const scrollEndRef = useRef(null)
+  const virtualizedMessageListRef = useRef(null)
   const messagesContainerRef = useRef(null)
   const isNearBottomRef = useRef(true)
   const previousMessagesRef = useRef([])
@@ -98,10 +224,13 @@ export default function ChatWindow() {
   // 검색 결과 점프(#36)로 히스토리를 일괄 로드하는 동안, 자동 스크롤 스냅/무한스크롤
   // 트리거가 우리가 계산한 목표 스크롤 위치와 경쟁하지 않도록 억제하는 플래그
   const pendingJumpScrollRef = useRef(false)
+  const setMessagesContainer = useCallback((element) => {
+    messagesContainerRef.current = element
+  }, [])
 
   const [newMessageToast, setNewMessageToast] = useState(null)
   const [isDragOver, setIsDragOver] = useState(false)
-  // 스크롤이 맨 아래에서 벗어나 있는지(#39 안읽음 점프 버튼 표시 조건) — handleScroll 에서 갱신.
+  // 스크롤이 맨 아래에서 벗어나 있는지(#39 안읽음 점프 버튼 표시 조건) — Virtuoso가 갱신한다.
   const [isAwayFromBottom, setIsAwayFromBottom] = useState(false)
   // 검색 상태 (로컬 — 스토어 구독 없음)
   const [showSearch, setShowSearch] = useState(false)
@@ -118,19 +247,12 @@ export default function ChatWindow() {
   // DB 기반 안읽음 구분선과 별개로, 현재 방에서 사용자가 점프 안내를 확인했는지 관리한다.
   const [isUnreadJumpDismissed, setIsUnreadJumpDismissed] = useState(false)
 
-  const mutedRooms = useChatStore(state => state.mutedRooms)
+  const isMuted = useChatStore(state => !!state.mutedRooms[roomKey])
   const toggleRoomMute = useChatStore(state => state.toggleRoomMute)
   // 북마크(#34) 목록에서 메시지를 열었을 때 스크롤해야 할 대상 — BookmarksPanel 이 설정한다.
   const pendingScrollMessageId = useChatStore(state => state.pendingScrollMessageId)
   // 방별 마지막 읽은 지점(#39) — DB 에 영속되어 재시작 후에도 유지된다.
-  const lastReadTimestamps = useChatStore(state => state.lastReadTimestamps)
-
-  const currentMessages = currentRoom.type === 'global'
-    ? globalMessages
-    : (dmMessages[currentRoom.peerId] || [])
-
-  const isMuted = !!mutedRooms[roomKey]
-  const lastReadTimestamp = lastReadTimestamps[roomKey]
+  const lastReadTimestamp = useChatStore(state => state.lastReadTimestamps[roomKey])
   // 안읽음 점프 버튼(#39)용 — 구분선 렌더링과 동일한 순수 함수로 계산해 기준이 어긋나지 않게 한다.
   const unreadMessages = getUnreadMessages(currentMessages, lastReadTimestamp, myPeerId)
   const firstUnreadMessageId = unreadMessages[0]?.id || null
@@ -156,22 +278,23 @@ export default function ChatWindow() {
   // DM 방에서는 상대가 "나에게" 보낸 typing(to === myPeerId) 인 경우에만 표시해야 한다.
   // 그렇지 않으면 상대가 전체채팅에 입력 중인데도 DM 방에 "입력 중"이 잘못 표시된다.
   const typingUserList = currentRoom.type === 'global'
-    ? Object.values(typingUsers).filter(u => u.to === null)
-    : (typingUsers[currentRoom.peerId]?.to === myPeerId ? [typingUsers[currentRoom.peerId]] : [])
+    ? Object.values(typingState).filter(user => user.to === null)
+    : (typingState?.to === myPeerId ? [typingState] : [])
+
+  const handleBottomStateChange = useCallback((isAtBottom) => {
+    isNearBottomRef.current = isAtBottom
+    setIsAwayFromBottom(!isAtBottom)
+    if (!isAtBottom) return
+
+    setNewMessageToast(null)
+    // 방 진입 직후 자동 스냅은 사용자의 확인으로 간주하지 않는다.
+    if (!pendingInitialScrollRef.current) setIsUnreadJumpDismissed(true)
+  }, [])
 
   function handleScroll() {
     const container = messagesContainerRef.current
     if (!container) return
-    const { scrollTop, scrollHeight, clientHeight } = container
-    const nearBottom = scrollHeight - scrollTop - clientHeight <= 50
-    isNearBottomRef.current = nearBottom
-    if (nearBottom) {
-      setNewMessageToast(null)
-      // 방 진입 직후 자동 스냅은 사용자의 확인으로 간주하지 않는다.
-      if (!pendingInitialScrollRef.current) setIsUnreadJumpDismissed(true)
-    }
-    // 안읽음 점프 버튼(#39) 표시 조건 — 맨 아래에 있으면 안읽음 메시지도 이미 화면에 보이므로 숨긴다.
-    setIsAwayFromBottom(!nearBottom)
+    const { scrollTop } = container
 
     // 무한 스크롤 — 상단 도달 시 이전 메시지 로드 (검색 결과 점프 로딩 중에는 건너뜀, #36)
     if (
@@ -205,9 +328,6 @@ export default function ChatWindow() {
     )
     setLoadingMore(true)
     setHistoryLoadError(false)
-    const container = messagesContainerRef.current
-    const prevScrollHeight = container?.scrollHeight || 0
-    const prevScrollTop = container?.scrollTop || 0
 
     try {
       const PAGE_SIZE = 50
@@ -240,12 +360,9 @@ export default function ChatWindow() {
           })
           .catch(() => { /* 메시지 본문은 이미 로드됐으므로 리액션만 생략 */ })
 
-        // React가 prepend를 커밋한 다음 높이 차이를 반영해 사용자가 보던 위치를 복원한다.
-        // 이 프레임까지 잠금을 유지해 다음 페이지 요청이 복원 작업을 앞지르지 않게 한다.
+        // 가상 목록이 data와 firstItemIndex를 함께 반영해 현재 보던 메시지를 앵커로 유지한다.
+        // 이 프레임까지 잠금을 유지해 다음 페이지 요청이 목록 갱신을 앞지르지 않게 한다.
         await new Promise(resolve => requestAnimationFrame(resolve))
-        if (container && isCurrentRequest()) {
-          container.scrollTop = prevScrollTop + container.scrollHeight - prevScrollHeight
-        }
       }
     } catch {
       if (isCurrentRequest()) setHistoryLoadError(true)
@@ -259,7 +376,7 @@ export default function ChatWindow() {
 
   function scrollToBottom() {
     isNearBottomRef.current = true
-    scrollEndRef.current?.scrollIntoView({ behavior: getScrollBehavior() })
+    virtualizedMessageListRef.current?.scrollToBottom({ behavior: getScrollBehavior() })
     setNewMessageToast(null)
     setIsUnreadJumpDismissed(true)
   }
@@ -267,8 +384,7 @@ export default function ChatWindow() {
   // 방 진입 후 첫 메시지 로드 시: 이미지/비디오 async 로딩으로 레이아웃이 커지는 것을
   // 따라잡기 위해 여러 번 즉시 스크롤 + 컨테이너 크기 변화 관찰.
   function snapToBottomInstant() {
-    const container = messagesContainerRef.current
-    if (container) container.scrollTop = container.scrollHeight
+    virtualizedMessageListRef.current?.scrollToBottom({ behavior: 'auto' })
   }
 
   function cancelInitialScrollSnap() {
@@ -349,16 +465,14 @@ export default function ChatWindow() {
   }
 
   // 검색 결과 클릭 / 답장 인용 클릭(#28) → 해당 메시지로 스크롤 + 하이라이트.
-  // 답장 인용에서 재사용하려고 useCallback 으로 참조를 안정화한다(Message 의 React.memo 유지).
-  // 원본이 화면(DOM)에 없으면 조용히 무시 — 과한 히스토리 로드를 하지 않는다(#28 설계 결정).
+  // 가상 목록에서 DOM 밖 메시지도 인덱스로 이동할 수 있으며, 데이터에 없는 원본만 조용히 무시한다.
   const scrollToMessage = useCallback((messageId) => {
     setHighlightedMessageId(messageId)
-    // DOM에서 해당 메시지 요소 찾아 스크롤
     requestAnimationFrame(() => {
-      const element = messagesContainerRef.current?.querySelector(`[data-message-id="${messageId}"]`)
-      if (element) {
-        element.scrollIntoView({ behavior: getScrollBehavior(), block: 'center' })
-      }
+      virtualizedMessageListRef.current?.scrollToMessage(messageId, {
+        behavior: getScrollBehavior(),
+        align: 'center',
+      })
     })
     // 3초 후 하이라이트 제거
     setTimeout(() => setHighlightedMessageId(null), 3000)
@@ -378,7 +492,7 @@ export default function ChatWindow() {
     scrollToMessage(messageId)
   }
 
-  // 검색 결과 클릭 처리(#36) — 이미 화면(DOM)에 로드되어 있으면 바로 스크롤하고,
+  // 검색 결과 클릭 처리(#36) — 이미 가상 목록 데이터에 로드되어 있으면 인덱스로 바로 이동하고,
   // 아직 없는 과거 결과라면 대상 메시지 ID부터 최신까지 원자적으로 불러온 뒤 점프한다.
   async function handleResultClick(result) {
     const messageId = result.id
@@ -404,8 +518,7 @@ export default function ChatWindow() {
     setLoadingMore(false)
     setHistoryLoadError(false)
 
-    const existingElement = messagesContainerRef.current?.querySelector(`[data-message-id="${messageId}"]`)
-    if (existingElement) {
+    if (virtualizedMessageListRef.current?.hasMessage(messageId)) {
       scrollToMessage(messageId)
       return
     }
@@ -480,7 +593,7 @@ export default function ChatWindow() {
     loadingMoreRef.current = false
     setLoadingMore(false)
 
-    // React 커밋 + 브라우저 페인트 이후에 스크롤해야 대상 메시지 DOM 이 실제로 존재한다.
+    // React 커밋 + 가상 목록의 새 인덱스 계산 이후에 이동 요청을 전달한다.
     requestAnimationFrame(() => {
       if (!isCurrentRequest()) return
       requestAnimationFrame(() => {
@@ -634,14 +747,14 @@ export default function ChatWindow() {
     const lastMessage = appendedMessages[appendedMessages.length - 1]
 
     if (isNearBottomRef.current || pendingInitialScrollRef.current) {
-      scrollEndRef.current?.scrollIntoView({
+      virtualizedMessageListRef.current?.scrollToBottom({
         behavior: pendingInitialScrollRef.current ? 'auto' : getScrollBehavior(),
       })
       setNewMessageToast(null)
     } else {
       const isMyMessage = lastMessage.fromId === myPeerId || lastMessage.from_id === myPeerId
       if (isMyMessage) {
-        scrollEndRef.current?.scrollIntoView({ behavior: getScrollBehavior() })
+        virtualizedMessageListRef.current?.scrollToBottom({ behavior: getScrollBehavior() })
         setNewMessageToast(null)
         setIsUnreadJumpDismissed(true)
         return
@@ -734,32 +847,57 @@ export default function ChatWindow() {
       .catch(() => { /* 캐시된 DM 목록은 그대로 유지 */ })
   }, [roomKey, myPeerId, chatSessionEpoch])
 
-  // 컨테이너 크기 변화 감지 — 초기 스크롤 snap 기간 동안 이미지/비디오가 로드되어
-  // 레이아웃이 커지면 자동으로 아래로 재스크롤. pendingInitialScrollRef 가 false 가 되면 비활성화.
+  // 초기 스냅 중 가상 목록에 새로 mount된 행도 관찰한다. 이후의 동적 높이 변화는
+  // Virtuoso followOutput이 현재 bottom 상태를 기준으로 처리한다.
   useEffect(() => {
     const container = messagesContainerRef.current
     if (!container || typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(() => {
+
+    const keepBottomPinned = () => {
       if (pendingInitialScrollRef.current) snapToBottomInstant()
+    }
+    const observer = new ResizeObserver(() => {
+      keepBottomPinned()
     })
-    observer.observe(container)
-    // 내부 자식들도 관찰 — 이미지 하나하나의 크기 변화까지 캐치
-    Array.from(container.querySelectorAll('img, video')).forEach(el => observer.observe(el))
+
+    const observeVirtualRows = (root) => {
+      if (!(root instanceof Element)) return
+      if (root.matches('[data-item-index]')) observer.observe(root)
+      root.querySelectorAll('[data-item-index]').forEach(element => observer.observe(element))
+    }
+
+    const unobserveVirtualRows = (root) => {
+      if (!(root instanceof Element)) return
+      if (root.matches('[data-item-index]')) observer.unobserve(root)
+      root.querySelectorAll('[data-item-index]').forEach(element => observer.unobserve(element))
+    }
+
+    observeVirtualRows(container)
+    const mutationObserver = typeof MutationObserver === 'undefined'
+      ? null
+      : new MutationObserver(mutations => {
+        mutations.forEach(mutation => {
+          // 가상화로 제거된 행의 참조도 해제해 오래 사용해도 관찰 대상이 쌓이지 않게 한다.
+          mutation.removedNodes.forEach(unobserveVirtualRows)
+          mutation.addedNodes.forEach(observeVirtualRows)
+        })
+      })
+    mutationObserver?.observe(container, { childList: true, subtree: true })
     resizeObserverRef.current = observer
     return () => {
+      mutationObserver?.disconnect()
       observer.disconnect()
       resizeObserverRef.current = null
     }
   }, [roomKey])
 
-  // 북마크(#34) 목록에서 메시지를 열었을 때: 이미 화면(DOM)에 로드돼 있으면 스크롤+하이라이트.
+  // 북마크(#34) 목록에서 메시지를 열었을 때: 현재 가상 목록 데이터에 있으면 스크롤+하이라이트.
   // 방을 막 전환한 직후라 히스토리가 아직 로드 중일 수 있으므로 currentMessages 가 바뀔 때마다
   // 재시도하고, 너무 오래된(아직 무한스크롤로 불러오지 않은) 메시지라면 일정 시간 후 조용히
   // 포기한다 — 기존 검색 점프 로직(#36)의 방/스크롤 레이스 처리는 건드리지 않는 순수 추가 effect.
   useEffect(() => {
     if (!pendingScrollMessageId) return
-    const element = messagesContainerRef.current?.querySelector(`[data-message-id="${pendingScrollMessageId}"]`)
-    if (element) {
+    if (virtualizedMessageListRef.current?.hasMessage(pendingScrollMessageId)) {
       scrollToMessage(pendingScrollMessageId)
       useChatStore.getState().clearPendingScrollMessageId()
       return
@@ -767,6 +905,22 @@ export default function ChatWindow() {
     const timer = setTimeout(() => useChatStore.getState().clearPendingScrollMessageId(), 4000)
     return () => clearTimeout(timer)
   }, [pendingScrollMessageId, currentMessages])
+
+  const virtualizedMessageContext = {
+    handleStartEdit,
+    handleStartReply,
+    highlightedMessageId,
+    historyLoadError,
+    loadOlderMessages,
+    loadingMore,
+    scrollEndRef,
+    scrollToBottom,
+    scrollToMessage,
+    searchHistoryGapAfterId,
+    searchQuery,
+    showSearch,
+    typingUserList,
+  }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
@@ -828,101 +982,24 @@ export default function ChatWindow() {
         <span role="status" aria-live="polite" aria-atomic="true" className="sr-only">
           {loadingMore ? '메시지를 불러오는 중...' : ''}
         </span>
-        <div
-          ref={messagesContainerRef}
+        <VirtualizedMessageList
+          ref={virtualizedMessageListRef}
+          scrollerRef={setMessagesContainer}
+          roomKey={`${roomKey}:${chatSessionEpoch}`}
+          items={renderItems}
+          components={VIRTUALIZED_MESSAGE_COMPONENTS}
+          context={virtualizedMessageContext}
+          itemContent={renderVirtualizedMessage}
+          followOutput={getScrollBehavior()}
+          atBottomThreshold={50}
+          atBottomStateChange={handleBottomStateChange}
           onScroll={handleScroll}
           role="log"
           aria-label={`${chatTitle} 메시지 목록`}
           aria-live={isAwayFromBottom ? 'off' : 'polite'}
           aria-busy={loadingMore}
           className="h-full overflow-y-auto py-2"
-        >
-          {currentMessages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-vsc-muted text-sm">아직 메시지가 없습니다.</p>
-            </div>
-          ) : (
-            <>
-            {historyLoadError && (
-              <div role="alert" className="flex items-center justify-center gap-2 px-4 py-2 text-xs text-vsc-muted">
-                <span>이전 메시지를 불러오지 못했습니다.</span>
-                <button
-                  onClick={loadOlderMessages}
-                  className="rounded px-2 py-1 font-semibold text-vsc-text underline decoration-vsc-accent hover:bg-vsc-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vsc-accent"
-                >
-                  다시 시도
-                </button>
-              </div>
-            )}
-            {loadingMore && (
-              <div className="flex justify-center py-2">
-                <span className="text-xs text-vsc-muted">메시지를 불러오는 중...</span>
-              </div>
-            )}
-            {renderItems.map(item => (
-              <React.Fragment key={item.message.id}>
-                {/* 날짜 구분선: 이전 메시지와 날짜가 다르면 표시 */}
-                {item.showDateDivider && (
-                  <div className="flex items-center gap-2 px-4 py-2 my-1">
-                    <div className="flex-1 border-t border-vsc-border" />
-                    <span className="text-xs text-vsc-muted shrink-0">{item.dateLabel}</span>
-                    <div className="flex-1 border-t border-vsc-border" />
-                  </div>
-                )}
-                {/* 안읽음 구분선(#39) */}
-                {item.showUnreadDivider && (
-                  <div className="flex items-center gap-2 px-4 py-1 my-1">
-                    <div className="flex-1 border-t border-red-400/50" />
-                    <span className="text-xs text-red-400 font-semibold shrink-0">여기서부터 새 메시지</span>
-                    <div className="flex-1 border-t border-red-400/50" />
-                  </div>
-                )}
-                <Message
-                  message={item.message}
-                  onStartEdit={handleStartEdit}
-                  onReply={handleStartReply}
-                  onQuoteClick={scrollToMessage}
-                  isHighlighted={
-                    highlightedMessageId === item.message.id ||
-                    item.extraImages.some(image => image.id === highlightedMessageId)
-                  }
-                  isGrouped={item.isGrouped}
-                  extraImages={item.extraImages}
-                  searchQuery={showSearch ? searchQuery : ''}
-                />
-                {(item.message.id === searchHistoryGapAfterId ||
-                  item.extraImages.some(image => image.id === searchHistoryGapAfterId)) && (
-                  <div className="mx-4 my-3 flex items-center justify-center gap-3 rounded border border-vsc-border bg-vsc-panel px-3 py-2 text-xs text-vsc-muted">
-                    <span>성능을 위해 중간 메시지는 생략했습니다.</span>
-                    <button
-                      onClick={scrollToBottom}
-                      className="rounded px-2 py-1 font-semibold text-vsc-text hover:bg-vsc-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vsc-accent"
-                    >
-                      최근 메시지로 이동
-                    </button>
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
-            </>
-          )}
-
-          {typingUserList.length > 0 && (
-            <div className="px-4 py-1 flex items-center gap-1.5 text-vsc-muted text-xs">
-              <span className="flex gap-0.5 items-end">
-                <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '0ms' }} />
-                <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '150ms' }} />
-                <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '300ms' }} />
-              </span>
-              <span>
-                {typingUserList.map(user => user.nickname).join(', ')}
-                {typingUserList.length === 1 ? '님이 입력 중...' : '님들이 입력 중...'}
-              </span>
-            </div>
-          )}
-
-          <div ref={scrollEndRef} />
-        </div>
+        />
 
         {/* 안읽음 점프 버튼(#39) — 구분선이 있는데(=안읽음 존재) 맨 아래에서 벗어나 있을 때만 표시.
             newMessageToast 와 동시에 뜨면 하단 pill 이 겹치므로 그 동안은 숨긴다(순수 추가, 기존
