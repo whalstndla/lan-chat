@@ -23,6 +23,20 @@ beforeEach(() => {
   })
 })
 
+it('orders a fast reply even if its event arrives before my send IPC result', () => {
+  const sent = makeMsg('sent', 10000, { sortTimestamp: 10000 })
+  const reply = makeMsg('reply', 9500, { sortTimestamp: 10001 })
+  useChatStore.getState().addDMMessage('remote', reply)
+  useChatStore.getState().addDMMessage('remote', sent)
+  expect(useChatStore.getState().dmMessages.remote.map(message => message.id)).toEqual(['sent', 'reply'])
+})
+
+it('keeps DB ordering when merging paginated history with live messages', () => {
+  useChatStore.getState().setGlobalHistory([makeMsg('sent', 10000, { sort_timestamp: 10000 })])
+  useChatStore.getState().mergeGlobalMessages([makeMsg('reply', 9500, { sortTimestamp: 10001 })])
+  expect(useChatStore.getState().globalMessages.map(message => message.id)).toEqual(['sent', 'reply'])
+})
+
 describe('addGlobalMessage — timestamp 기준 삽입 (#20)', () => {
   it('연속으로 최신 timestamp 메시지를 추가하면 append 순서를 유지한다', () => {
     useChatStore.getState().addGlobalMessage(makeMsg('g1', 100))

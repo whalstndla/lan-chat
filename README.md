@@ -112,36 +112,14 @@ npm run dev
 npm test
 ```
 
-### macOS 서명·공증 준비
+### 릴리즈 빌드
 
 ```bash
-# 최초 1회: Apple 계정의 앱 전용 암호를 입력해 공증 자격 증명을 키체인에 저장
-xcrun notarytool store-credentials "lan-chat-notary" \
-  --apple-id "<APPLE_ID_EMAIL>" \
-  --team-id "<APPLE_TEAM_ID>"
-
-# 저장할 때와 같은 기본 키체인에서 공증 프로필 조회
-export APPLE_KEYCHAIN_PROFILE="lan-chat-notary"
-export APPLE_TEAM_ID="<APPLE_TEAM_ID>"
-```
-
-```bash
-# 테스트, 렌더러 빌드, macOS 서명·공증 패키징만 수행
 npm run release:package
+npm run release:verify
 ```
 
 `npm run release`는 현재 버전의 GitHub Release와 업데이트 메타데이터를 즉시 게시하므로 `release:package` 산출물을 먼저 검증해야 합니다.
-
-### 릴리즈 빌드
-
-macOS 배포는 Developer ID 서명과 공증을 구분해 확인합니다. 기존 공증 프로필을 로컬에서 준비하고 `APPLE_KEYCHAIN_PROFILE`을 지정한 후 다음 순서로 실행합니다. 계정 암호나 토큰을 채팅이나 저장소에 입력하지 않습니다.
-
-```bash
-npm run release:package  # 테스트·빌드·서명·공증, 게시 없음
-npm run release:verify   # codesign·Gatekeeper·공증 티켓·업데이트 SHA-512 검증
-```
-
-검증을 통과한 버전의 앱·ZIP·DMG·업데이트 메타데이터만 함께 게시합니다. 공증 자격 증명이 없거나 검증이 실패하면 배포 완료로 처리하지 않습니다.
 
 ```bash
 # .env 파일에 GH_TOKEN 설정 필요

@@ -10,6 +10,7 @@ import ChatSearchBar from './chat/ChatSearchBar'
 import VirtualizedMessageList from './chat/VirtualizedMessageList'
 import { getUnreadMessages } from '../utils/unreadDivider'
 import { buildMessageRenderItems } from '../utils/buildMessageRenderItems'
+import { getMessageSortTimestamp } from '../utils/messageOrder'
 
 const MAX_MESSAGE_PREVIEW_LENGTH = 120
 const EMPTY_LIVE_MESSAGE_EVENTS = []
@@ -52,8 +53,8 @@ function mergeMessagesById(historyMessages, loadedMessages) {
   }
 
   return mergedMessages.sort((firstMessage, secondMessage) => {
-    const firstTimestamp = Number(firstMessage?.timestamp)
-    const secondTimestamp = Number(secondMessage?.timestamp)
+    const firstTimestamp = Number(getMessageSortTimestamp(firstMessage))
+    const secondTimestamp = Number(getMessageSortTimestamp(secondMessage))
     if (!Number.isFinite(firstTimestamp) || !Number.isFinite(secondTimestamp)) return 0
     return firstTimestamp - secondTimestamp
   })
@@ -655,7 +656,7 @@ export default function ChatWindow() {
         ? useChatStore.getState().globalMessages
         : (useChatStore.getState().dmMessages[currentRoom.peerId] || [])
       const lastMessage = messagesInRoom[messagesInRoom.length - 1]
-      const timestamp = lastMessage ? lastMessage.timestamp : null
+      const timestamp = lastMessage ? getMessageSortTimestamp(lastMessage) : null
       useChatStore.getState().setLastReadTimestamp(key, timestamp)
       window.electronAPI.setRoomReadTimestamp(key, timestamp).catch(() => {})
     }
@@ -691,7 +692,7 @@ export default function ChatWindow() {
         ? useChatStore.getState().globalMessages
         : (useChatStore.getState().dmMessages[currentRoom.peerId] || [])
       const lastMessage = messagesInRoom[messagesInRoom.length - 1]
-      const timestamp = lastMessage ? lastMessage.timestamp : null
+      const timestamp = lastMessage ? getMessageSortTimestamp(lastMessage) : null
       useChatStore.getState().setLastReadTimestamp(key, timestamp)
       window.electronAPI.setRoomReadTimestamp(key, timestamp).catch(() => {})
     }

@@ -12,6 +12,7 @@ const {
   cacheReceivedFile,
 } = require('../../../utils/appUtils')
 const { resolveNotificationDecision } = require('../../../utils/notificationPolicy')
+const { withMessageOrder } = require('../../../utils/messageOrder')
 
 function saveCiphertextOnly(ctx, message) {
   try {
@@ -23,6 +24,7 @@ function saveCiphertextOnly(ctx, message) {
       encrypted_payload: message.encryptedPayload,
       file_url: null, file_name: null,
       timestamp: message.timestamp,
+      sort_timestamp: withMessageOrder(ctx, message).sortTimestamp,
     })
   } catch { /* DB 저장 실패 무시 */ }
 }
@@ -40,6 +42,7 @@ module.exports = function handleDm({ message, ctx }) {
   try {
     const sharedSecret = deriveSharedSecret(ctx.state.myPrivateKey, senderPublicKey)
     const decryptedPayload = decryptDM(message.encryptedPayload, sharedSecret, message.fromId, ctx.state.peerId)
+    const orderedMessage = withMessageOrder(ctx, message)
 
     try {
       saveMessage(ctx.state.database, {
@@ -55,6 +58,7 @@ module.exports = function handleDm({ message, ctx }) {
         file_url: decryptedPayload.fileUrl || null,
         file_name: decryptedPayload.fileName || null,
         timestamp: message.timestamp,
+        sort_timestamp: orderedMessage.sortTimestamp,
         // 답장(#28) — DM 은 reply 메타가 암호화 페이로드 안에 있으므로 복호화된 값을
         // file_url/file_name 처럼 평문 컬럼으로 저장한다.
         reply_to_id: decryptedPayload.replyToId || null,
@@ -92,7 +96,7 @@ module.exports = function handleDm({ message, ctx }) {
     }
 
     sendToRenderer(ctx, 'message-received', {
-      ...message,
+      ...orderedMessage,
       content: decryptedPayload.content,
       contentType: decryptedPayload.contentType,
       fileUrl: decryptedPayload.fileUrl,

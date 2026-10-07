@@ -1,5 +1,15 @@
 [
   {
+    "version": "0.15.2",
+    "date": "2026-10-07",
+    "changes": [
+      { "type": "fix", "text": "Notification sounds use the latest selection and volume. Custom sound data is preserved when other notification settings change." },
+      { "type": "fix", "text": "Update checks can be repeated after a latest-version result. The title bar and settings receive update events independently and allow retry after an error." },
+      { "type": "fix", "text": "Live messages retain their local display order when peer clocks differ or a reply arrives before the send response. The order persists through history loading and restarts." },
+      { "type": "improve", "text": "The chat protocol remains compatible with earlier versions. Message ordering improvements apply on updated apps; existing history keeps its original order." }
+    ]
+  },
+  {
     "version": "0.15.1",
     "date": "2026-10-07",
     "changes": [

@@ -1,5 +1,5 @@
 // src/hooks/useNotificationSound.js
-import { useRef, useCallback } from 'react'
+import { useCallback } from 'react'
 import useUserStore from '../store/useUserStore'
 
 // 내장 사운드 파일 경로 (public/assets/sounds/ → 빌드 후 ./assets/sounds/)
@@ -36,18 +36,16 @@ function playFromPath(path, volume) {
 }
 
 export default function useNotificationSound() {
-  const notificationSound = useUserStore(state => state.notificationSound)
-  const notificationVolume = useUserStore(state => state.notificationVolume)
-  const notificationCustomSoundBuffer = useUserStore(state => state.notificationCustomSoundBuffer)
-
   const play = useCallback(() => {
+    // 설정 변경 직후의 미리듣기와 IPC 알림도 항상 최신 값을 사용한다.
+    const { notificationSound, notificationVolume, notificationCustomSoundBuffer } = useUserStore.getState()
     if (notificationSound === 'custom' && notificationCustomSoundBuffer) {
       playFromBuffer(notificationCustomSoundBuffer, notificationVolume)
     } else {
       const path = BUILT_IN_SOUND_PATHS[notificationSound] || BUILT_IN_SOUND_PATHS.notification1
       playFromPath(path, notificationVolume)
     }
-  }, [notificationSound, notificationVolume, notificationCustomSoundBuffer])
+  }, [])
 
   return { play }
 }

@@ -36,12 +36,12 @@ function TitleBar({ nickname, updateState, onCheckUpdate, showLanpet = false }) 
 
   const rightButtonStyle = {
     downloaded: 'bg-blue-600 hover:bg-blue-500 text-white',
-    'not-available': 'bg-transparent text-vsc-muted cursor-default',
+    'not-available': 'bg-transparent hover:bg-vsc-border text-vsc-muted hover:text-vsc-text',
     checking: 'bg-transparent text-vsc-muted cursor-default',
     available: 'bg-transparent text-vsc-muted cursor-default',
   }[updateState] ?? 'bg-transparent hover:bg-vsc-border text-vsc-muted hover:text-vsc-text'
 
-  const isDisabled = updateState === 'checking' || updateState === 'available' || updateState === 'not-available'
+  const isDisabled = updateState === 'checking' || updateState === 'available'
 
   return (
     <div
@@ -82,12 +82,16 @@ export default function App() {
 
   // 업데이트 확인 완료 후 인증 화면으로 진행 (자동 로그인 체크 포함)
   const proceedToAuth = async () => {
+    // 수동 업데이트 확인 결과가 현재 로그인 세션을 다시 초기화하지 않게 한다.
+    if (useAuthStore.getState().authStatus !== 'loading') return
     const hasProfile = await window.electronAPI.checkProfileExists()
+    if (useAuthStore.getState().authStatus !== 'loading') return
     if (!hasProfile) {
       setAuthStatus('setup')
       return
     }
     const result = await window.electronAPI.checkAutoLogin()
+    if (useAuthStore.getState().authStatus !== 'loading') return
     if (result.autoLogin) {
       const { completeAuth } = useAuthStore.getState()
       completeAuth(result.nickname)
@@ -100,29 +104,37 @@ export default function App() {
   useEffect(() => {
     setUpdateState('checking')
 
-    window.electronAPI.onUpdateAvailable(() => setUpdateState('available'))
-    window.electronAPI.onDownloadProgress((percent) => setDownloadPercent(percent))
-    window.electronAPI.onUpdateDownloaded(() => {
-      updateDownloadedRef.current = true
-      setUpdateState('downloaded')
-    })
-    window.electronAPI.onUpdateNotAvailable(() => {
-      setUpdateState('not-available')
-      if (!updateDownloadedRef.current) proceedToAuth()
-    })
-    window.electronAPI.onUpdateError(() => {
-      // 다운로드 완료 후 발생하는 후속 에러는 무시 (downloaded 상태 유지)
-      if (updateDownloadedRef.current) return
-      setUpdateState('error')
-      proceedToAuth()
-    })
+    const unsubscribeListeners = [
+      window.electronAPI.onUpdateAvailable(() => setUpdateState('available')),
+      window.electronAPI.onDownloadProgress((percent) => setDownloadPercent(percent)),
+      window.electronAPI.onUpdateDownloaded(() => {
+        updateDownloadedRef.current = true
+        setUpdateState('downloaded')
+      }),
+      window.electronAPI.onUpdateNotAvailable(() => {
+        setUpdateState('not-available')
+        if (!updateDownloadedRef.current) proceedToAuth()
+      }),
+      window.electronAPI.onUpdateError(() => {
+        // 다운로드 완료 후 발생하는 후속 에러는 무시 (downloaded 상태 유지)
+        if (updateDownloadedRef.current) return
+        setUpdateState('error')
+        proceedToAuth()
+      }),
+    ]
 
-    window.electronAPI.checkForUpdates()
+    handleCheckUpdate()
+    return () => unsubscribeListeners.forEach(unsubscribe => unsubscribe?.())
   }, [])
 
-  const handleCheckUpdate = () => {
+  const handleCheckUpdate = async () => {
     setUpdateState('checking')
-    window.electronAPI.checkForUpdates()
+    try {
+      await window.electronAPI.checkForUpdates()
+    } catch {
+      setUpdateState('error')
+      proceedToAuth()
+    }
   }
 
   const handleSkipUpdate = () => {

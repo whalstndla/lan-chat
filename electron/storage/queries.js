@@ -10,10 +10,11 @@ function normalizeHistoryPageLimit(limit, fallback = 50) {
 function saveMessage(db, message) {
   db.prepare(`
     INSERT OR IGNORE INTO messages
-    (id, type, from_id, from_name, to_id, content, content_type, encrypted_payload, file_url, file_name, timestamp, format, reply_to_id, reply_preview, mentions)
-    VALUES (@id, @type, @from_id, @from_name, @to_id, @content, @content_type, @encrypted_payload, @file_url, @file_name, @timestamp, @format, @reply_to_id, @reply_preview, @mentions)
+    (id, type, from_id, from_name, to_id, content, content_type, encrypted_payload, file_url, file_name, timestamp, sort_timestamp, format, reply_to_id, reply_preview, mentions)
+    VALUES (@id, @type, @from_id, @from_name, @to_id, @content, @content_type, @encrypted_payload, @file_url, @file_name, @timestamp, @sort_timestamp, @format, @reply_to_id, @reply_preview, @mentions)
   `).run({
     ...message,
+    sort_timestamp: message.sort_timestamp ?? message.timestamp,
     format: message.format || null,
     // 답장(#28) — 미지정 시 null 로 정규화(구버전/일반 메시지 호환). reply_preview 는 JSON 문자열.
     reply_to_id: message.reply_to_id || null,
@@ -32,7 +33,7 @@ function getGlobalHistory(db, limit = 100, offset = 0) {
   return db.prepare(`
     SELECT * FROM messages
     WHERE type = 'message'
-    ORDER BY timestamp DESC, rowid DESC
+    ORDER BY COALESCE(sort_timestamp, timestamp) DESC, rowid DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset).reverse()
 }
@@ -44,7 +45,7 @@ function getGlobalHistory(db, limit = 100, offset = 0) {
 function getGlobalHistoryThroughMessage(db, messageId) {
   const rows = db.prepare(`
     WITH target AS (
-      SELECT timestamp AS target_timestamp, rowid AS target_rowid
+      SELECT COALESCE(sort_timestamp, timestamp) AS target_timestamp, rowid AS target_rowid
       FROM messages
       WHERE id = ? AND type = 'message'
     )
@@ -53,13 +54,13 @@ function getGlobalHistoryThroughMessage(db, messageId) {
     CROSS JOIN target
     WHERE messages.type = 'message'
       AND (
-        messages.timestamp > target.target_timestamp
+        COALESCE(messages.sort_timestamp, messages.timestamp) > target.target_timestamp
         OR (
-          messages.timestamp = target.target_timestamp
+          COALESCE(messages.sort_timestamp, messages.timestamp) = target.target_timestamp
           AND messages.rowid >= target.target_rowid
         )
     )
-    ORDER BY messages.timestamp ASC, messages.rowid ASC
+    ORDER BY COALESCE(messages.sort_timestamp, messages.timestamp) ASC, messages.rowid ASC
     LIMIT ?
   `).all(messageId, SEARCH_JUMP_HISTORY_LIMIT + 1)
   return {
@@ -74,7 +75,7 @@ function getGlobalHistoryBeforeMessage(db, messageId, limit = 50) {
   const safeLimit = normalizeHistoryPageLimit(limit)
   return db.prepare(`
     WITH boundary AS (
-      SELECT timestamp AS boundary_timestamp, rowid AS boundary_rowid
+      SELECT COALESCE(sort_timestamp, timestamp) AS boundary_timestamp, rowid AS boundary_rowid
       FROM messages
       WHERE id = ? AND type = 'message'
     )
@@ -83,13 +84,13 @@ function getGlobalHistoryBeforeMessage(db, messageId, limit = 50) {
     CROSS JOIN boundary
     WHERE messages.type = 'message'
       AND (
-        messages.timestamp < boundary.boundary_timestamp
+        COALESCE(messages.sort_timestamp, messages.timestamp) < boundary.boundary_timestamp
         OR (
-          messages.timestamp = boundary.boundary_timestamp
+          COALESCE(messages.sort_timestamp, messages.timestamp) = boundary.boundary_timestamp
           AND messages.rowid < boundary.boundary_rowid
         )
       )
-    ORDER BY messages.timestamp DESC, messages.rowid DESC
+    ORDER BY COALESCE(messages.sort_timestamp, messages.timestamp) DESC, messages.rowid DESC
     LIMIT ?
   `).all(messageId, safeLimit).reverse()
 }
@@ -121,7 +122,7 @@ function getDMHistory(db, peerId1, peerId2, limit = 100, offset = 0) {
     SELECT * FROM messages
     WHERE type = 'dm'
       AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
-    ORDER BY timestamp DESC, rowid DESC
+    ORDER BY COALESCE(sort_timestamp, timestamp) DESC, rowid DESC
     LIMIT ? OFFSET ?
   `).all(peerId1, peerId2, peerId2, peerId1, limit, offset).reverse()
 }
@@ -131,7 +132,7 @@ function getDMHistory(db, peerId1, peerId2, limit = 100, offset = 0) {
 function getDMHistoryThroughMessage(db, peerId1, peerId2, messageId) {
   const rows = db.prepare(`
     WITH target AS (
-      SELECT timestamp AS target_timestamp, rowid AS target_rowid
+      SELECT COALESCE(sort_timestamp, timestamp) AS target_timestamp, rowid AS target_rowid
       FROM messages
       WHERE id = @messageId
         AND type = 'dm'
@@ -149,13 +150,13 @@ function getDMHistoryThroughMessage(db, peerId1, peerId2, messageId) {
         OR (messages.from_id = @peerId2 AND messages.to_id = @peerId1)
       )
       AND (
-        messages.timestamp > target.target_timestamp
+        COALESCE(messages.sort_timestamp, messages.timestamp) > target.target_timestamp
         OR (
-          messages.timestamp = target.target_timestamp
+          COALESCE(messages.sort_timestamp, messages.timestamp) = target.target_timestamp
           AND messages.rowid >= target.target_rowid
         )
     )
-    ORDER BY messages.timestamp ASC, messages.rowid ASC
+    ORDER BY COALESCE(messages.sort_timestamp, messages.timestamp) ASC, messages.rowid ASC
     LIMIT @limit
   `).all({
     peerId1,
@@ -173,7 +174,7 @@ function getDMHistoryBeforeMessage(db, peerId1, peerId2, messageId, limit = 50) 
   const safeLimit = normalizeHistoryPageLimit(limit)
   return db.prepare(`
     WITH boundary AS (
-      SELECT timestamp AS boundary_timestamp, rowid AS boundary_rowid
+      SELECT COALESCE(sort_timestamp, timestamp) AS boundary_timestamp, rowid AS boundary_rowid
       FROM messages
       WHERE id = @messageId
         AND type = 'dm'
@@ -191,13 +192,13 @@ function getDMHistoryBeforeMessage(db, peerId1, peerId2, messageId, limit = 50) 
         OR (messages.from_id = @peerId2 AND messages.to_id = @peerId1)
       )
       AND (
-        messages.timestamp < boundary.boundary_timestamp
+        COALESCE(messages.sort_timestamp, messages.timestamp) < boundary.boundary_timestamp
         OR (
-          messages.timestamp = boundary.boundary_timestamp
+          COALESCE(messages.sort_timestamp, messages.timestamp) = boundary.boundary_timestamp
           AND messages.rowid < boundary.boundary_rowid
         )
       )
-    ORDER BY messages.timestamp DESC, messages.rowid DESC
+    ORDER BY COALESCE(messages.sort_timestamp, messages.timestamp) DESC, messages.rowid DESC
     LIMIT @limit
   `).all({ peerId1, peerId2, messageId, limit: safeLimit }).reverse()
 }
@@ -211,12 +212,12 @@ function getDMPeers(db, myPeerId) {
   return db.prepare(`
     SELECT
       CASE WHEN from_id = ? THEN to_id ELSE from_id END AS peer_id,
-      MAX(timestamp) AS last_timestamp,
+      MAX(COALESCE(sort_timestamp, timestamp)) AS last_timestamp,
       (
         SELECT m2.from_name FROM messages m2
         WHERE m2.type = 'dm'
           AND m2.from_id = CASE WHEN messages.from_id = ? THEN messages.to_id ELSE messages.from_id END
-        ORDER BY m2.timestamp DESC LIMIT 1
+        ORDER BY COALESCE(m2.sort_timestamp, m2.timestamp) DESC LIMIT 1
       ) AS nickname
     FROM messages
     WHERE type = 'dm' AND (from_id = ? OR to_id = ?)
@@ -331,7 +332,7 @@ function searchMessages(db, { query, type, limit = 50 }) {
     let sql = `SELECT m.* FROM messages m INNER JOIN messages_fts fts ON m.id = fts.id WHERE messages_fts MATCH ?`
     const params = [query + '*']
     if (type) { sql += ' AND m.type = ?'; params.push(type) }
-    sql += ' ORDER BY m.timestamp DESC LIMIT ?'
+    sql += ' ORDER BY COALESCE(m.sort_timestamp, m.timestamp) DESC LIMIT ?'
     params.push(limit)
     return db.prepare(sql).all(...params)
   } catch {
@@ -339,7 +340,7 @@ function searchMessages(db, { query, type, limit = 50 }) {
     let sql = 'SELECT * FROM messages WHERE content LIKE ?'
     const params = [`%${query}%`]
     if (type) { sql += ' AND type = ?'; params.push(type) }
-    sql += ' ORDER BY timestamp DESC LIMIT ?'
+    sql += ' ORDER BY COALESCE(sort_timestamp, timestamp) DESC LIMIT ?'
     params.push(limit)
     return db.prepare(sql).all(...params)
   }
@@ -354,7 +355,7 @@ function getAllDMMessagesForSearch(db, peerId1, peerId2, limit = DM_SEARCH_FETCH
     SELECT * FROM messages
     WHERE type = 'dm'
       AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
-    ORDER BY timestamp DESC
+    ORDER BY COALESCE(sort_timestamp, timestamp) DESC
     LIMIT ?
   `).all(peerId1, peerId2, peerId2, peerId1, limit)
 }
@@ -367,7 +368,7 @@ function getGlobalMessagesForExport(db, limit, offset) {
   return db.prepare(`
     SELECT * FROM messages
     WHERE type = 'message'
-    ORDER BY timestamp ASC
+    ORDER BY COALESCE(sort_timestamp, timestamp) ASC
     LIMIT ? OFFSET ?
   `).all(limit, offset)
 }
@@ -378,7 +379,7 @@ function getDMMessagesForExport(db, peerId1, peerId2, limit, offset) {
     SELECT * FROM messages
     WHERE type = 'dm'
       AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?))
-    ORDER BY timestamp ASC
+    ORDER BY COALESCE(sort_timestamp, timestamp) ASC
     LIMIT ? OFFSET ?
   `).all(peerId1, peerId2, peerId2, peerId1, limit, offset)
 }
