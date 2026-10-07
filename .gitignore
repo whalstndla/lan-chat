@@ -13,3 +13,11 @@ docs/
 logs/
 .codegraph/
 .cursor/
+
+# 내부 문서와 개발자 작업 지침은 별도 비공개 저장소에서 관리한다.
+/AGENTS.md
+/CLAUDE.md
+/.superset/
+/scripts/
+/tests/lanpet/electronHarness.cjs
+/tests/peer/harness/README.md
