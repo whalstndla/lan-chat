@@ -1,5 +1,18 @@
 [
   {
+    "version": "0.15.3",
+    "date": "2026-11-09",
+    "changes": [
+      { "type": "fix", "text": "Long conversations keep consecutive image groups small so offscreen messages can leave the DOM." },
+      { "type": "fix", "text": "Encrypted direct-message history and search remain readable after a full restart while the other peer is offline." },
+      { "type": "fix", "text": "Profile images recover after loading errors and refresh when a peer changes their picture." },
+      { "type": "fix", "text": "Notifications display readable message text without Markdown escape sequences or encoded entities." },
+      { "type": "fix", "text": "Long pasted links wrap inside the composer. Link previews open the actual URL without trailing Markdown delimiters." },
+      { "type": "fix", "text": "Typing indicators remain visible above the composer without scrolling the conversation." },
+      { "type": "improve", "text": "Existing chat protocols remain compatible. These fixes take effect on updated apps." }
+    ]
+  },
+  {
     "version": "0.15.2",
     "date": "2026-10-07",
     "changes": [

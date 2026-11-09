@@ -6,6 +6,7 @@ import useChatStore from '../store/useChatStore'
 import useUserStore from '../store/useUserStore'
 import SettingsPanel from './SettingsPanel'
 import BookmarksPanel from './BookmarksPanel'
+import ProfileImage from './ProfileImage'
 import { comparePeersForSidebar, matchesPeerFilter } from '../utils/comparePeers'
 
 // 상태 타입 → dot 색상 클래스 매핑
@@ -31,11 +32,10 @@ function PeerAvatar({ peer, isOnline }) {
       </div>
       {/* 프로필 이미지 — 이니셜 위에 덮어씌움 */}
       {peer.profileImageUrl && (
-        <img
+        <ProfileImage
           src={peer.profileImageUrl}
           alt={peer.nickname}
           className="absolute inset-0 w-5 h-5 rounded-full object-cover"
-          onError={(e) => { e.target.style.display = 'none' }}
         />
       )}
       {/* 상태 dot */}

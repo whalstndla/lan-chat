@@ -48,6 +48,7 @@ module.exports = function handleGlobalMessage({ message, ctx }) {
       roomType: 'global',
       roomKey: 'global',
       fallbackBody: message.content || '파일을 보냈습니다.',
+      format: message.format,
       isMentioned,
     })
     if (notify) {

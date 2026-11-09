@@ -7,7 +7,7 @@ const fs = require('fs')
 const { getProfile, updateNickname, updateProfileImage, updateStatus } = require('../storage/profile')
 const { republishService } = require('../peer/discovery')
 const { getFilePort } = require('../peer/fileServer')
-const { buildMyProfileImageUrl, getMyAdvertisedAddresses, broadcastPeerMessage, getCurrentNicknameSafely } = require('../utils/appUtils')
+const { buildMyProfileImageUrl, buildMyKeyExchangePayload, getMyAdvertisedAddresses, broadcastPeerMessage, getCurrentNicknameSafely } = require('../utils/appUtils')
 
 function registerUserHandlers(ctx) {
   const profileFolderPath = path.join(ctx.config.appDataPath, 'profile')
@@ -51,7 +51,9 @@ function registerUserHandlers(ctx) {
       const savePath = path.join(profileFolderPath, imageName)
       fs.writeFileSync(savePath, Buffer.from(new Uint8Array(imageBuffer)))
       updateProfileImage(ctx.state.database, imageName)
-      const url = `http://${ctx.state.localIP}:${getFilePort()}/profile/${imageName}`
+      const url = buildMyProfileImageUrl(ctx)
+      // 기존 hello 형식으로 새 이미지 주소를 알려 연결된 상대도 즉시 다시 읽게 한다.
+      broadcastPeerMessage(ctx, buildMyKeyExchangePayload(ctx, ctx.state.peerId, getCurrentNicknameSafely(ctx)))
       return { success: true, url }
     } catch (error) {
       return { success: false, error: error.message }

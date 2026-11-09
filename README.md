@@ -7,7 +7,7 @@
 
 ## 다운로드
 
-- [macOS (Apple Silicon) 설치 파일 다운로드 — v0.15.2](https://github.com/whalstndla/lan-chat/releases/download/v0.15.2/LAN-Chat-0.15.2-arm64.dmg)
+- [macOS (Apple Silicon) 설치 파일 다운로드 — v0.15.3](https://github.com/whalstndla/lan-chat/releases/download/v0.15.3/LAN-Chat-0.15.3-arm64.dmg)
 - [최신 릴리즈 및 업데이트 내역](https://github.com/whalstndla/lan-chat/releases/latest)
 
 ## ✨ 주요 기능

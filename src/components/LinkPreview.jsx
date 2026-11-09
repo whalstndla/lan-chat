@@ -1,30 +1,30 @@
 // src/components/LinkPreview.jsx
 import React from 'react'
-
-const URL_PATTERN = /(https?:\/\/[^\s]+)/g
+import { findTextLinks } from '../utils/messageLinks'
 
 // 텍스트에서 URL을 감지해서 클릭 가능한 링크로 변환
 export function parseLinksInText(text) {
-  const parts = text.split(URL_PATTERN)
-  return parts.map((part, index) => {
-    if (URL_PATTERN.test(part)) {
-      URL_PATTERN.lastIndex = 0 // 정규식 상태 초기화
-      return (
+  const parts = []
+  let offset = 0
+  for (const link of findTextLinks(text)) {
+    parts.push(text.slice(offset, link.index))
+    parts.push(
         <a
-          key={index}
-          href={part}
+          key={link.index}
+          href={link.url}
           target="_blank"
           rel="noreferrer"
           className="text-vsc-accent underline hover:opacity-80 break-all"
           onClick={(event) => {
             event.preventDefault()
-            window.electronAPI.openExternal(part)
+            window.electronAPI.openExternal(link.url)
           }}
         >
-          {part}
+          {link.text}
         </a>
-      )
-    }
-    return part
-  })
+    )
+    offset = link.lastIndex
+  }
+  parts.push(text.slice(offset))
+  return parts
 }

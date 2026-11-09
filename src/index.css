@@ -79,6 +79,8 @@ body {
   font-size: calc(14px * var(--app-font-scale));
   color: rgb(var(--vsc-text));
   line-height: 1.5;
+  /* 공백 없는 주소도 입력 영역 안에서 줄바꿈하여 flex 최소 너비가 늘어나지 않게 한다. */
+  overflow-wrap: anywhere;
 }
 
 /* placeholder — TipTap Placeholder 확장(ProseMirror 노드 데코레이션) 대신 래퍼 레벨에서 처리.
@@ -89,6 +91,7 @@ body {
    ::before 로 표시 — ProseMirror 가 관리하는 내부 DOM 은 전혀 건드리지 않는다. */
 .tiptap-editor {
   position: relative;
+  min-width: 0;
 }
 
 .tiptap-editor[data-placeholder-visible='true']::before {

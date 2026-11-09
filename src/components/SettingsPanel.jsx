@@ -6,6 +6,7 @@ import useUserStore from '../store/useUserStore'
 import usePeerStore from '../store/usePeerStore'
 import useChatStore from '../store/useChatStore'
 import useNotificationSound from '../hooks/useNotificationSound'
+import ProfileImage from './ProfileImage'
 
 // 설정 메뉴 항목 정의
 const MENU_ITEMS = [
@@ -242,7 +243,7 @@ export default function SettingsPanel({ onClose }) {
     if (!file) return
     const buffer = await file.arrayBuffer()
     const result = await window.electronAPI.saveProfileImage(new Uint8Array(buffer))
-    if (result.url) updateMyProfileImageUrl(`${result.url}?t=${Date.now()}`)
+    if (result.url) updateMyProfileImageUrl(result.url)
     event.target.value = ''
   }
 
@@ -414,7 +415,7 @@ export default function SettingsPanel({ onClose }) {
               <div onClick={() => fileInputRef.current?.click()} className="relative cursor-pointer group">
                 <div className="w-16 h-16 rounded-full overflow-hidden bg-vsc-border flex items-center justify-center">
                   {myProfileImageUrl ? (
-                    <img src={myProfileImageUrl} alt="프로필" className="w-full h-full object-cover" onError={(e) => { e.target.style.display = 'none' }} />
+                    <ProfileImage src={myProfileImageUrl} alt="프로필" className="w-full h-full object-cover" />
                   ) : null}
                   <span className="text-xl font-bold text-vsc-accent absolute" style={{ display: myProfileImageUrl ? 'none' : 'block' }}>
                     {myNickname?.[0]?.toUpperCase() || '?'}

@@ -179,6 +179,18 @@ describe('ChatWindow', () => {
     fireEvent.scroll(messageLog)
   }
 
+  it('keeps the typing status outside the message scroll area', async () => {
+    render(<ChatWindow />)
+    moveAwayFromBottom()
+    await act(async () => {
+      useChatStore.getState().setTyping('other-peer', 'Remote', null)
+    })
+    const indicator = screen.getByTestId('chat-typing-indicator')
+    expect(screen.getByRole('log')).not.toContainElement(indicator)
+    expect(indicator.closest('[role="status"]')).toHaveAttribute('aria-live', 'polite')
+    expect(indicator.parentElement.nextElementSibling).toBe(screen.getByTestId('message-input'))
+  })
+
   it('releases resize observation when virtualized rows leave the DOM', async () => {
     const originalResizeObserver = window.ResizeObserver
     const observer = {
