@@ -98,6 +98,13 @@ describe('buildMessageRenderItems — 안읽음 구분선', () => {
 })
 
 describe('buildMessageRenderItems — 연속 이미지 그룹핑', () => {
+  it('splits long image bursts into bounded rows without losing message IDs', () => {
+    const messages = Array.from({ length: 350 }, (_, index) => imageMsg(`image-${index}`, 'peerA'))
+    const items = buildMessageRenderItems(messages, null, myPeerId)
+    expect(Math.max(...items.map(item => 1 + item.extraImages.length))).toBeLessThanOrEqual(3)
+    expect(items.flatMap(item => [item.message, ...item.extraImages]).map(message => message.id)).toEqual(messages.map(message => message.id))
+  })
+
   it('같은 발신자의 연속 이미지 3장은 첫 장 + extraImages(나머지 2장)로 묶인다', () => {
     const messages = [
       imageMsg('img1', 'peerA'),

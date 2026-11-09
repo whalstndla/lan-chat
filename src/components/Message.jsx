@@ -2,8 +2,10 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Paperclip, Trash2, Clock, Check, CheckCheck, Bookmark, Pencil, Loader2, Download, FolderOpen, Reply, X } from 'lucide-react'
 import { parseLinksInText } from './LinkPreview'
+import { extractFirstMessageUrl } from '../utils/messageLinks'
 import { parseReplyPreview } from '../utils/replyPreview'
 import LinkPreviewCard from './LinkPreviewCard'
+import ProfileImage from './ProfileImage'
 import MarkdownRenderer from './MarkdownRenderer'
 import ImageLightbox from './message/ImageLightbox'
 import CopyButton from './message/CopyButton'
@@ -125,14 +127,6 @@ function ExtraImageThumb({ imageMessage, onClick }) {
   )
 }
 
-// 텍스트에서 첫 번째 URL 추출
-const URL_EXTRACT_PATTERN = /https?:\/\/[^\s]+/
-function extractFirstUrl(text) {
-  if (!text) return null
-  const match = text.match(URL_EXTRACT_PATTERN)
-  return match ? match[0] : null
-}
-
 // 멘션(#29) 하이라이트 + 링크 파싱을 함께 적용한 일반 텍스트 렌더링.
 // highlightMentions 가 먼저 "@닉네임" 부분을 배지로 감싸고, 나머지 순수 문자열 구간에만
 // parseLinksInText 를 적용해 링크 자동 인식을 그대로 유지한다(#37 검색 하이라이트와 동일하게
@@ -211,8 +205,8 @@ function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = 
   // 텍스트 메시지에서 첫 번째 URL 추출 (링크 프리뷰용)
   const firstUrl = useMemo(() => {
     if (contentType && contentType !== 'text') return null
-    return extractFirstUrl(message.content)
-  }, [message.content, contentType])
+    return extractFirstMessageUrl(message.content, message.format)
+  }, [message.content, message.format, contentType])
 
   // 이미지/비디오 URL — 폴백 체인 (ws 캐시 → DB 캐시 → HTTP 원본) 관리
   const wsFileCachedUrl = useChatStore(state => state.cachedFileUrls[message.id])
@@ -299,11 +293,10 @@ function Message({ message, onStartEdit, onReply, onQuoteClick, isHighlighted = 
               {sender?.[0]?.toUpperCase() || '?'}
             </div>
             {avatarUrl && (
-              <img
+              <ProfileImage
                 src={avatarUrl}
                 alt={sender}
                 className="absolute inset-0 w-8 h-8 rounded object-cover"
-                onError={(e) => { e.target.style.display = 'none' }}
               />
             )}
           </div>

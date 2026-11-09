@@ -82,6 +82,7 @@ module.exports = function handleDm({ message, ctx }) {
         roomType: 'dm',
         roomKey: message.fromId,
         fallbackBody: decryptedPayload.content || '파일을 보냈습니다.',
+        format: message.format,
         isMentioned,
       })
       if (notify) {

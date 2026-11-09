@@ -9,6 +9,8 @@ import { isFirstUnreadMessage } from './unreadDivider'
 // 비그룹 메시지가 공유하는 안정적인 빈 배열 참조 — 매 계산마다 새 [] 를 만들면 React.memo 의
 // 얕은 비교가 깨져 무관한 메시지까지 리렌더되므로 모듈 상수를 재사용한다.
 export const EMPTY_EXTRA_IMAGES = []
+// 한 행에 수백 장을 합치면 가상 목록이 그 내부 이미지를 해제할 수 없다.
+const MAX_IMAGES_PER_GROUP = 3
 
 // timestamp → 날짜 비교용 키 문자열 (로케일 날짜). 이전 메시지와 날짜가 다른지 판정에 사용.
 function toDateKey(timestamp) {
@@ -55,7 +57,7 @@ export function buildMessageRenderItems(messages, lastReadTimestamp, myPeerId) {
     if (messageContentType === 'image') {
       const imageGroup = [message]
       let j = i + 1
-      while (j < messages.length) {
+      while (j < messages.length && imageGroup.length < MAX_IMAGES_PER_GROUP) {
         const next = messages[j]
         const nextContentType = next.contentType || next.content_type
         const nextSenderId = next.fromId || next.from_id

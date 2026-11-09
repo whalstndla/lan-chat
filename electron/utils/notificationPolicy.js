@@ -4,6 +4,7 @@
 
 const { getProfile } = require('../storage/profile')
 const { isRoomMuted } = require('./appUtils')
+const { notificationText } = require('./notificationText')
 
 // 순수 판정 함수 — 방 뮤트/알림 범위(scope)/방해금지(dnd)/@멘션(#29) 조건으로
 // 소리+OS알림 여부를 결정한다.
@@ -36,7 +37,7 @@ function maskNotificationBody(hideBody, actualBody) {
 // ctx + 방 정보로부터 "소리/OS알림을 보낼지"와 "마스킹된 본문"을 한 번에 결정한다.
 // message.js/dm.js 인바운드 핸들러가 사용하는 통합 진입점.
 // isMentioned(#29) — 호출부가 "이 메시지의 mentions 에 내 peerId 가 포함되는지"를 미리 계산해 전달한다.
-function resolveNotificationDecision(ctx, { roomType, roomKey, fallbackBody, isMentioned = false }) {
+function resolveNotificationDecision(ctx, { roomType, roomKey, fallbackBody, format, isMentioned = false }) {
   const profile = ctx.state.database ? getProfile(ctx.state.database) : null
   const scope = profile?.notification_scope || 'all'
   const hideBody = !!profile?.notification_hide_body
@@ -45,7 +46,7 @@ function resolveNotificationDecision(ctx, { roomType, roomKey, fallbackBody, isM
 
   return {
     notify: shouldNotify({ roomType, scope, isMuted, isDnd, isMentioned }),
-    body: maskNotificationBody(hideBody, fallbackBody),
+    body: maskNotificationBody(hideBody, notificationText(fallbackBody, format)),
   }
 }
 

@@ -5,9 +5,10 @@ const { ipcMain } = require('electron')
 const {
   getGlobalHistory, getGlobalHistoryThroughMessage, getGlobalHistoryBeforeMessage,
   getDMHistory, getDMHistoryThroughMessage, getDMHistoryBeforeMessage, getDMPeers, searchMessages,
-  getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank,
+  getAllDMMessagesForSearch, getGlobalMessageRank, getDMMessageRank, getPinnedKey,
 } = require('../storage/queries')
 const { deriveSharedSecret, decryptDM } = require('../crypto/encryption')
+const { importPublicKey } = require('../crypto/keyManager')
 const { rewriteFileUrl } = require('../utils/appUtils')
 
 // DM 검색 결과 목록에 노출할 최대 건수 — 전역 searchMessages() 의 기본 limit(50)과 동일하게 맞춘다.
@@ -18,9 +19,15 @@ const DM_SEARCH_RESULT_LIMIT = 50
 // decryptDMRecord 에 인자로 넘긴다(메시지마다 동일 키를 반복 도출하지 않도록). 공개키가
 // 없거나 도출에 실패하면 null 을 반환해 decryptDMRecord 가 평문 fallback 경로를 타게 한다.
 function deriveSharedSecretForPeer(ctx, peerId2) {
-  const otherPublicKey = ctx.state.peerPublicKeyMap.get(peerId2)
-  if (!otherPublicKey) return null
   try {
+    // 재시작 직후에는 연결 맵이 비어 있으므로 DB에 고정한 상대 키로 로컬 기록을 복원한다.
+    // 통신용 맵에는 넣지 않아 새 연결의 키 검증/신뢰 흐름을 건너뛰지 않는다.
+    let otherPublicKey = ctx.state.peerPublicKeyMap.get(peerId2)
+    if (!otherPublicKey && ctx.state.database) {
+      const pinnedKey = getPinnedKey(ctx.state.database, peerId2)
+      if (pinnedKey) otherPublicKey = importPublicKey(pinnedKey.publicKey)
+    }
+    if (!otherPublicKey) return null
     return deriveSharedSecret(ctx.state.myPrivateKey, otherPublicKey)
   } catch (err) {
     console.warn(`[히스토리] sharedSecret 도출 실패: peerId=${peerId2}`, err.message)
@@ -82,7 +89,13 @@ function decryptDMRecord(ctx, msg, peerId1, peerId2, sharedSecret) {
       console.warn(`[히스토리] 복호화 처리 실패: msgId=${msg.id}`, err.message)
     }
   }
-  return { ...msg, read: readFlag, file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id) }
+  return {
+    ...msg,
+    read: readFlag,
+    file_url: rewriteFileUrl(ctx, msg.file_url, msg.from_id),
+    // 복호화에 필요한 키가 없는 암호문은 빈 말풍선 대신 기존 오류 표시를 사용한다.
+    ...(msg.encrypted_payload && !msg.content ? { decryptionFailed: true } : {}),
+  }
 }
 
 function registerHistoryHandlers(ctx) {

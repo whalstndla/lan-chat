@@ -352,7 +352,14 @@ function rewriteFileUrl(ctx, url, fromId) {
 function buildMyProfileImageUrl(ctx) {
   const profile = getProfile(ctx.state.database)
   if (!profile?.profile_image) return null
-  return `http://${ctx.state.localIP}:${getFilePort()}/profile/${profile.profile_image}`
+  let revision = ''
+  if (ctx.config?.appDataPath) {
+    try {
+      const imagePath = path.join(ctx.config.appDataPath, 'profile', profile.profile_image)
+      revision = `?v=${fs.statSync(imagePath).mtimeMs}`
+    } catch { /* 프로필 파일이 아직 없으면 기존 주소로 다음 로드를 허용한다. */ }
+  }
+  return `http://${ctx.state.localIP}:${getFilePort()}/profile/${encodeURIComponent(profile.profile_image)}${revision}`
 }
 
 // 송신자 자기 메시지의 파일을 영구 캐시 (file_cache/) 로 복사하고 DB 매핑 저장.

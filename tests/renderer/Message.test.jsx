@@ -3,7 +3,7 @@
 // 렌더링되는지만 확인한다(상호작용/IPC 통합까지는 다루지 않음, 과한 커버리지 지양).
 // message.format 이 'markdown' 이 아닌 일반 텍스트 경로를 사용해 react-markdown(ESM 전용 패키지)
 // 의존 없이 렌더링되도록 한다.
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import Message from '../../src/components/Message'
 import useUserStore from '../../src/store/useUserStore'
 import useChatStore from '../../src/store/useChatStore'
@@ -49,6 +49,16 @@ function buildMessage(overrides = {}) {
 }
 
 describe('Message', () => {
+  it('opens markdown autolink previews without the closing delimiter', async () => {
+    window.electronAPI.fetchLinkPreview = jest.fn().mockResolvedValue({ title: 'Preview target' })
+    window.electronAPI.openExternal = jest.fn()
+    render(<Message message={buildMessage({ content: '<https://example.com/autolink>', format: 'markdown' })} />)
+    await waitFor(() => expect(screen.getByText('Preview target')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Preview target'))
+    expect(window.electronAPI.fetchLinkPreview).toHaveBeenCalledWith('https://example.com/autolink')
+    expect(window.electronAPI.openExternal).toHaveBeenCalledWith('https://example.com/autolink')
+  })
+
   it('상대방의 일반 텍스트 메시지를 크래시 없이 렌더링한다', () => {
     render(<Message message={buildMessage()} />)
 

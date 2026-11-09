@@ -106,25 +106,26 @@ function ChatMessageListEmpty() {
 }
 
 function ChatMessageListFooter({ context }) {
-  const { scrollEndRef, typingUserList } = context
+  return <div ref={context.scrollEndRef} />
+}
 
+function ChatTypingIndicator({ typingUserList }) {
   return (
-    <>
+    <div className="h-6 shrink-0" role="status" aria-live="polite" aria-atomic="true">
       {typingUserList.length > 0 && (
-        <div className="px-4 py-1 flex items-center gap-1.5 text-vsc-muted text-xs">
-          <span className="flex gap-0.5 items-end">
+        <div data-testid="chat-typing-indicator" className="min-w-0 px-4 py-1 flex items-center gap-1.5 text-vsc-muted text-xs">
+          <span className="flex shrink-0 gap-0.5 items-end">
             <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '0ms' }} />
             <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '150ms' }} />
             <span className="w-1 h-1 rounded-full bg-vsc-muted animate-bounce motion-reduce:animate-none" style={{ animationDelay: '300ms' }} />
           </span>
-          <span>
+          <span className="min-w-0 truncate">
             {typingUserList.map(user => user.nickname).join(', ')}
             {typingUserList.length === 1 ? '님이 입력 중...' : '님들이 입력 중...'}
           </span>
         </div>
       )}
-      <div ref={scrollEndRef} />
-    </>
+    </div>
   )
 }
 
@@ -920,11 +921,10 @@ export default function ChatWindow() {
     searchHistoryGapAfterId,
     searchQuery,
     showSearch,
-    typingUserList,
   }
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden" onDragEnter={handleDragEnter} onDragLeave={handleDragLeave} onDragOver={handleDragOver} onDrop={handleDrop}>
       {/* 헤더 */}
       <div className="border-b border-vsc-border shrink-0">
         <div className="px-4 py-2.5 flex items-center justify-between">
@@ -973,7 +973,7 @@ export default function ChatWindow() {
       </div>
 
       {/* 메시지 목록 */}
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 min-h-0 overflow-hidden relative">
         {isDragOver && (
           <div className="absolute inset-0 z-40 bg-vsc-bg/80 flex items-center justify-center border-2 border-dashed border-vsc-accent rounded-lg m-2">
             <p className="text-vsc-accent text-sm font-semibold">파일을 여기에 놓으세요</p>
@@ -1040,6 +1040,7 @@ export default function ChatWindow() {
         )}
       </div>
 
+      <ChatTypingIndicator typingUserList={typingUserList} />
       <MessageInput ref={messageInputRef} />
       <LanpetDrawer currentRoom={currentRoom} />
     </div>
